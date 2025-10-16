@@ -1028,12 +1028,6 @@ class SEDTask4(pl.LightningModule):
 
         scores_postprocessed_student_strong = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes+maestro_classes, fill_value=0.0)
 
-        # SEBBsの後処理されたスコアからPSDS用の検出DataFrameを生成
-        decoded_student_strong = self._create_detection_dataframes_from_scores(
-            scores_postprocessed_student_strong, 
-            list(self.test_buffer_psds_eval_student.keys()) + [0.5]
-        )
-
         # --- ここまで ---
 
 
@@ -1105,13 +1099,6 @@ class SEDTask4(pl.LightningModule):
         # sed_scores = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes + maestro_classes, fill_value=0.0)
 
         scores_postprocessed_teacher_strong = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes+maestro_classes, fill_value=0.0)
-        
-        # SEBBsの後処理されたスコアからPSDS用の検出DataFrameを生成
-        decoded_teacher_strong = self._create_detection_dataframes_from_scores(
-            scores_postprocessed_teacher_strong, 
-            list(self.test_buffer_psds_eval_teacher.keys()) + [0.5]
-        )
-        
         # --- ここまで ---
 
         self.test_buffer_sed_scores_eval_unprocessed_teacher.update(
@@ -1520,60 +1507,6 @@ class SEDTask4(pl.LightningModule):
 
         for key in results.keys():
             self.log(key, results[key], prog_bar=True, logger=True)
-
-    def _create_detection_dataframes_from_scores(self, scores_dict, thresholds):
-        """
-        SEBBsから生成されたスコアからPSDS計算用の検出DataFrameを作成する
-        
-        Args:
-            scores_dict: dict, {clip_id: DataFrame with scores}
-            thresholds: list, 閾値のリスト
-            
-        Returns:
-            dict: {threshold: DataFrame with detections}
-        """
-        prediction_dfs = {}
-        for threshold in thresholds:
-            prediction_dfs[threshold] = pd.DataFrame()
-            
-        for clip_id, scores_df in scores_dict.items():
-            filename = clip_id + ".wav"
-            
-            # スコアDataFrameから各クラスのスコア配列を取得
-            event_classes = [col for col in scores_df.columns if col not in ['onset', 'offset']]
-            timestamps = scores_df['onset'].values
-            
-            for threshold in thresholds:
-                detections = []
-                
-                for class_name in event_classes:
-                    class_scores = scores_df[class_name].values
-                    # 閾値を超える部分を検出
-                    above_threshold = class_scores >= threshold
-                    
-                    if np.any(above_threshold):
-                        # 連続した領域を見つける
-                        changes = np.diff(np.concatenate(([False], above_threshold, [False])).astype(int))
-                        onsets = np.where(changes == 1)[0]
-                        offsets = np.where(changes == -1)[0]
-                        
-                    for onset_idx, offset_idx in zip(onsets, offsets):
-                        # タイムスタンプの境界チェック
-                        onset_time = timestamps[min(onset_idx, len(timestamps) - 1)]
-                        offset_time = timestamps[min(offset_idx, len(timestamps) - 1)]
-                        
-                        detections.append({
-                                'filename': filename,
-                                'event_label': class_name,
-                                'onset': onset_time,
-                                'offset': offset_time
-                            })
-                
-                if detections:
-                    det_df = pd.DataFrame(detections)
-                    prediction_dfs[threshold] = pd.concat([prediction_dfs[threshold], det_df], ignore_index=True)
-                    
-        return prediction_dfs
 
     def configure_optimizers(self):
         return [self.opt], [self.scheduler]
