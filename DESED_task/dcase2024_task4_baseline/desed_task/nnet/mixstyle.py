@@ -14,12 +14,18 @@ def mix_style(content_feature): # ok
         Tensor: スタイルが適用された新しい特徴量
     """
     # チャンネル次元で統計量を計算
-    content_mean, content_std = content_feature.mean(dim=1, keepdim=True), content_feature.std(dim=1, keepdim=True)
-    content_normed = (content_feature - content_mean) / (content_std + 1e-6)
+    # 若干実装がRFNに寄っている
+    
+    content_mean = content_feature.mean(dim=(1,3), keepdim=True)
+    content_var = content_feature.var(dim=(1,3), keepdim=True)
+    content_std = (content_var + 1e-6).sqrt()
+
+    content_mean, content_std = content_mean.detach(), content_std.detach()
+    content_normed = (content_feature - content_mean) / (content_std)
 
     # x_styleを内部で用意
     B = content_feature.size(0)
-    perm = torch.randperm(B) # ランダムにシャッフル 本当はチャンクごとに区切るのが良い??? 現実的に適用する場合はランダムになりそうだが...
+    perm = torch.randperm(B, device=content_feature.device) # ランダムにシャッフル 本当はチャンクごとに区切るのが良い??? 現実的に適用する場合はランダムになりそうだが...
 
     mu2, sig2 = content_mean[perm], content_std[perm]
     # style_mean, style_std = content_mean[perm].mean(dim=1, keepdim=True), content_mean[perm].std(dim=1, keepdim=True)
@@ -48,10 +54,13 @@ class FrequencyAttentionMixStyle(nn.Module):
 
         # 周波数ごとの重要度を学習するための小さなAttentionネットワーク
         # ここでは単純なConv1dを使用
+        specific_channels = channels if channels == 1 else channels // 2
+
+
         self.attention_network = nn.Sequential(
-            nn.Conv1d(in_channels=channels, out_channels=channels // 2, kernel_size=3, padding=1),
+            nn.Conv1d(in_channels=channels, out_channels=specific_channels, kernel_size=3, padding=1),
             nn.ReLU(),
-            nn.Conv1d(in_channels=channels // 2, out_channels=1, kernel_size=1)
+            nn.Conv1d(in_channels=specific_channels, out_channels=1, kernel_size=1)
         )
 
     def forward(self, x_content):
