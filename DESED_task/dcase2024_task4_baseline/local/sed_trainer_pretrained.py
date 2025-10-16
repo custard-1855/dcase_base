@@ -30,9 +30,10 @@ from .utils import batched_decode_preds, log_sedeval_metrics
 
 
 from pathlib import Path
-import sed_scores_eval.io as io
+
 from sebbs.sebbs import csebbs
 from sebbs.sebbs.utils import sed_scores_from_sebbs
+from sebbs.scripts.utils  import get_segment_scores
 
 
 # データ不足の対策
@@ -622,33 +623,33 @@ class SEDTask4(pl.LightningModule):
 
 
             # SEBBを導入
-            # (
-            #     scores_unprocessed_student_strong,
-            #     scores_postprocessed_student_strong,
-            #     decoded_student_strong,
-            # ) = batched_decode_preds(
-            #     strong_preds_student[mask_strong],
-            #     filenames_strong,
-            #     self.encoder,
-            #     median_filter=self.median_filter,
-            #     thresholds=[],
-            # )
+            (
+                scores_unprocessed_student_strong,
+                scores_postprocessed_student_strong,
+                decoded_student_strong,
+            ) = batched_decode_preds(
+                strong_preds_student[mask_strong],
+                filenames_strong,
+                self.encoder,
+                median_filter=self.median_filter,
+                thresholds=[],
+            )
 
             self.val_buffer_sed_scores_eval_student.update(
                 scores_postprocessed_student_strong
             )
 
-            # (
-            #     scores_unprocessed_teacher_strong,
-            #     scores_postprocessed_teacher_strong,
-            #     decoded_teacher_strong,
-            # ) = batched_decode_preds(
-            #     strong_preds_teacher[mask_strong],
-            #     filenames_strong,
-            #     self.encoder,
-            #     median_filter=self.median_filter,
-            #     thresholds=[],
-            # )
+            (
+                scores_unprocessed_teacher_strong,
+                scores_postprocessed_teacher_strong,
+                decoded_teacher_strong,
+            ) = batched_decode_preds(
+                strong_preds_teacher[mask_strong],
+                filenames_strong,
+                self.encoder,
+                median_filter=self.median_filter,
+                thresholds=[],
+            )
 
             self.val_buffer_sed_scores_eval_teacher.update(
                 scores_postprocessed_teacher_strong
@@ -975,7 +976,7 @@ class SEDTask4(pl.LightningModule):
         # compute psds
         (
             scores_unprocessed_student_strong,
-            scores_postprocessed_student_strong,
+            _,# scores_postprocessed_student_strong,
             decoded_student_strong,
         ) = batched_decode_preds(
             strong_preds_student,
@@ -989,12 +990,50 @@ class SEDTask4(pl.LightningModule):
         print("Apply cSEBBs post-processing and write output scores ...") 
 
         # DESEDクラスのスコアに対してcSEBBsを適用
+        # ALL > scores_unprocessed_student_strong   
         desed_classes = list(classes_labels_desed.keys()) # classes_labels_desedは適切にインポート
         keys_desed = ["onset", "offset"] + desed_classes
         scores_desed_classes = {clip_id: scores_unprocessed_student_strong[clip_id][keys_desed] for clip_id in scores_unprocessed_student_strong.keys()}
-        
         csebbs_desed_classes = self.csebbs_predictor.predict(scores_desed_classes)
-        scores_postprocessed_student_strong = sed_scores_from_sebbs(csebbs_desed_classes, sound_classes=desed_classes, fill_value=0.0)
+
+        maestro_classes = list(classes_labels_maestro_real.keys())
+        keys = ["onset", "offset"] + maestro_classes
+        scores_maestro_classes = {clip_id: scores_unprocessed_student_strong[clip_id][keys] for clip_id in scores_unprocessed_student_strong.keys()}
+        segment_scores_maestro_classes = {
+            clip_id: get_segment_scores(
+                clip_scores,
+                clip_length=list(clip_scores["offset"])[-1],
+                segment_length=1.0,
+            )
+            for clip_id, clip_scores in scores_maestro_classes.items()
+        }
+
+        sebbs_all = {
+            clip_id: sorted(
+                csebbs_desed_classes[clip_id]
+                + [
+                    (float(onset), float(offset), class_name, float(seg_score))
+                    for onset, offset, scores_vec in zip(
+                        segment_scores_maestro_classes[clip_id]["onset"],
+                        segment_scores_maestro_classes[clip_id]["offset"],
+                        segment_scores_maestro_classes[clip_id][maestro_classes].to_numpy(),
+                    )
+                    for class_name, seg_score in zip(maestro_classes, scores_vec)
+                ]
+            )
+            for clip_id in scores_unprocessed_student_strong
+        }
+    
+        # sed_scores = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes + maestro_classes, fill_value=0.0)
+
+        scores_postprocessed_student_strong = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes+maestro_classes, fill_value=0.0)
+
+        # SEBBsの後処理されたスコアからPSDS用の検出DataFrameを生成
+        decoded_student_strong = self._create_detection_dataframes_from_scores(
+            scores_postprocessed_student_strong, 
+            list(self.test_buffer_psds_eval_student.keys()) + [0.5]
+        )
+
         # --- ここまで ---
 
 
@@ -1029,9 +1068,50 @@ class SEDTask4(pl.LightningModule):
         desed_classes = list(classes_labels_desed.keys()) # classes_labels_desedは適切にインポート
         keys_desed = ["onset", "offset"] + desed_classes
         scores_desed_classes = {clip_id: scores_unprocessed_teacher_strong[clip_id][keys_desed] for clip_id in scores_unprocessed_teacher_strong.keys()}
-        
         csebbs_desed_classes = self.csebbs_predictor.predict(scores_desed_classes)
-        scores_postprocessed_teacher_strong = sed_scores_from_sebbs(csebbs_desed_classes, sound_classes=desed_classes, fill_value=0.0)
+
+        maestro_classes = list(classes_labels_maestro_real.keys())
+        # maestro_classes_eval = [
+        #     class_label for class_label in maestro_classes if class_label in classes_labels_maestro_real_eval
+        # ]
+
+        keys = ["onset", "offset"] + maestro_classes
+        scores_maestro_classes = {clip_id: scores_unprocessed_teacher_strong[clip_id][keys] for clip_id in scores_unprocessed_teacher_strong.keys()}
+        segment_scores_maestro_classes = {
+            clip_id: get_segment_scores(
+                clip_scores,
+                clip_length=list(clip_scores["offset"])[-1],
+                segment_length=1.0,
+            )
+            for clip_id, clip_scores in scores_maestro_classes.items()
+        }
+
+        sebbs_all = {
+            clip_id: sorted(
+                csebbs_desed_classes[clip_id]
+                + [
+                    (float(onset), float(offset), class_name, float(seg_score))
+                    for onset, offset, scores_vec in zip(
+                        segment_scores_maestro_classes[clip_id]["onset"],
+                        segment_scores_maestro_classes[clip_id]["offset"],
+                        segment_scores_maestro_classes[clip_id][maestro_classes].to_numpy(),
+                    )
+                    for class_name, seg_score in zip(maestro_classes, scores_vec)
+                ]
+            )
+            for clip_id in scores_unprocessed_teacher_strong
+        }
+    
+        # sed_scores = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes + maestro_classes, fill_value=0.0)
+
+        scores_postprocessed_teacher_strong = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes+maestro_classes, fill_value=0.0)
+        
+        # SEBBsの後処理されたスコアからPSDS用の検出DataFrameを生成
+        decoded_teacher_strong = self._create_detection_dataframes_from_scores(
+            scores_postprocessed_teacher_strong, 
+            list(self.test_buffer_psds_eval_teacher.keys()) + [0.5]
+        )
+        
         # --- ここまで ---
 
         self.test_buffer_sed_scores_eval_unprocessed_teacher.update(
@@ -1440,6 +1520,60 @@ class SEDTask4(pl.LightningModule):
 
         for key in results.keys():
             self.log(key, results[key], prog_bar=True, logger=True)
+
+    def _create_detection_dataframes_from_scores(self, scores_dict, thresholds):
+        """
+        SEBBsから生成されたスコアからPSDS計算用の検出DataFrameを作成する
+        
+        Args:
+            scores_dict: dict, {clip_id: DataFrame with scores}
+            thresholds: list, 閾値のリスト
+            
+        Returns:
+            dict: {threshold: DataFrame with detections}
+        """
+        prediction_dfs = {}
+        for threshold in thresholds:
+            prediction_dfs[threshold] = pd.DataFrame()
+            
+        for clip_id, scores_df in scores_dict.items():
+            filename = clip_id + ".wav"
+            
+            # スコアDataFrameから各クラスのスコア配列を取得
+            event_classes = [col for col in scores_df.columns if col not in ['onset', 'offset']]
+            timestamps = scores_df['onset'].values
+            
+            for threshold in thresholds:
+                detections = []
+                
+                for class_name in event_classes:
+                    class_scores = scores_df[class_name].values
+                    # 閾値を超える部分を検出
+                    above_threshold = class_scores >= threshold
+                    
+                    if np.any(above_threshold):
+                        # 連続した領域を見つける
+                        changes = np.diff(np.concatenate(([False], above_threshold, [False])).astype(int))
+                        onsets = np.where(changes == 1)[0]
+                        offsets = np.where(changes == -1)[0]
+                        
+                    for onset_idx, offset_idx in zip(onsets, offsets):
+                        # タイムスタンプの境界チェック
+                        onset_time = timestamps[min(onset_idx, len(timestamps) - 1)]
+                        offset_time = timestamps[min(offset_idx, len(timestamps) - 1)]
+                        
+                        detections.append({
+                                'filename': filename,
+                                'event_label': class_name,
+                                'onset': onset_time,
+                                'offset': offset_time
+                            })
+                
+                if detections:
+                    det_df = pd.DataFrame(detections)
+                    prediction_dfs[threshold] = pd.concat([prediction_dfs[threshold], det_df], ignore_index=True)
+                    
+        return prediction_dfs
 
     def configure_optimizers(self):
         return [self.opt], [self.scheduler]
