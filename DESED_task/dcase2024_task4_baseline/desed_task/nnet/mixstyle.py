@@ -1,7 +1,9 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import random
+# import random
+from torch.distributions.beta import Beta
+
 
 # --- MixStyleのコア機能 ---
 # 2つの特徴量の統計量（スタイル）を混ぜ合わせる関数
@@ -15,7 +17,7 @@ def mix_style(content_feature): # ok
     """
     # チャンネル次元で統計量を計算
     # 若干実装がRFNに寄っている
-    
+
     content_mean = content_feature.mean(dim=(1,3), keepdim=True)
     content_var = content_feature.var(dim=(1,3), keepdim=True)
     content_std = (content_var + 1e-6).sqrt()
@@ -31,7 +33,11 @@ def mix_style(content_feature): # ok
     # style_mean, style_std = content_mean[perm].mean(dim=1, keepdim=True), content_mean[perm].std(dim=1, keepdim=True)
 
     # ランダムな比率で統計量を混ぜる
-    lam = random.uniform(0, 1)
+    # lam = random.uniform(0, 1)
+    alpha = 0.1
+    lam = Beta(alpha, alpha).sample((B, 1, 1, 1))
+    lam = lam.to(device=content_feature.device)
+
     # mixed_mean = lam * style_mean + (1 - lam) * content_mean
     # mixed_std = lam * style_std + (1 - lam) * content_std
     mixed_mean = lam * content_mean + (1 - lam) * mu2
