@@ -621,8 +621,6 @@ class SEDTask4(pl.LightningModule):
                 ]
             ]
 
-
-            # SEBBを導入
             (
                 scores_unprocessed_student_strong,
                 scores_postprocessed_student_strong,
@@ -989,16 +987,24 @@ class SEDTask4(pl.LightningModule):
         # cSEBBsで後処理を行い、新しいスコアファイルを書き出す
         print("Apply cSEBBs post-processing and write output scores ...") 
 
-        # DESEDクラスのスコアに対してcSEBBsを適用
+        # 1. DESEDクラスのスコアに対してcSEBBsを適用
         # ALL > scores_unprocessed_student_strong   
-        desed_classes = list(classes_labels_desed.keys()) # classes_labels_desedは適切にインポート
+        desed_classes = list(classes_labels_desed.keys())
         keys_desed = ["onset", "offset"] + desed_classes
         scores_desed_classes = {clip_id: scores_unprocessed_student_strong[clip_id][keys_desed] for clip_id in scores_unprocessed_student_strong.keys()}
-        csebbs_desed_classes = self.csebbs_predictor.predict(scores_desed_classes)
+        
+        # csebbs_desed_classes = self.csebbs_predictor.predict(scores_desed_classes)
+        # cSEBBsの予測結果を直接sed_scores形式で取得
+        sed_scores_desed = self.csebbs_predictor.predict(
+            scores_desed_classes,
+            return_sed_scores=True  # このオプションで直接DataFrameを取得
+        )
 
+        # 2. Maestroも計算
         maestro_classes = list(classes_labels_maestro_real.keys())
         keys = ["onset", "offset"] + maestro_classes
         scores_maestro_classes = {clip_id: scores_unprocessed_student_strong[clip_id][keys] for clip_id in scores_unprocessed_student_strong.keys()}
+        
         segment_scores_maestro_classes = {
             clip_id: get_segment_scores(
                 clip_scores,
@@ -1024,9 +1030,31 @@ class SEDTask4(pl.LightningModule):
             for clip_id in scores_unprocessed_student_strong
         }
     
-        # sed_scores = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes + maestro_classes, fill_value=0.0)
 
-        scores_postprocessed_student_strong = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes+maestro_classes, fill_value=0.0)
+        # 3. dataframeを結合
+        scores_postprocessed_student_strong = {}
+        all_clip_ids = set(sed_scores_desed.keys()) | set(segment_scores_maestro_classes.keys())
+
+        for clip_id in all_clip_ids:
+            # 各クリップIDごとにDataFrameを結合
+            df_desed = sed_scores_desed.get(clip_id)
+            df_maestro = segment_scores_maestro_classes.get(clip_id)
+
+            # 両方のDataFrameが存在することを確認
+            if df_desed is not None and df_maestro is not None:
+                # onsetとoffsetをインデックスに設定して結合
+                df_desed.set_index(["onset", "offset"], inplace=True)
+                df_maestro.set_index(["onset", "offset"], inplace=True)
+                
+                # 2つのDataFrameを列方向に結合
+                combined_df = df_desed.join(df_maestro, how="outer").fillna(0.0).reset_index()
+                scores_postprocessed_student_strong[clip_id] = combined_df
+            elif df_desed is not None:
+                scores_postprocessed_student_strong[clip_id] = df_desed
+            elif df_maestro is not None:
+                scores_postprocessed_student_strong[clip_id] = df_maestro
+
+        # scores_postprocessed_student_strong = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes+maestro_classes, fill_value=0.0)
 
         # --- ここまで ---
 
