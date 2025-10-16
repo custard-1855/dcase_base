@@ -58,15 +58,15 @@ training:
   
   # 訓練制御
   num_workers: 6
-  n_epochs: 300                     # エポック数（10→200）
-  early_stop_patience: 200           # 早期停止（200→50）
+  n_epochs: 1 #300           # エポック数（10→200）
+  early_stop_patience: 1 #200           # 早期停止（200→50）
   accumulate_batches: 1
   gradient_clip: 5.0
   
   # 検証設定
   val_thresholds: [0.5]
   n_test_thresholds: 50
-  validation_interval: 10           # 検証間隔短縮（10→5）
+  validation_interval: 1 #10           # 検証間隔短縮（10→5）
   
   # データ分割
   weak_split: 0.9
