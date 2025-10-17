@@ -940,6 +940,86 @@ class SEDTask4(pl.LightningModule):
             batch_indx: torch.Tensor, 1D tensor of indexes to know which data are present in each batch.
         Returns:
         """
+        def get_sebbs(self, scores_strong):
+                # cSEBBsで後処理を行い、新しいスコアファイルを書き出す
+            print("Apply cSEBBs post-processing and write output scores ...") 
+
+            # 1. DESEDクラスのスコアに対してcSEBBsを適用
+            # ALL > scores_unprocessed_student_strong   
+            desed_classes = list(classes_labels_desed.keys())
+            keys_desed = ["onset", "offset"] + desed_classes
+            scores_desed_classes = {clip_id: scores_strong[clip_id][keys_desed] for clip_id in scores_strong.keys()}
+            
+            # 2. Maestroも計算
+            maestro_classes = list(classes_labels_maestro_real.keys())
+            keys = ["onset", "offset"] + maestro_classes
+            scores_maestro_classes = {clip_id: scores_strong[clip_id][keys] for clip_id in scores_strong.keys()}
+            
+            segment_scores_maestro_classes = {
+                clip_id: get_segment_scores(
+                    clip_scores,
+                    clip_length=list(clip_scores["offset"])[-1],
+                    segment_length=1.0,
+                )
+                for clip_id, clip_scores in scores_maestro_classes.items()
+            }    
+
+
+            #             # cSEBBsの予測結果を直接sed_scores形式で取得
+            # sed_scores_desed = self.csebbs_predictor.predict(
+            #     scores_desed_classes,
+            #     return_sed_scores=True  # このオプションで直接DataFrameを取得
+            # )
+
+            # イベントのリストを取得
+            csebbs_desed_events = self.csebbs_predictor.predict(
+                scores_desed_classes,
+                return_sed_scores=False
+            )
+
+            # 3. dataframeを結合
+            scores_postprocessed_strong = {}
+            # all_clip_ids = set(sed_scores_desed.keys()) | set(segment_scores_maestro_classes.keys())
+
+            for clip_id, df_maestro in segment_scores_maestro_classes.items():
+
+                combined_df = df_maestro.copy()
+
+                for class_name in desed_classes:
+                    combined_df[class_name] = 0.0
+
+                sebbs_list = csebbs_desed_events.get(clip_id, [])
+
+                for onset, offset, class_name, confidence in sebbs_list:
+                    overlapping_indices = combined_df[
+                        (combined_df['onset'] < offset) & (combined_df['offset'] > onset)
+                    ].index
+
+                    combined_df.loc[overlapping_indices, class_name] = np.maximum(
+                        combined_df.loc[overlapping_indices, class_name],
+                        confidence
+                    )
+
+                # # 各クリップIDごとにDataFrameを結合
+                # df_desed = sed_scores_desed.get(clip_id)
+                # df_maestro = segment_scores_maestro_classes.get(clip_id)
+
+                # # 両方のDataFrameが存在することを確認
+                # if df_desed is not None and df_maestro is not None:
+                #     # onsetとoffsetをインデックスに設定して結合
+                #     df_desed.set_index(["onset", "offset"], inplace=True)
+                #     df_maestro.set_index(["onset", "offset"], inplace=True)
+                    
+                #     # 2つのDataFrameを列方向に結合
+                #     combined_df = df_desed.join(df_maestro, how="outer").fillna(0.0).reset_index()
+                #     scores_postprocessed_strong[clip_id] = combined_df
+                # elif df_desed is not None:
+                #     scores_postprocessed_strong[clip_id] = df_desed
+                # elif df_maestro is not None:
+                #     scores_postprocessed_strong[clip_id] = df_maestro
+            scores_postprocessed_strong[clip_id] = combined_df
+            return combined_df
+            # return sed_scores_desed
 
         audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = (
             self._unpack_batch(batch)
@@ -985,78 +1065,7 @@ class SEDTask4(pl.LightningModule):
         )
 
         # cSEBBsで後処理を行い、新しいスコアファイルを書き出す
-        print("Apply cSEBBs post-processing and write output scores ...") 
-
-        # 1. DESEDクラスのスコアに対してcSEBBsを適用
-        # ALL > scores_unprocessed_student_strong   
-        desed_classes = list(classes_labels_desed.keys())
-        keys_desed = ["onset", "offset"] + desed_classes
-        scores_desed_classes = {clip_id: scores_unprocessed_student_strong[clip_id][keys_desed] for clip_id in scores_unprocessed_student_strong.keys()}
-        
-        # csebbs_desed_classes = self.csebbs_predictor.predict(scores_desed_classes)
-        # cSEBBsの予測結果を直接sed_scores形式で取得
-        sed_scores_desed = self.csebbs_predictor.predict(
-            scores_desed_classes,
-            return_sed_scores=True  # このオプションで直接DataFrameを取得
-        )
-
-        # 2. Maestroも計算
-        maestro_classes = list(classes_labels_maestro_real.keys())
-        keys = ["onset", "offset"] + maestro_classes
-        scores_maestro_classes = {clip_id: scores_unprocessed_student_strong[clip_id][keys] for clip_id in scores_unprocessed_student_strong.keys()}
-        
-        segment_scores_maestro_classes = {
-            clip_id: get_segment_scores(
-                clip_scores,
-                clip_length=list(clip_scores["offset"])[-1],
-                segment_length=1.0,
-            )
-            for clip_id, clip_scores in scores_maestro_classes.items()
-        }
-
-        sebbs_all = {
-            clip_id: sorted(
-                csebbs_desed_classes[clip_id]
-                + [
-                    (float(onset), float(offset), class_name, float(seg_score))
-                    for onset, offset, scores_vec in zip(
-                        segment_scores_maestro_classes[clip_id]["onset"],
-                        segment_scores_maestro_classes[clip_id]["offset"],
-                        segment_scores_maestro_classes[clip_id][maestro_classes].to_numpy(),
-                    )
-                    for class_name, seg_score in zip(maestro_classes, scores_vec)
-                ]
-            )
-            for clip_id in scores_unprocessed_student_strong
-        }
-    
-
-        # 3. dataframeを結合
-        scores_postprocessed_student_strong = {}
-        all_clip_ids = set(sed_scores_desed.keys()) | set(segment_scores_maestro_classes.keys())
-
-        for clip_id in all_clip_ids:
-            # 各クリップIDごとにDataFrameを結合
-            df_desed = sed_scores_desed.get(clip_id)
-            df_maestro = segment_scores_maestro_classes.get(clip_id)
-
-            # 両方のDataFrameが存在することを確認
-            if df_desed is not None and df_maestro is not None:
-                # onsetとoffsetをインデックスに設定して結合
-                df_desed.set_index(["onset", "offset"], inplace=True)
-                df_maestro.set_index(["onset", "offset"], inplace=True)
-                
-                # 2つのDataFrameを列方向に結合
-                combined_df = df_desed.join(df_maestro, how="outer").fillna(0.0).reset_index()
-                scores_postprocessed_student_strong[clip_id] = combined_df
-            elif df_desed is not None:
-                scores_postprocessed_student_strong[clip_id] = df_desed
-            elif df_maestro is not None:
-                scores_postprocessed_student_strong[clip_id] = df_maestro
-
-        # scores_postprocessed_student_strong = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes+maestro_classes, fill_value=0.0)
-
-        # --- ここまで ---
+        scores_postprocessed_student_strong = get_sebbs(self, scores_unprocessed_student_strong)
 
 
         self.test_buffer_sed_scores_eval_unprocessed_student.update(
@@ -1083,51 +1092,8 @@ class SEDTask4(pl.LightningModule):
             thresholds=list(self.test_buffer_psds_eval_teacher.keys()) + [0.5],
         )
 
-        # cSEBBsで後処理を行い、新しいスコアファイルを書き出す
-        print("Apply cSEBBs post-processing and write output scores ...") 
-
-        # DESEDクラスのスコアに対してcSEBBsを適用
-        desed_classes = list(classes_labels_desed.keys()) # classes_labels_desedは適切にインポート
-        keys_desed = ["onset", "offset"] + desed_classes
-        scores_desed_classes = {clip_id: scores_unprocessed_teacher_strong[clip_id][keys_desed] for clip_id in scores_unprocessed_teacher_strong.keys()}
-        csebbs_desed_classes = self.csebbs_predictor.predict(scores_desed_classes)
-
-        maestro_classes = list(classes_labels_maestro_real.keys())
-        # maestro_classes_eval = [
-        #     class_label for class_label in maestro_classes if class_label in classes_labels_maestro_real_eval
-        # ]
-
-        keys = ["onset", "offset"] + maestro_classes
-        scores_maestro_classes = {clip_id: scores_unprocessed_teacher_strong[clip_id][keys] for clip_id in scores_unprocessed_teacher_strong.keys()}
-        segment_scores_maestro_classes = {
-            clip_id: get_segment_scores(
-                clip_scores,
-                clip_length=list(clip_scores["offset"])[-1],
-                segment_length=1.0,
-            )
-            for clip_id, clip_scores in scores_maestro_classes.items()
-        }
-
-        sebbs_all = {
-            clip_id: sorted(
-                csebbs_desed_classes[clip_id]
-                + [
-                    (float(onset), float(offset), class_name, float(seg_score))
-                    for onset, offset, scores_vec in zip(
-                        segment_scores_maestro_classes[clip_id]["onset"],
-                        segment_scores_maestro_classes[clip_id]["offset"],
-                        segment_scores_maestro_classes[clip_id][maestro_classes].to_numpy(),
-                    )
-                    for class_name, seg_score in zip(maestro_classes, scores_vec)
-                ]
-            )
-            for clip_id in scores_unprocessed_teacher_strong
-        }
-    
-        # sed_scores = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes + maestro_classes, fill_value=0.0)
-
-        scores_postprocessed_teacher_strong = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes+maestro_classes, fill_value=0.0)
-        # --- ここまで ---
+        # SEBB
+        scores_postprocessed_teacher_strong = get_sebbs(self, scores_unprocessed_teacher_strong)
 
         self.test_buffer_sed_scores_eval_unprocessed_teacher.update(
             scores_unprocessed_teacher_strong
