@@ -1017,8 +1017,8 @@ class SEDTask4(pl.LightningModule):
                 #     scores_postprocessed_strong[clip_id] = df_desed
                 # elif df_maestro is not None:
                 #     scores_postprocessed_strong[clip_id] = df_maestro
-            scores_postprocessed_strong[clip_id] = combined_df
-            return combined_df
+                scores_postprocessed_strong[clip_id] = combined_df
+            return scores_postprocessed_strong
             # return sed_scores_desed
 
         audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = (
