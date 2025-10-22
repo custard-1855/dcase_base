@@ -940,21 +940,30 @@ class SEDTask4(pl.LightningModule):
             batch_indx: torch.Tensor, 1D tensor of indexes to know which data are present in each batch.
         Returns:
         """
-        def get_sebbs(self, scores_strong):
-                # cSEBBsで後処理を行い、新しいスコアファイルを書き出す
-            print("Apply cSEBBs post-processing and write output scores ...") 
+        def get_sebbs(self, scores_all_classes):
+            '''Use cSEBBs
+                SEBBのサンプルコードに忠実に直す
+                下のPSDS付近のコードに寄せないで実装
+            '''
 
-            # 1. DESEDクラスのスコアに対してcSEBBsを適用
-            # ALL > scores_unprocessed_student_strong   
-            desed_classes = list(classes_labels_desed.keys())
-            keys_desed = ["onset", "offset"] + desed_classes
-            scores_desed_classes = {clip_id: scores_strong[clip_id][keys_desed] for clip_id in scores_strong.keys()}
-            
+            # cSEBBsで後処理を行い、新しいスコアファイルを出力
+            # scores_all_classes = scores_unprocessed_{student | teacher}_strong
+
+            # 1. DESEDクラスのスコアに対してcSEBBsを適用         
+            desed_classes = list(classes_labels_desed.keys()) # ラベル一覧を獲得
+            keys_desed = ["onset", "offset"] + desed_classes # 辞書から取り出すためのkeyを設定 # 下ではsortedしているが,sebbではしてない. どちらが正しい?
+            # sebbの実装ではスコアを受け取っている なぜ?
+            scores_desed_classes = {clip_id: scores_all_classes[clip_id][keys_desed] for clip_id in scores_all_classes.keys()}
+            # csebbsでdesedデータセットのスコアを後処理
+            csebbs_desed_classes = self.csebbs_predictor.predict(scores_desed_classes)
+
+
             # 2. Maestroも計算
             maestro_classes = list(classes_labels_maestro_real.keys())
-            keys = ["onset", "offset"] + maestro_classes
-            scores_maestro_classes = {clip_id: scores_strong[clip_id][keys] for clip_id in scores_strong.keys()}
+            keys_maestro = ["onset", "offset"] + maestro_classes
+            scores_maestro_classes = {clip_id: scores_all_classes[clip_id][keys_maestro] for clip_id in scores_all_classes.keys()}
             
+            # この処理が分かってない... 要理解
             segment_scores_maestro_classes = {
                 clip_id: get_segment_scores(
                     clip_scores,
@@ -964,41 +973,60 @@ class SEDTask4(pl.LightningModule):
                 for clip_id, clip_scores in scores_maestro_classes.items()
             }    
 
+            # 要理解
+            sebbs_all = {
+                clip_id: sorted( # ここでsort?
+                    csebbs_desed_classes[clip_id]
+                    + [
+                        (float(onset), float(offset), class_name, float(seg_score))
+                        for onset, offset, scores_vec in zip(
+                            segment_scores_maestro_classes[clip_id]["onset"],
+                            segment_scores_maestro_classes[clip_id]["offset"],
+                            segment_scores_maestro_classes[clip_id][maestro_classes].to_numpy(),
+                        )
+                        for class_name, seg_score in zip(maestro_classes, scores_vec)
+                    ]
+                )
+                for clip_id in scores_all_classes
+            }
 
-            #             # cSEBBsの予測結果を直接sed_scores形式で取得
+            sed_scores = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes + maestro_classes, fill_value=0.0)
+            return 0
+
+            # cSEBBsの予測結果を直接sed_scores形式で取得
             # sed_scores_desed = self.csebbs_predictor.predict(
             #     scores_desed_classes,
             #     return_sed_scores=True  # このオプションで直接DataFrameを取得
             # )
 
-            # イベントのリストを取得
-            csebbs_desed_events = self.csebbs_predictor.predict(
-                scores_desed_classes,
-                return_sed_scores=False
-            )
+            # # イベントのリストを取得
+            # csebbs_desed_events = self.csebbs_predictor.predict(
+            #     scores_desed_classes,
+            #     return_sed_scores=False
+            # ) # 元はcsebbs_desed_classes
 
-            # 3. dataframeを結合
-            scores_postprocessed_strong = {}
-            # all_clip_ids = set(sed_scores_desed.keys()) | set(segment_scores_maestro_classes.keys())
+            # # 3. dataframeを結合
+            # scores_postprocessed_strong = {}
+            # # all_clip_ids = set(sed_scores_desed.keys()) | set(segment_scores_maestro_classes.keys())
 
-            for clip_id, df_maestro in segment_scores_maestro_classes.items():
+            # for clip_id, df_maestro in segment_scores_maestro_classes.items():
 
-                combined_df = df_maestro.copy()
+            #     combined_df = df_maestro.copy()
 
-                for class_name in desed_classes:
-                    combined_df[class_name] = 0.0
+            #     for class_name in desed_classes:
+            #         combined_df[class_name] = 0.0
 
-                sebbs_list = csebbs_desed_events.get(clip_id, [])
+            #     sebbs_list = csebbs_desed_events.get(clip_id, [])
 
-                for onset, offset, class_name, confidence in sebbs_list:
-                    overlapping_indices = combined_df[
-                        (combined_df['onset'] < offset) & (combined_df['offset'] > onset)
-                    ].index
+            #     for onset, offset, class_name, confidence in sebbs_list:
+            #         overlapping_indices = combined_df[
+            #             (combined_df['onset'] < offset) & (combined_df['offset'] > onset)
+            #         ].index
 
-                    combined_df.loc[overlapping_indices, class_name] = np.maximum(
-                        combined_df.loc[overlapping_indices, class_name],
-                        confidence
-                    )
+            #         combined_df.loc[overlapping_indices, class_name] = np.maximum(
+            #             combined_df.loc[overlapping_indices, class_name],
+            #             confidence
+            #         )
 
                 # # 各クリップIDごとにDataFrameを結合
                 # df_desed = sed_scores_desed.get(clip_id)
@@ -1017,9 +1045,9 @@ class SEDTask4(pl.LightningModule):
                 #     scores_postprocessed_strong[clip_id] = df_desed
                 # elif df_maestro is not None:
                 #     scores_postprocessed_strong[clip_id] = df_maestro
-                scores_postprocessed_strong[clip_id] = combined_df
-            return scores_postprocessed_strong
-            # return sed_scores_desed
+            #     scores_postprocessed_strong[clip_id] = combined_df
+            # return scores_postprocessed_strong
+            # # return sed_scores_desed
 
         audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = (
             self._unpack_batch(batch)
