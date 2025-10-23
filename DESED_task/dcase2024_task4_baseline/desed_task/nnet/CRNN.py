@@ -242,8 +242,8 @@ class CRNN(nn.Module):
         # x: (batch, freq, time) > (batch, channel, freq, time)?
         # x = x.transpose(1, 2).unsqueeze(1)
 
-        x = mfcc.unsqueeze(1)
-        # print("[DEBUG]: mfcc:", x.size()) # ([57, 1, 40, 626]) 元は 40 > 128
+        x = mfcc.transpose(1,2).unsqueeze(1) # transposeを追加 frame, freqの順に
+        # print("[DEBUG]: mfcc:", x.size()) # ([57, 1, 40, 626]) 元は 40 > 128 # 期待されるsizeと逆になってる
 
         # input size : (batch_size, n_channels, n_frames, n_freq)
         if self.cnn_integration:
