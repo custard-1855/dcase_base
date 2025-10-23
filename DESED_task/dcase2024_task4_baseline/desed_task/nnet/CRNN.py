@@ -235,7 +235,8 @@ class CRNN(nn.Module):
         # print("[DEBUG]: mfcc:", mfcc.size()) # ([57, 40, 626])
 
         # x: (batch, freq, time) > (batch, time, freq) > (batch, channel, freq, time)
-        x = mfcc.transpose(1,2).unsqueeze(1) # transposeを追加 frame, freqの順に
+        # x = mfcc.transpose(1,2).unsqueeze(1) # transposeを追加 frame, freqの順に
+        x = mfcc.transpose(1,2) # チャンネル追加を削除
         # print("[DEBUG]: mfcc:", x.size()) # ([57, 1, 40, 626]) 元は 40 > 128 # 期待されるsizeと逆
 
         #--- delta, delta delta ---
