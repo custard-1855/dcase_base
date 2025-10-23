@@ -229,7 +229,7 @@ class CRNN(nn.Module):
 
         # mel_specgram.transpose(-1, -2)
         # (..., time, n_mels(freq)) dot (n_mels, n_mfcc) -> (..., n_nfcc, time)
-        mfcc = torch.matmul(x.transpose(-1, -2), self.dct_mat).transpose(-1, -2)
+        mfcc = torch.matmul(x.transpose(-1, -2), dct_mat).transpose(-1, -2)
         # Tensor: specgram_mel_db of size (..., ``n_mfcc``, time)
 
         # x: (batch, freq, time) > (batch, channel, freq, time)?
