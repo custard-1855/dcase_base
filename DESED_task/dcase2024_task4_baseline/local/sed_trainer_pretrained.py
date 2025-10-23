@@ -1802,80 +1802,80 @@ def get_sebbs(self, scores_all_classes):
 
 
 
-def get_sebbs(self, scores_all_classes):
-    """
-    SEBB (cSEBBs) を用いて batched_decode_preds() の
-    scores_postprocessed_student_strong と同等の出力形式を生成する。
-    """
-    # --- 1. DESEDクラスのみ抽出 ---
-    desed_classes = list(classes_labels_desed.keys())
-    keys_desed = ["onset", "offset"] + sorted(desed_classes)
-    scores_desed_classes = {
-        clip_id: scores_all_classes[clip_id][keys_desed]
-        for clip_id in scores_all_classes.keys()
-    }
+# def get_sebbs(self, scores_all_classes):
+#     """
+#     SEBB (cSEBBs) を用いて batched_decode_preds() の
+#     scores_postprocessed_student_strong と同等の出力形式を生成する。
+#     """
+#     # --- 1. DESEDクラスのみ抽出 ---
+#     desed_classes = list(classes_labels_desed.keys())
+#     keys_desed = ["onset", "offset"] + sorted(desed_classes)
+#     scores_desed_classes = {
+#         clip_id: scores_all_classes[clip_id][keys_desed]
+#         for clip_id in scores_all_classes.keys()
+#     }
 
-    # --- 2. SEBBによる後処理 ---
-    sed_scores_desed = self.csebbs_predictor.predict(
-        scores_desed_classes,
-        return_sed_scores=True  # ← DataFrame形式で返す
-    )
+#     # --- 2. SEBBによる後処理 ---
+#     sed_scores_desed = self.csebbs_predictor.predict(
+#         scores_desed_classes,
+#         return_sed_scores=True  # ← DataFrame形式で返す
+#     )
 
-    # --- 3. Maestroも同様に (segment単位でスコア化) ---
-    maestro_classes = list(classes_labels_maestro_real.keys())
-    keys_maestro = ["onset", "offset"] + maestro_classes
-    scores_maestro_classes = {
-        clip_id: scores_all_classes[clip_id][keys_maestro]
-        for clip_id in scores_all_classes.keys()
-    }
+#     # --- 3. Maestroも同様に (segment単位でスコア化) ---
+#     maestro_classes = list(classes_labels_maestro_real.keys())
+#     keys_maestro = ["onset", "offset"] + maestro_classes
+#     scores_maestro_classes = {
+#         clip_id: scores_all_classes[clip_id][keys_maestro]
+#         for clip_id in scores_all_classes.keys()
+#     }
 
-    # segment_scores_maestro_classes = {
-    #     clip_id: get_segment_scores(
-    #         clip_scores,
-    #         clip_length=self.audio_durations.get(
-    #             clip_id, list(clip_scores["offset"])[-1]
-    #         ),
-    #         segment_length=1.0,
-    #     )
-    #     for clip_id, clip_scores in scores_maestro_classes.items()
-    # }
-
-
-    # 既に load_maestro_audio_durations_and_gt(self) が呼ばれている前提
-    maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
-
-    segment_scores_maestro_classes = {}
-    for clip_id, clip_scores in scores_maestro_classes.items():
-        # clip_length を安全に取得：辞書に無ければ最後の offset を fallback に使用
-        clip_length = maestro_audio_durations.get(clip_id)
-        if clip_length is None:
-            # fallback: 最後の offset を使う（それすら無ければ raise / skip）
-            try:
-                clip_length = float(list(clip_scores["offset"])[-1])
-                # self.logger.warning(f"Using fallback clip_length={clip_length:.3f} for {clip_id}")
-            except Exception:
-                # self.logger.error(f"Cannot determine clip_length for {clip_id}; skipping.")
-                continue
-
-        segment_scores_maestro_classes[clip_id] = get_segment_scores(
-            clip_scores,
-            clip_length=clip_length,
-            segment_length=1.0,
-        )
+#     # segment_scores_maestro_classes = {
+#     #     clip_id: get_segment_scores(
+#     #         clip_scores,
+#     #         clip_length=self.audio_durations.get(
+#     #             clip_id, list(clip_scores["offset"])[-1]
+#     #         ),
+#     #         segment_length=1.0,
+#     #     )
+#     #     for clip_id, clip_scores in scores_maestro_classes.items()
+#     # }
 
 
-    # --- 4. DataFrameを統合 ---
-    scores_postprocessed = {}
-    all_clip_ids = set(sed_scores_desed.keys()) | set(segment_scores_maestro_classes.keys())
-    for clip_id in all_clip_ids:
-        dfs = []
-        if clip_id in sed_scores_desed:
-            dfs.append(sed_scores_desed[clip_id])
-        if clip_id in segment_scores_maestro_classes:
-            dfs.append(segment_scores_maestro_classes[clip_id])
-        if dfs:
-            combined_df = pd.concat(dfs, axis=0, ignore_index=True).fillna(0.0)
-            combined_df = combined_df.sort_values(by="onset").reset_index(drop=True)
-            scores_postprocessed[clip_id] = combined_df
+#     # 既に load_maestro_audio_durations_and_gt(self) が呼ばれている前提
+#     maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
 
-    return scores_postprocessed
+#     segment_scores_maestro_classes = {}
+#     for clip_id, clip_scores in scores_maestro_classes.items():
+#         # clip_length を安全に取得：辞書に無ければ最後の offset を fallback に使用
+#         clip_length = maestro_audio_durations.get(clip_id)
+#         if clip_length is None:
+#             # fallback: 最後の offset を使う（それすら無ければ raise / skip）
+#             try:
+#                 clip_length = float(list(clip_scores["offset"])[-1])
+#                 # self.logger.warning(f"Using fallback clip_length={clip_length:.3f} for {clip_id}")
+#             except Exception:
+#                 # self.logger.error(f"Cannot determine clip_length for {clip_id}; skipping.")
+#                 continue
+
+#         segment_scores_maestro_classes[clip_id] = get_segment_scores(
+#             clip_scores,
+#             clip_length=clip_length,
+#             segment_length=1.0,
+#         )
+
+
+#     # --- 4. DataFrameを統合 ---
+#     scores_postprocessed = {}
+#     all_clip_ids = set(sed_scores_desed.keys()) | set(segment_scores_maestro_classes.keys())
+#     for clip_id in all_clip_ids:
+#         dfs = []
+#         if clip_id in sed_scores_desed:
+#             dfs.append(sed_scores_desed[clip_id])
+#         if clip_id in segment_scores_maestro_classes:
+#             dfs.append(segment_scores_maestro_classes[clip_id])
+#         if dfs:
+#             combined_df = pd.concat(dfs, axis=0, ignore_index=True).fillna(0.0)
+#             combined_df = combined_df.sort_values(by="onset").reset_index(drop=True)
+#             scores_postprocessed[clip_id] = combined_df
+
+#     return scores_postprocessed
