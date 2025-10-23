@@ -1465,6 +1465,9 @@ class SEDTask4(pl.LightningModule):
         )
 
     def on_test_start(self) -> None:
+        print("Loading MAESTRO audio durations and ground truth for test...")
+        self.load_maestro_audio_durations_and_gt()
+
         if self.evaluation:
             os.makedirs(os.path.join(self.exp_dir, "codecarbon"), exist_ok=True)
             self.tracker_eval = OfflineEmissionsTracker(
@@ -1672,6 +1675,57 @@ def _get_segment_scores(scores_df, clip_length, segment_length=1.0):
 #     sed_scores = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes + maestro_classes, fill_value=0.0)
 #     return sed_scores
 
+
+def load_maestro_audio_durations_and_gt(self):
+    """
+    1回だけ呼んで maestro_audio_durations(dict) と maestro_ground_truth(dict) を返す。
+    """
+    # --- 1. durations の読み込み ---
+    durations_path = self.hparams["data"]["real_maestro_val_dur"]
+    gt_tsv_path = self.hparams["data"]["real_maestro_val_tsv"]
+
+    maestro_audio_durations = sed_scores_eval.io.read_audio_durations(durations_path)
+
+    # --- 2. ground truth tsv の読み込みとフィルタ ---
+    maestro_ground_truth_clips = pd.read_csv(gt_tsv_path, sep="\t")
+    # 元ファイルの filename カラムが "xxxx.wav" のようになっている前提
+    # ここで clip_id の仕様に合わせて切る（例: remove .wav）
+    maestro_ground_truth_clips["file_id"] = maestro_ground_truth_clips["filename"].apply(lambda x: x[:-4] if isinstance(x, str) and x.lower().endswith(".wav") else x)
+
+    # confidence とラベルフィルタ
+    maestro_ground_truth_clips = maestro_ground_truth_clips[maestro_ground_truth_clips.confidence > 0.5]
+    maestro_ground_truth_clips = maestro_ground_truth_clips[
+        maestro_ground_truth_clips.event_label.isin(classes_labels_maestro_real_eval)
+    ]
+
+    # --- 3. read_ground_truth_events に通す（返り値が dict になる前提） ---
+    maestro_ground_truth_clips = sed_scores_eval.io.read_ground_truth_events(maestro_ground_truth_clips)
+
+    # --- 4. マッピングを clip_id の集合に揃える ---
+    maestro_ground_truth = _merge_maestro_ground_truth(maestro_ground_truth_clips)  # 既存関数使用
+    # maestro_audio_durations のキーが file_id と一致するか確かめる
+    # ここで、該当する file_id のみ抽出
+    maestro_audio_durations_filtered = {
+        file_id: maestro_audio_durations[file_id]
+        for file_id in maestro_ground_truth.keys()
+        if file_id in maestro_audio_durations
+    }
+
+    missing = set(maestro_ground_truth.keys()) - set(maestro_audio_durations_filtered.keys())
+    if missing:
+        warnings.warn(f"maestro_audio_durations missing for {len(missing)} files. Examples: {list(missing)[:5]}. Using fallback for those clips.")
+        # 欠損は許容するが、fallback 用に空のエントリは作らない（fallbackはget()で対応）
+
+    # ログ（あると便利）
+    self.logger.info(f"Loaded {len(maestro_audio_durations_filtered)} maestro durations for {len(maestro_ground_truth)} ground truth clips.")
+
+    # キャッシュしておく（後で呼び出し直すときのため）
+    self._maestro_audio_durations = maestro_audio_durations_filtered
+    self._maestro_ground_truth = maestro_ground_truth
+
+    return maestro_audio_durations_filtered, maestro_ground_truth
+
+
 def get_sebbs(self, scores_all_classes):
     """
     SEBB (cSEBBs) を用いて batched_decode_preds() の
@@ -1699,16 +1753,40 @@ def get_sebbs(self, scores_all_classes):
         for clip_id in scores_all_classes.keys()
     }
 
-    segment_scores_maestro_classes = {
-        clip_id: get_segment_scores(
+    # segment_scores_maestro_classes = {
+    #     clip_id: get_segment_scores(
+    #         clip_scores,
+    #         clip_length=self.audio_durations.get(
+    #             clip_id, list(clip_scores["offset"])[-1]
+    #         ),
+    #         segment_length=1.0,
+    #     )
+    #     for clip_id, clip_scores in scores_maestro_classes.items()
+    # }
+
+
+    # 既に load_maestro_audio_durations_and_gt(self) が呼ばれている前提
+    maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
+
+    segment_scores_maestro_classes = {}
+    for clip_id, clip_scores in scores_maestro_classes.items():
+        # clip_length を安全に取得：辞書に無ければ最後の offset を fallback に使用
+        clip_length = maestro_audio_durations.get(clip_id)
+        if clip_length is None:
+            # fallback: 最後の offset を使う（それすら無ければ raise / skip）
+            try:
+                clip_length = float(list(clip_scores["offset"])[-1])
+                self.logger.warning(f"Using fallback clip_length={clip_length:.3f} for {clip_id}")
+            except Exception:
+                self.logger.error(f"Cannot determine clip_length for {clip_id}; skipping.")
+                continue
+
+        segment_scores_maestro_classes[clip_id] = get_segment_scores(
             clip_scores,
-            clip_length=self.audio_durations.get(
-                clip_id, list(clip_scores["offset"])[-1]
-            ),
+            clip_length=clip_length,
             segment_length=1.0,
         )
-        for clip_id, clip_scores in scores_maestro_classes.items()
-    }
+
 
     # --- 4. DataFrameを統合 ---
     scores_postprocessed = {}
