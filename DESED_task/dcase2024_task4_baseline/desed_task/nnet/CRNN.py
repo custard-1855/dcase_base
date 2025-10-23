@@ -227,24 +227,25 @@ class CRNN(nn.Module):
         # input x: batch, time, freq?
         x = self.apply_specaugment(x)
         # print("[DEBUG]: SpecAugument:", x.size()) # ([57, 128, 626])
-        log_mel = x
 
-        # dctを入れる
-        # self.n_mfcc, self.MelSpectrogram.n_mels, self.norm
-        # dct_mat = torchaudio.functional.create_dct(40, 128, "ortho")
-
-        # mel_specgram.transpose(-1, -2)
+        #--- MFCC ---
+        # dct init内で宣言
         # (..., time, n_mels(freq)) dot (n_mels, n_mfcc) -> (..., n_nfcc, time)
         mfcc = torch.matmul(x.transpose(-1, -2), self.dct_mat).transpose(-1, -2)
-        print("[DEBUG]: mfcc:", mfcc.size()) # ([57, 40, 626])
+        # print("[DEBUG]: mfcc:", mfcc.size()) # ([57, 40, 626])
 
-        # Tensor: specgram_mel_db of size (..., ``n_mfcc``, time)
-
-        # x: (batch, freq, time) > (batch, channel, freq, time)?
-        # x = x.transpose(1, 2).unsqueeze(1)
-
+        # x: (batch, freq, time) > (batch, time, freq) > (batch, channel, freq, time)
         x = mfcc.transpose(1,2).unsqueeze(1) # transposeを追加 frame, freqの順に
-        # print("[DEBUG]: mfcc:", x.size()) # ([57, 1, 40, 626]) 元は 40 > 128 # 期待されるsizeと逆になってる
+        # print("[DEBUG]: mfcc:", x.size()) # ([57, 1, 40, 626]) 元は 40 > 128 # 期待されるsizeと逆
+
+        #--- delta, delta delta ---
+            # 時間軸でのlog mel + MFCCは効果が薄い?
+            # log melのdelta, delta deltaをチャネル次元で重ねる
+            # 1がチャネル次元のはず
+        delta = torchaudio.functional.compute_deltas(x)
+        delta2 = torchaudio.functional. compute_deltas(delta)
+        combined_tensor = torch.stack([x, delta, delta2], dim=1)
+        x = combined_tensor # 重ねた特徴量を入力にする
 
         # input size : (batch_size, n_channels, n_frames, n_freq)
         if self.cnn_integration:
