@@ -226,18 +226,18 @@ class CRNN(nn.Module):
 
         # input x: batch, time, freq?
         x = self.apply_specaugment(x)
-        # print("[DEBUG]: SpecAugument:", x.size()) # ([57, 128, 626])
+        print("[DEBUG]: SpecAugument:", x.size()) # ([57, 128, 626])
 
         #--- MFCC ---
-        # dct init内で宣言
-        # (..., time, n_mels(freq)) dot (n_mels, n_mfcc) -> (..., n_nfcc, time)
-        mfcc = torch.matmul(x.transpose(-1, -2), self.dct_mat).transpose(-1, -2)
-        # print("[DEBUG]: mfcc:", mfcc.size()) # ([57, 40, 626])
+        # # dct init内で宣言
+        # # (..., time, n_mels(freq)) dot (n_mels, n_mfcc) -> (..., n_nfcc, time)
+        # mfcc = torch.matmul(x.transpose(-1, -2), self.dct_mat).transpose(-1, -2)
+        # # print("[DEBUG]: mfcc:", mfcc.size()) # ([57, 40, 626])
 
-        # x: (batch, freq, time) > (batch, time, freq) > (batch, channel, freq, time)
-        # x = mfcc.transpose(1,2).unsqueeze(1) # transposeを追加 frame, freqの順に
-        x = mfcc.transpose(1,2) # チャンネル追加を削除
-        # print("[DEBUG]: mfcc:", x.size()) # ([57, 1, 40, 626]) 元は 40 > 128 # 期待されるsizeと逆
+        # # x: (batch, freq, time) > (batch, time, freq) > (batch, channel, freq, time)
+        # # x = mfcc.transpose(1,2).unsqueeze(1) # transposeを追加 frame, freqの順に
+        # x = mfcc.transpose(1,2) # チャンネル追加を削除
+        # # print("[DEBUG]: mfcc:", x.size()) # ([57, 1, 40, 626]) 元は 40 > 128 # 期待されるsizeと逆
 
         #--- delta, delta delta ---
             # 時間軸でのlog mel + MFCCは効果が薄い?
@@ -247,6 +247,10 @@ class CRNN(nn.Module):
         delta2 = torchaudio.functional. compute_deltas(delta)
         combined_tensor = torch.stack([x, delta, delta2], dim=1)
         x = combined_tensor # 重ねた特徴量を入力にする
+        
+        x = x.transpose(2,3) # timeとfreqを入れ替え
+
+        print("[DEBUG]: x:", x.size()) # ([55, 3, 128, 626])
 
         # input size : (batch_size, n_channels, n_frames, n_freq)
         if self.cnn_integration:
@@ -256,7 +260,7 @@ class CRNN(nn.Module):
         # conv features
         x = self.cnn(x)
         bs, chan, frames, freq = x.size()
-        print("[DEBUG]: cnn:", x.size()) # ([57, 128, 10, 15])
+        print("[DEBUG]: cnn:", x.size()) # ([57, 128, 10, 15]) ([55, 128, 32, 4])
         if self.cnn_integration:
             x = x.reshape(bs_in, chan * nc_in, frames, freq)
 
