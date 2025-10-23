@@ -144,7 +144,7 @@ feats:
 net:
   dropout: 0.2
   rnn_layers: 1
-  n_in_channel: 1
+  n_in_channel: 3 #1 #stack用に変更
   nclass: 27
   attention: True
   n_RNN_cell: 192
