@@ -226,7 +226,8 @@ class CRNN(nn.Module):
 
         # input x: batch, time, freq?
         x = self.apply_specaugment(x)
-        print("[DEBUG]: SpecAugument:", x.size()) # ([57, 128, 626])
+        # print("[DEBUG]: SpecAugument:", x.size()) # ([57, 128, 626])
+        log_mel = x
 
         # dctを入れる
         # self.n_mfcc, self.MelSpectrogram.n_mels, self.norm
