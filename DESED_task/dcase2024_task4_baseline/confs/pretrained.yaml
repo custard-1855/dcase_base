@@ -154,7 +154,9 @@ net:
   padding: [1, 1, 1, 1, 1, 1, 1]
   stride: [1, 1, 1, 1, 1, 1, 1]
   nb_filters: [ 16, 32, 64, 128, 128, 128, 128 ]
-  pooling: [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ] ]
+  # MFCCは40, log melは128
+  # pooling: [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 5 ], [ 1, 1 ], [ 1, 1 ], [ 1, 1 ] ] # for MFCC
+  pooling:  [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ] ] # for log mel
   dropstep_recurrent: 0.3
   dropstep_recurrent_len: 16
   use_embeddings: True
