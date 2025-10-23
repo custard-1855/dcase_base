@@ -704,13 +704,14 @@ class SEDTask4(pl.LightningModule):
 
 
         # SEBBをtune
-        print("\nTune csebbs for DESED classes ...")
-        self.csebbs_predictor, _ = csebbs.tune(
-            scores=desed_scores,
-            ground_truth=desed_ground_truth,
-            audio_durations=desed_audio_durations,
-            selection_fn=csebbs.select_best_psds
-        )
+        if not hasattr(self, "csebbs_predictor"):
+            print("\nTune csebbs for DESED classes ...")
+            self.csebbs_predictor, _ = csebbs.tune(
+                scores=desed_scores,
+                ground_truth=desed_ground_truth,
+                audio_durations=desed_audio_durations,
+                selection_fn=csebbs.select_best_psds
+            )
 
         psds1_sed_scores_eval_student = compute_psds_from_scores(
             desed_scores,
@@ -940,114 +941,6 @@ class SEDTask4(pl.LightningModule):
             batch_indx: torch.Tensor, 1D tensor of indexes to know which data are present in each batch.
         Returns:
         """
-        def get_sebbs(self, scores_all_classes):
-            '''Use cSEBBs
-                SEBBのサンプルコードに忠実に直す
-                下のPSDS付近のコードに寄せないで実装
-            '''
-
-            # cSEBBsで後処理を行い、新しいスコアファイルを出力
-            # scores_all_classes = scores_unprocessed_{student | teacher}_strong
-
-            # 1. DESEDクラスのスコアに対してcSEBBsを適用         
-            desed_classes = list(classes_labels_desed.keys()) # ラベル一覧を獲得
-            keys_desed = ["onset", "offset"] + desed_classes # 辞書から取り出すためのkeyを設定 # 下ではsortedしているが,sebbではしてない. どちらが正しい?
-            # sebbの実装ではスコアを受け取っている なぜ?
-            scores_desed_classes = {clip_id: scores_all_classes[clip_id][keys_desed] for clip_id in scores_all_classes.keys()}
-            # csebbsでdesedデータセットのスコアを後処理
-            csebbs_desed_classes = self.csebbs_predictor.predict(scores_desed_classes)
-
-
-            # 2. Maestroも計算
-            maestro_classes = list(classes_labels_maestro_real.keys())
-            keys_maestro = ["onset", "offset"] + maestro_classes
-            scores_maestro_classes = {clip_id: scores_all_classes[clip_id][keys_maestro] for clip_id in scores_all_classes.keys()}
-            
-            # この処理が分かってない... 要理解
-            segment_scores_maestro_classes = {
-                clip_id: get_segment_scores(
-                    clip_scores,
-                    clip_length=list(clip_scores["offset"])[-1],
-                    segment_length=1.0,
-                )
-                for clip_id, clip_scores in scores_maestro_classes.items()
-            }    
-
-            # 要理解
-            sebbs_all = {
-                clip_id: sorted( # ここでsort?
-                    csebbs_desed_classes[clip_id]
-                    + [
-                        (float(onset), float(offset), class_name, float(seg_score))
-                        for onset, offset, scores_vec in zip(
-                            segment_scores_maestro_classes[clip_id]["onset"],
-                            segment_scores_maestro_classes[clip_id]["offset"],
-                            segment_scores_maestro_classes[clip_id][maestro_classes].to_numpy(),
-                        )
-                        for class_name, seg_score in zip(maestro_classes, scores_vec)
-                    ]
-                )
-                for clip_id in scores_all_classes
-            }
-
-            sed_scores = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes + maestro_classes, fill_value=0.0)
-            return 0
-
-            # cSEBBsの予測結果を直接sed_scores形式で取得
-            # sed_scores_desed = self.csebbs_predictor.predict(
-            #     scores_desed_classes,
-            #     return_sed_scores=True  # このオプションで直接DataFrameを取得
-            # )
-
-            # # イベントのリストを取得
-            # csebbs_desed_events = self.csebbs_predictor.predict(
-            #     scores_desed_classes,
-            #     return_sed_scores=False
-            # ) # 元はcsebbs_desed_classes
-
-            # # 3. dataframeを結合
-            # scores_postprocessed_strong = {}
-            # # all_clip_ids = set(sed_scores_desed.keys()) | set(segment_scores_maestro_classes.keys())
-
-            # for clip_id, df_maestro in segment_scores_maestro_classes.items():
-
-            #     combined_df = df_maestro.copy()
-
-            #     for class_name in desed_classes:
-            #         combined_df[class_name] = 0.0
-
-            #     sebbs_list = csebbs_desed_events.get(clip_id, [])
-
-            #     for onset, offset, class_name, confidence in sebbs_list:
-            #         overlapping_indices = combined_df[
-            #             (combined_df['onset'] < offset) & (combined_df['offset'] > onset)
-            #         ].index
-
-            #         combined_df.loc[overlapping_indices, class_name] = np.maximum(
-            #             combined_df.loc[overlapping_indices, class_name],
-            #             confidence
-            #         )
-
-                # # 各クリップIDごとにDataFrameを結合
-                # df_desed = sed_scores_desed.get(clip_id)
-                # df_maestro = segment_scores_maestro_classes.get(clip_id)
-
-                # # 両方のDataFrameが存在することを確認
-                # if df_desed is not None and df_maestro is not None:
-                #     # onsetとoffsetをインデックスに設定して結合
-                #     df_desed.set_index(["onset", "offset"], inplace=True)
-                #     df_maestro.set_index(["onset", "offset"], inplace=True)
-                    
-                #     # 2つのDataFrameを列方向に結合
-                #     combined_df = df_desed.join(df_maestro, how="outer").fillna(0.0).reset_index()
-                #     scores_postprocessed_strong[clip_id] = combined_df
-                # elif df_desed is not None:
-                #     scores_postprocessed_strong[clip_id] = df_desed
-                # elif df_maestro is not None:
-                #     scores_postprocessed_strong[clip_id] = df_maestro
-            #     scores_postprocessed_strong[clip_id] = combined_df
-            # return scores_postprocessed_strong
-            # # return sed_scores_desed
 
         audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = (
             self._unpack_batch(batch)
@@ -1094,6 +987,7 @@ class SEDTask4(pl.LightningModule):
 
         # cSEBBsで後処理を行い、新しいスコアファイルを書き出す
         scores_postprocessed_student_strong = get_sebbs(self, scores_unprocessed_student_strong)
+        # もしかして入力はstrong_preds_student?
 
 
         self.test_buffer_sed_scores_eval_unprocessed_student.update(
@@ -1722,3 +1616,112 @@ def _get_segment_scores(scores_df, clip_length, segment_length=1.0):
     return create_score_dataframe(
         np.array(segment_scores), np.array(segment_timestamps), event_classes
     )
+
+# def get_sebbs(self, scores_all_classes):
+#     '''Use cSEBBs
+#         SEBBのサンプルコードに忠実に直す
+#         下のPSDS付近のコードに寄せないで実装
+#     '''
+
+#     # cSEBBsで後処理を行い、新しいスコアファイルを出力
+#     # scores_all_classes = scores_unprocessed_{student | teacher}_strong
+
+#     # 1. DESEDクラスのスコアに対してcSEBBsを適用         
+#     desed_classes = list(classes_labels_desed.keys()) # ラベル一覧を獲得
+#     keys_desed = ["onset", "offset"] + sorted(desed_classes) # 辞書から取り出すためのkeyを設定 # 下ではsortedしているが,sebbではしてない. どちらが正しい?
+#     # sebbの実装ではスコアを受け取っている なぜ?
+#     scores_desed_classes = {clip_id: scores_all_classes[clip_id][keys_desed] for clip_id in scores_all_classes.keys()}
+#     # csebbsでdesedデータセットのスコアを後処理
+#     csebbs_desed_classes = self.csebbs_predictor.predict(scores_desed_classes)
+
+
+#     # 2. Maestroも計算
+#     maestro_classes = list(classes_labels_maestro_real.keys()) # classes_labels_maestro_real_eval?
+#     keys_maestro = ["onset", "offset"] + sorted(maestro_classes)
+#     scores_maestro_classes = {clip_id: scores_all_classes[clip_id][keys_maestro] for clip_id in scores_all_classes.keys()}
+    
+#     # この処理が分かってない... 要理解
+#     segment_scores_maestro_classes = {
+#         clip_id: get_segment_scores(
+#             clip_scores,
+#             # clip_length=list(clip_scores["offset"])[-1],
+#             clip_length = self.audio_durations[clip_id]
+#             segment_length=1.0,
+#         )
+#         for clip_id, clip_scores in scores_maestro_classes.items()
+#     }    
+
+#     # 要理解
+#     sebbs_all = {
+#         clip_id: sorted( # ここでsort?
+#             csebbs_desed_classes[clip_id]
+#             + [
+#                 (float(onset), float(offset), class_name, float(seg_score))
+#                 for onset, offset, scores_vec in zip(
+#                     segment_scores_maestro_classes[clip_id]["onset"],
+#                     segment_scores_maestro_classes[clip_id]["offset"],
+#                     segment_scores_maestro_classes[clip_id][maestro_classes].to_numpy(),
+#                 )
+#                 for class_name, seg_score in zip(maestro_classes, scores_vec)
+#             ],
+#             key=lambda x: x[0]
+#         )
+#         for clip_id in scores_all_classes
+#     }
+
+#     sed_scores = sed_scores_from_sebbs(sebbs_all, sound_classes=desed_classes + maestro_classes, fill_value=0.0)
+#     return sed_scores
+
+def get_sebbs(self, scores_all_classes):
+    """
+    SEBB (cSEBBs) を用いて batched_decode_preds() の
+    scores_postprocessed_student_strong と同等の出力形式を生成する。
+    """
+    # --- 1. DESEDクラスのみ抽出 ---
+    desed_classes = list(classes_labels_desed.keys())
+    keys_desed = ["onset", "offset"] + sorted(desed_classes)
+    scores_desed_classes = {
+        clip_id: scores_all_classes[clip_id][keys_desed]
+        for clip_id in scores_all_classes.keys()
+    }
+
+    # --- 2. SEBBによる後処理 ---
+    sed_scores_desed = self.csebbs_predictor.predict(
+        scores_desed_classes,
+        return_sed_scores=True  # ← DataFrame形式で返す
+    )
+
+    # --- 3. Maestroも同様に (segment単位でスコア化) ---
+    maestro_classes = list(classes_labels_maestro_real.keys())
+    keys_maestro = ["onset", "offset"] + maestro_classes
+    scores_maestro_classes = {
+        clip_id: scores_all_classes[clip_id][keys_maestro]
+        for clip_id in scores_all_classes.keys()
+    }
+
+    segment_scores_maestro_classes = {
+        clip_id: get_segment_scores(
+            clip_scores,
+            clip_length=self.audio_durations.get(
+                clip_id, list(clip_scores["offset"])[-1]
+            ),
+            segment_length=1.0,
+        )
+        for clip_id, clip_scores in scores_maestro_classes.items()
+    }
+
+    # --- 4. DataFrameを統合 ---
+    scores_postprocessed = {}
+    all_clip_ids = set(sed_scores_desed.keys()) | set(segment_scores_maestro_classes.keys())
+    for clip_id in all_clip_ids:
+        dfs = []
+        if clip_id in sed_scores_desed:
+            dfs.append(sed_scores_desed[clip_id])
+        if clip_id in segment_scores_maestro_classes:
+            dfs.append(segment_scores_maestro_classes[clip_id])
+        if dfs:
+            combined_df = pd.concat(dfs, axis=0, ignore_index=True).fillna(0.0)
+            combined_df = combined_df.sort_values(by="onset").reset_index(drop=True)
+            scores_postprocessed[clip_id] = combined_df
+
+    return scores_postprocessed
