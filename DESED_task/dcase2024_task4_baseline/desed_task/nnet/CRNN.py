@@ -220,8 +220,22 @@ class CRNN(nn.Module):
 
     def forward(self, x, pad_mask=None, embeddings=None, classes_mask=None):
 
+        # input x: batch, time, freq?
         x = self.apply_specaugment(x)
-        x = x.transpose(1, 2).unsqueeze(1)
+
+        # dctを入れる
+        # self.n_mfcc, self.MelSpectrogram.n_mels, self.norm
+        dct_mat = torchaudio.functional.create_dct(40, 128, "ortho")
+
+        # mel_specgram.transpose(-1, -2)
+        # (..., time, n_mels(freq)) dot (n_mels, n_mfcc) -> (..., n_nfcc, time)
+        mfcc = torch.matmul(x.transpose(-1, -2), self.dct_mat).transpose(-1, -2)
+        # Tensor: specgram_mel_db of size (..., ``n_mfcc``, time)
+
+        # x: (batch, freq, time) > (batch, channel, freq, time)?
+        # x = x.transpose(1, 2).unsqueeze(1)
+
+        x = mfcc.unsqueeze(1)
 
         # input size : (batch_size, n_channels, n_frames, n_freq)
         if self.cnn_integration:

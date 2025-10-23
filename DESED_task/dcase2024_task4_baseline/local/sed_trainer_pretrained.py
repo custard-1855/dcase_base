@@ -15,7 +15,7 @@ import torchmetrics
 from codecarbon import OfflineEmissionsTracker
 from sed_scores_eval.base_modules.scores import (create_score_dataframe,
                                                  validate_score_dataframe)
-from torchaudio.transforms import AmplitudeToDB, MelSpectrogram
+from torchaudio.transforms import AmplitudeToDB, MelSpectrogram, MFCC
 
 from desed_task.data_augm import mixup
 from desed_task.utils.postprocess import ClassWiseMedianFilter
@@ -180,6 +180,22 @@ class SEDTask4(pl.LightningModule):
             wkwargs={"periodic": False},
             power=1,
         )
+
+        # self.mfcc = MFCC(
+        #     sample_rate=feat_params["sample_rate"],
+        #     melkwargs= {
+        #     "n_fft": feat_params["n_window"],
+        #     "win_length": feat_params["n_window"],
+        #     "hop_length": feat_params["hop_length"],
+        #     "f_min": feat_params["f_min"],
+        #     "f_max": feat_params["f_max"],
+        #     "n_mels": feat_params["n_mels"],
+        #     "window_fn": torch.hamming_window,
+        #     "wkwargs": {"periodic": False},
+        #     "power": 1,
+        #     },
+        # )
+
 
         for param in self.sed_teacher.parameters():
             param.detach_()
