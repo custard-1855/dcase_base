@@ -5,7 +5,7 @@ pretrained:
   extracted_embeddings_dir: ./embeddings
 
 cmt:
-  enabled: false              # CMTを有効化
+  enabled: True          # CMTを有効化
   phi_clip: 0.5             # クリップレベル閾値 (論文では0.5)
   phi_frame: 0.7            # フレームレベル閾値 (論文では0.7)
   median_filter_size: 7     # メディアンフィルタのサイズ (デフォルト7)
@@ -58,8 +58,8 @@ training:
   
   # 訓練制御
   num_workers: 6
-  n_epochs: 300                     # エポック数（10→200）
-  early_stop_patience: 200           # 早期停止（200→50）
+  n_epochs: 10 #300           # エポック数（10→200）
+  early_stop_patience: 10 #200           # 早期停止（200→50）
   accumulate_batches: 1
   gradient_clip: 5.0
   

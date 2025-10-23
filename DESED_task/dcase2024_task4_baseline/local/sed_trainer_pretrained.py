@@ -29,9 +29,22 @@ from .classes_dict import (classes_labels_desed, classes_labels_maestro_real,
 from .utils import batched_decode_preds, log_sedeval_metrics
 
 
+from pathlib import Path
+
+from sebbs.sebbs import csebbs
+from sebbs.sebbs.utils import sed_scores_from_sebbs
+from sebbs.scripts.utils  import get_segment_scores
+
+
 # データ不足の対策
 import torch
 from torch.utils.data.dataloader import DataLoader, default_collate
+
+
+
+scores_path = "path/to/your/validation/scores" # モデルが出力したスコア
+ground_truth_path = "path/to/your/validation/ground_truth.tsv"
+durations_path = "path/to/your/validation/audio_durations.tsv"
 
 
 class _NoneSafeIterator:
@@ -130,6 +143,13 @@ class SEDTask4(pl.LightningModule):
         self.encoder = encoder
         self.sed_student = sed_student
         self.median_filter = ClassWiseMedianFilter(self.hparams["net"]["median_filter"])
+
+
+        # CMT parameters
+        self.cmt_enabled = self.hparams.get("cmt", {}).get("enabled", False)
+        self.cmt_phi_clip = self.hparams.get("cmt", {}).get("phi_clip", 0.5)
+        self.cmt_phi_frame = self.hparams.get("cmt", {}).get("phi_frame", 0.7)
+        self.cmt_filter_size = self.hparams.get("cmt", {}).get("median_filter_size", 7)
 
 
         if self.hparams["pretrained"]["e2e"]:
@@ -333,6 +353,124 @@ class SEDTask4(pl.LightningModule):
         # clamp to reproduce old code
         return amp_to_db(mels).clamp(min=-50, max=80)
 
+    #CMT
+    def apply_cmt_postprocessing(self, y_w, y_s, phi_clip=0.5, phi_frame=0.5):
+        """Apply Confident Mean Teacher postprocessing to teacher predictions.
+        (Input shape: batch, classes, frames)
+        """
+        # y_s: (batch, classes, frames), y_w: (batch, classes)
+
+        # Step 1: Apply clip-level threshold # クリップレベルで閾値で二値化
+        y_tilde_w = (y_w > phi_clip).float()
+        y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s) # クリップとフレームでサイズが合わないので拡張
+
+        # Step 2 & 3: Apply two-stage thresholding, frame-level
+        # フレームレベルで二値化 おそらく元論文はクリップの判定とフレームの判定をかけて算出しろ,と言っている
+        y_s_temp = y_s.clone()    
+        # クリップ予測の二値化とフレーム予測の二値化をかける
+        y_s_binary = y_w_expanded * ((y_s_temp > phi_frame).float()) # bool値をfloatにしているっぽい. 最初からそれでいいのでは?
+
+        # Step 4: Apply class-wise constraint and median filter
+        # Expand y_tilde_w to (batch, classes, 1) for broadcasting
+
+        y_tilde_s = []
+
+
+        for i in range(y_s.shape[0]):
+            constrained_s = y_s_binary[i]
+            constrained_s = constrained_s.transpose(0, 1).detach().cpu().numpy()
+            y_tilde_s.append(self.median_filter(constrained_s)) 
+
+        # constrained_s = # y_s_binary * y_tilde_w.unsqueeze(-1)
+        # c_scores.transpose(0, 1).detach().cpu().numpy()
+
+        # Apply the median filter which expects (batch, classes, frames)
+        # n_classes = y_w.shape[1]
+        # median_filter_list = [filter_size] * n_classes
+        # median_filter = ClassWiseMedianFilter(median_filter_list)
+
+        # 窓のサイズをconfsから読み取るように変更
+        original_device = y_s.device
+        # constrained_s = constrained_s.cpu().numpy()
+        # y_tilde_s = self.median_filter(constrained_s)
+        y_tilde_s = np.stack(y_tilde_s, axis=0)
+        y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
+
+        return y_tilde_w, y_tilde_s
+
+    def compute_cmt_confidence_weights(self, y_w, y_s, y_tilde_w, y_tilde_s):
+        """Compute confidence weights for CMT consistency loss.
+        (Input shape: batch, classes, frames)
+        """
+        # c_w(k) = ŷ_w(k) · I(ỹ_w(k)=1)
+        c_w = y_w * (y_tilde_w == 1).float()
+
+        # c_s(t,k) = ŷ_s(t,k) · ŷ_w(k) · I(ỹ_s(t,k)=1)
+        # Expand y_w to match dimensions of y_s: (batch, classes, frames)
+        y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
+        c_s = y_s * y_w_expanded * (y_tilde_s == 1).float()
+
+        return c_w, c_s
+
+
+
+    def compute_cmt_consistency_loss(self, student_w, student_s, teacher_pseudo_w, teacher_pseudo_s, 
+                                   confidence_w, confidence_s):
+        """Compute CMT consistency loss with confidence weighting.
+        
+        Args:
+            student_w: torch.Tensor, student weak predictions [batch_size, n_classes]
+            student_s: torch.Tensor, student strong predictions [batch_size, n_frames, n_classes]
+            teacher_pseudo_w: torch.Tensor, teacher pseudo weak labels [batch_size, n_classes]
+            teacher_pseudo_s: torch.Tensor, teacher pseudo strong labels [batch_size, n_frames, n_classes]
+            confidence_w: torch.Tensor, confidence weights for weak [batch_size, n_classes]
+            confidence_s: torch.Tensor, confidence weights for strong [batch_size, n_frames, n_classes]
+            
+        Returns:
+            loss_w_con: torch.Tensor, weighted weak consistency loss
+            loss_s_con: torch.Tensor, weighted strong consistency loss
+        """
+
+        """ 参考実装
+        if torch.any(mask_unlabeled):
+            strong_self_sup_loss = self.selfsup_loss(
+                strong_preds_student[mask_unlabeled],
+                strong_preds_teacher.detach()[mask_unlabeled],
+            )
+            weak_self_sup_loss = self.selfsup_loss(
+                weak_preds_student[mask_unlabeled],
+                weak_preds_teacher.detach()[mask_unlabeled],
+            )
+        else:
+            strong_self_sup_loss = torch.tensor(0.0, device=features.device)
+            strong_self_sup_loss.requires_grad_()
+            weak_self_sup_loss = torch.tensor(0.0, device=features.device)
+            weak_self_sup_loss.requires_grad_()
+        tot_self_loss = (strong_self_sup_loss + weak_self_sup_loss) * weight
+
+        tot_loss = tot_loss_supervised + tot_self_loss
+        """
+
+        # Weak consistency loss: ℓ_w,con = (1/|K|) ∑_{k=1}^K c_w(k) · BCE(ỹ_w(k), f_{θ_s}(x)_w(k))
+        bce_w = torch.nn.BCELoss(
+            student_w, # 生徒モデルのクリップ予測
+            teacher_pseudo_w, # 教師モデルのクリップ予測
+            #reduction='none'
+        )
+        weighted_bce_w = confidence_w * bce_w # 信頼度重みをbce損失にかける
+        loss_w_con = weighted_bce_w.mean() # 平均を取る
+        
+        # Strong consistency loss: ℓ_s,con = (1/|Ω|) ∑_{t,k} c_s(t,k) · BCE(ỹ_s(t,k), f_{θ_s}(x)_s(t,k))
+        bce_s = torch.nn.BCELoss(
+            student_s, # 生徒モデルのフレーム予測
+            teacher_pseudo_s,  # 教師モデルのフレーム予測
+            #reduction='none'
+        )
+        weighted_bce_s = confidence_s * bce_s # 信頼度重みをbce損失にかける
+        loss_s_con = weighted_bce_s.mean() # 平均を取る
+        
+        return loss_w_con, loss_s_con
+
     def detect(self, mel_feats, model, embeddings=None, **kwargs):
         if embeddings is None:
             return model(self.scaler(self.take_log(mel_feats)), **kwargs)
@@ -441,7 +579,6 @@ class SEDTask4(pl.LightningModule):
 
         # print(f"[DEBUG] Student | strong: {strong_preds_student}, weak: {weak_preds_student}")
 
-
         # supervised loss on strong labels
         loss_strong = self.supervised_loss(
             strong_preds_student[strong_mask],
@@ -467,21 +604,52 @@ class SEDTask4(pl.LightningModule):
         # print(f"[DEBUG] Student | strong: {strong_preds_teacher}, weak: {weak_preds_teacher}")
 
 
-
         weight = (
             self.hparams["training"]["const_max"]
             * self.scheduler["scheduler"]._get_scaling_factor()
         ) if self.current_epoch < self.hparams["training"]["epoch_decay"] else self.hparams["training"]["const_max"]
         # should we apply the valid mask for classes also here ?
 
-        strong_self_sup_loss = self.selfsup_loss(
-            strong_preds_student[mask_unlabeled],
-            strong_preds_teacher.detach()[mask_unlabeled],
-        )
-        weak_self_sup_loss = self.selfsup_loss(
-            weak_preds_student[mask_unlabeled],
-            weak_preds_teacher.detach()[mask_unlabeled],
-        )
+        # CMT
+        if self.cmt_enabled:
+            # Apply CMT processing
+            with torch.no_grad():
+                # Apply CMT postprocessing to teacher predictions
+                teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
+                    weak_preds_teacher[mask_unlabeled], 
+                    strong_preds_teacher[mask_unlabeled],
+                    phi_clip=self.cmt_phi_clip,
+                    phi_frame=self.cmt_phi_frame,
+                )
+                
+                # Compute confidence weights
+                confidence_w, confidence_s = self.compute_cmt_confidence_weights(
+                    weak_preds_teacher[mask_unlabeled],
+                    strong_preds_teacher[mask_unlabeled],
+                    teacher_pseudo_w,
+                    teacher_pseudo_s
+                )
+            
+            # Compute CMT consistency loss with confidence weighting
+            weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
+                weak_preds_student[mask_unlabeled],
+                strong_preds_student[mask_unlabeled],
+                teacher_pseudo_w,
+                teacher_pseudo_s,
+                confidence_w,
+                confidence_s
+            )
+        else:
+            # Original Mean Teacher consistency loss
+            strong_self_sup_loss = self.selfsup_loss(
+                strong_preds_student[mask_unlabeled],
+                strong_preds_teacher.detach()[mask_unlabeled],
+            )
+            weak_self_sup_loss = self.selfsup_loss(
+                weak_preds_student[mask_unlabeled],
+                weak_preds_teacher.detach()[mask_unlabeled],
+            )
+
         tot_self_loss = (strong_self_sup_loss + weak_self_sup_loss) * weight
 
         tot_loss = tot_loss_supervised + tot_self_loss
@@ -495,6 +663,15 @@ class SEDTask4(pl.LightningModule):
         self.log("train/student/weak_self_sup_loss", weak_self_sup_loss)
         self.log("train/student/strong_self_sup_loss", strong_self_sup_loss)
         self.log("train/lr", self.opt.param_groups[-1]["lr"], prog_bar=True)
+
+
+
+        # CMT specific logging
+        if self.cmt_enabled:
+            self.log("train/cmt/enabled", True)
+            self.log("train/cmt/phi_clip", self.cmt_phi_clip)
+            self.log("train/cmt/phi_frame", self.cmt_phi_frame)
+
 
         return tot_loss
 
@@ -687,6 +864,18 @@ class SEDTask4(pl.LightningModule):
             clip_id: self.val_buffer_sed_scores_eval_student[clip_id][keys]
             for clip_id in desed_ground_truth.keys()
         }
+
+
+        # SEBBをtune
+        if not hasattr(self, "csebbs_predictor"):
+            print("\nTune csebbs for DESED classes ...")
+            self.csebbs_predictor, _ = csebbs.tune(
+                scores=desed_scores,
+                ground_truth=desed_ground_truth,
+                audio_durations=desed_audio_durations,
+                selection_fn=csebbs.select_best_psds
+            )
+
         psds1_sed_scores_eval_student = compute_psds_from_scores(
             desed_scores,
             desed_ground_truth,
@@ -949,7 +1138,7 @@ class SEDTask4(pl.LightningModule):
         # compute psds
         (
             scores_unprocessed_student_strong,
-            scores_postprocessed_student_strong,
+            _,# scores_postprocessed_student_strong,
             decoded_student_strong,
         ) = batched_decode_preds(
             strong_preds_student,
@@ -958,6 +1147,11 @@ class SEDTask4(pl.LightningModule):
             median_filter=self.median_filter,
             thresholds=list(self.test_buffer_psds_eval_student.keys()) + [0.5],
         )
+
+        # cSEBBsで後処理を行い、新しいスコアファイルを書き出す
+        scores_postprocessed_student_strong = get_sebbs(self, scores_unprocessed_student_strong)
+        # もしかして入力はstrong_preds_student?
+
 
         self.test_buffer_sed_scores_eval_unprocessed_student.update(
             scores_unprocessed_student_strong
@@ -982,6 +1176,9 @@ class SEDTask4(pl.LightningModule):
             median_filter=self.median_filter,
             thresholds=list(self.test_buffer_psds_eval_teacher.keys()) + [0.5],
         )
+
+        # SEBB
+        scores_postprocessed_teacher_strong = get_sebbs(self, scores_unprocessed_teacher_strong)
 
         self.test_buffer_sed_scores_eval_unprocessed_teacher.update(
             scores_unprocessed_teacher_strong
@@ -1431,6 +1628,9 @@ class SEDTask4(pl.LightningModule):
         )
 
     def on_test_start(self) -> None:
+        print("Loading MAESTRO audio durations and ground truth for test...")
+        self.load_maestro_audio_durations_and_gt()
+
         if self.evaluation:
             os.makedirs(os.path.join(self.exp_dir, "codecarbon"), exist_ok=True)
             self.tracker_eval = OfflineEmissionsTracker(
@@ -1454,6 +1654,57 @@ class SEDTask4(pl.LightningModule):
             )
 
             self.tracker_devtest.start()
+
+
+    def load_maestro_audio_durations_and_gt(self):
+        """
+        1回だけ呼んで maestro_audio_durations(dict) と maestro_ground_truth(dict) を返す。
+        """
+        # --- 1. durations の読み込み ---
+        durations_path = self.hparams["data"]["real_maestro_val_dur"]
+        gt_tsv_path = self.hparams["data"]["real_maestro_val_tsv"]
+
+        maestro_audio_durations = sed_scores_eval.io.read_audio_durations(durations_path)
+
+        # --- 2. ground truth tsv の読み込みとフィルタ ---
+        maestro_ground_truth_clips = pd.read_csv(gt_tsv_path, sep="\t")
+        # 元ファイルの filename カラムが "xxxx.wav" のようになっている前提
+        # ここで clip_id の仕様に合わせて切る（例: remove .wav）
+        maestro_ground_truth_clips["file_id"] = maestro_ground_truth_clips["filename"].apply(lambda x: x[:-4] if isinstance(x, str) and x.lower().endswith(".wav") else x)
+
+        # confidence とラベルフィルタ
+        maestro_ground_truth_clips = maestro_ground_truth_clips[maestro_ground_truth_clips.confidence > 0.5]
+        maestro_ground_truth_clips = maestro_ground_truth_clips[
+            maestro_ground_truth_clips.event_label.isin(classes_labels_maestro_real_eval)
+        ]
+
+        # --- 3. read_ground_truth_events に通す（返り値が dict になる前提） ---
+        maestro_ground_truth_clips = sed_scores_eval.io.read_ground_truth_events(maestro_ground_truth_clips)
+
+        # --- 4. マッピングを clip_id の集合に揃える ---
+        maestro_ground_truth = _merge_maestro_ground_truth(maestro_ground_truth_clips)  # 既存関数使用
+        # maestro_audio_durations のキーが file_id と一致するか確かめる
+        # ここで、該当する file_id のみ抽出
+        maestro_audio_durations_filtered = {
+            file_id: maestro_audio_durations[file_id]
+            for file_id in maestro_ground_truth.keys()
+            if file_id in maestro_audio_durations
+        }
+
+        missing = set(maestro_ground_truth.keys()) - set(maestro_audio_durations_filtered.keys())
+        if missing:
+            warnings.warn(f"maestro_audio_durations missing for {len(missing)} files. Examples: {list(missing)[:5]}. Using fallback for those clips.")
+            # 欠損は許容するが、fallback 用に空のエントリは作らない（fallbackはget()で対応）
+
+        # ログ（あると便利）
+        # self.logger.info(f"Loaded {len(maestro_audio_durations_filtered)} maestro durations for {len(maestro_ground_truth)} ground truth clips.")
+
+        # キャッシュしておく（後で呼び出し直すときのため）
+        self._maestro_audio_durations = maestro_audio_durations_filtered
+        self._maestro_ground_truth = maestro_ground_truth
+
+        return maestro_audio_durations_filtered, maestro_ground_truth
+
 
 
 def _merge_maestro_ground_truth(clip_ground_truth):
@@ -1582,3 +1833,102 @@ def _get_segment_scores(scores_df, clip_length, segment_length=1.0):
     return create_score_dataframe(
         np.array(segment_scores), np.array(segment_timestamps), event_classes
     )
+
+def get_sebbs(self, scores_all_classes):
+    '''Use cSEBBs
+        SEBBのサンプルコードに忠実に直す
+        下のPSDS付近のコードに寄せないで実装
+    '''
+
+    # cSEBBsで後処理を行い、新しいスコアファイルを出力
+    # scores_all_classes = scores_unprocessed_{student | teacher}_strong
+
+    # 1. DESEDクラスのスコアに対してcSEBBsを適用         
+    desed_classes = list(classes_labels_desed.keys()) # ラベル一覧を獲得
+    keys_desed = ["onset", "offset"] + sorted(desed_classes) # 辞書から取り出すためのkeyを設定 # 下ではsortedしているが,sebbではしてない. どちらが正しい?
+    # sebbの実装ではスコアを受け取っている なぜ?
+    scores_desed_classes = {
+        clip_id: scores_all_classes[clip_id][keys_desed] 
+        for clip_id in scores_all_classes.keys()
+    }
+    # csebbsでdesedデータセットのスコアを後処理
+    csebbs_desed_events = self.csebbs_predictor.predict(
+        scores_desed_classes
+    )
+
+
+    # 2. Maestroも計算
+    maestro_classes = list(classes_labels_maestro_real.keys()) # classes_labels_maestro_real_eval?
+    keys_maestro = ["onset", "offset"] + sorted(maestro_classes)
+    scores_maestro_classes = {
+        clip_id: scores_all_classes[clip_id][keys_maestro] 
+        for clip_id in scores_all_classes.keys()
+    }
+    
+
+    maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
+
+    # この処理が分かってない... 要理解
+    segment_scores_maestro_classes = {}
+    for clip_id, clip_scores in scores_maestro_classes.items():
+            clip_length = maestro_audio_durations.get(clip_id)
+            if clip_length is None:
+                try:
+                    clip_length = float(list(clip_scores["offset"])[-1])
+                except Exception:
+                    # loggerが使えないためprintで代替
+                    print(f"[Warning] Cannot determine clip_length for {clip_id}; skipping.")
+                    continue
+
+            segment_scores_maestro_classes[clip_id] = get_segment_scores(
+                clip_scores,
+                clip_length=clip_length,
+                segment_length=1.0,
+            )
+
+    # 全クラスのリスト
+    all_sound_classes = sorted(list(set(desed_classes + maestro_classes)))
+    
+    sebbs_all_events = {}
+    all_clip_ids = set(csebbs_desed_events.keys()) | set(segment_scores_maestro_classes.keys())
+
+    for clip_id in all_clip_ids:
+        
+        # (A) DESEDのイベントリストを取得
+        desed_events = csebbs_desed_events.get(clip_id, [])
+        
+        # (B) MAESTROのイベントリストを生成
+        maestro_events = []
+        if clip_id in segment_scores_maestro_classes:
+            df_maestro = segment_scores_maestro_classes[clip_id]
+            
+            # DataFrameから (onset, offset, class_name, score) のタプルリストを作成
+            maestro_classes_local = [c for c in maestro_classes if c in df_maestro.columns]
+            
+            for onset, offset, scores_vec in zip(
+                df_maestro["onset"],
+                df_maestro["offset"],
+                df_maestro[maestro_classes_local].to_numpy(),
+            ):
+                for class_name, seg_score in zip(maestro_classes_local, scores_vec):
+                    # 0点以上のイベントのみ追加 (0点は不要)
+                    if seg_score > 0.0:
+                        maestro_events.append(
+                            (float(onset), float(offset), class_name, float(seg_score))
+                        )
+
+        # (C) DESEDとMAESTROのイベントリストを結合してソート
+        sebbs_all_events[clip_id] = sorted(
+            desed_events + maestro_events,
+            key=lambda x: x[0] # onsetでソート
+        )
+
+    # --- 5. ★ 追加: 統合したイベントリストから、連続したスコアDataFrameを生成 ---
+    sed_scores_postprocessed = sed_scores_from_sebbs(
+        sebbs_all_events,
+        sound_classes=all_sound_classes,
+        fill_value=0.0 # 存在しない場所は0.0で埋める
+    )
+
+    return sed_scores_postprocessed
+
