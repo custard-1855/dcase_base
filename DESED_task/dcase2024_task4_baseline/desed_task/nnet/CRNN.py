@@ -230,7 +230,7 @@ class CRNN(nn.Module):
         #--- normal ---
         # print("[DEBUG]: x:", x.size()) # ([57, 128, 626])
 
-        # x = x.transpose(1, 2).unsqueeze(1)
+        x = x.transpose(1, 2).unsqueeze(1)
         # print("[DEBUG]: x:", x.size()) # ([57, 1, 626, 128])
 
         # print("[DEBUG]: SpecAugument:", x.size()) # ([57, 128, 626])
@@ -251,12 +251,12 @@ class CRNN(nn.Module):
             # 時間軸でのlog mel + MFCCは効果が薄い?
             # log melのdelta, delta deltaをチャネル次元で重ねる
             # 1がチャネル次元のはず
-        delta = torchaudio.functional.compute_deltas(x)
-        delta2 = torchaudio.functional. compute_deltas(delta)
-        combined_tensor = torch.stack([x, delta, delta2], dim=1)
-        x = combined_tensor # 重ねた特徴量を入力にする
+        # delta = torchaudio.functional.compute_deltas(x)
+        # delta2 = torchaudio.functional. compute_deltas(delta)
+        # combined_tensor = torch.stack([x, delta, delta2], dim=1)
+        # x = combined_tensor # 重ねた特徴量を入力にする
         
-        x = x.transpose(2,3) # timeとfreqを入れ替え
+        # x = x.transpose(2,3) # timeとfreqを入れ替え
 
         # print("[DEBUG]: x:", x.size()) # ([55, 3, 128, 626])
 
