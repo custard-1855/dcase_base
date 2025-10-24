@@ -37,7 +37,6 @@ from sebbs.scripts.utils  import get_segment_scores
 
 
 # データ不足の対策
-import torch
 from torch.utils.data.dataloader import DataLoader, default_collate
 
 
@@ -411,6 +410,7 @@ class SEDTask4(pl.LightningModule):
         # y_tilde_s = self.median_filter(constrained_s)
         y_tilde_s = np.stack(y_tilde_s, axis=0)
         y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
+        y_tilde_s = y_tilde_s.transpose(1, 2) # class,framesを入れ替え
 
         return y_tilde_w, y_tilde_s
 
@@ -420,10 +420,15 @@ class SEDTask4(pl.LightningModule):
         """
         # c_w(k) = ŷ_w(k) · I(ỹ_w(k)=1)
         c_w = y_w * (y_tilde_w == 1).float()
+        print("[DEBUG]: ", y_w.size())
+        print("[DEBUG]: ", y_s.size())
+
 
         # c_s(t,k) = ŷ_s(t,k) · ŷ_w(k) · I(ỹ_s(t,k)=1)
         # Expand y_w to match dimensions of y_s: (batch, classes, frames)
         y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
+        print("[DEBUG]: ", y_w_expanded.size())
+        print("[DEBUG]: ", y_tilde_s.size())
         c_s = y_s * y_w_expanded * (y_tilde_s == 1).float()
 
         return c_w, c_s
@@ -468,19 +473,19 @@ class SEDTask4(pl.LightningModule):
         """
 
         # Weak consistency loss: ℓ_w,con = (1/|K|) ∑_{k=1}^K c_w(k) · BCE(ỹ_w(k), f_{θ_s}(x)_w(k))
-        bce_w = torch.nn.BCELoss(
+        bce_w = torch.nn.functional.binary_cross_entropy(
             student_w, # 生徒モデルのクリップ予測
             teacher_pseudo_w, # 教師モデルのクリップ予測
-            #reduction='none'
+            reduction='none'
         )
         weighted_bce_w = confidence_w * bce_w # 信頼度重みをbce損失にかける
         loss_w_con = weighted_bce_w.mean() # 平均を取る
         
         # Strong consistency loss: ℓ_s,con = (1/|Ω|) ∑_{t,k} c_s(t,k) · BCE(ỹ_s(t,k), f_{θ_s}(x)_s(t,k))
-        bce_s = torch.nn.BCELoss(
+        bce_s = torch.nn.functional.binary_cross_entropy(
             student_s, # 生徒モデルのフレーム予測
             teacher_pseudo_s,  # 教師モデルのフレーム予測
-            #reduction='none'
+            reduction='none'
         )
         weighted_bce_s = confidence_s * bce_s # 信頼度重みをbce損失にかける
         loss_s_con = weighted_bce_s.mean() # 平均を取る
