@@ -418,15 +418,15 @@ class SEDTask4(pl.LightningModule):
         """
         # c_w(k) = ŷ_w(k) · I(ỹ_w(k)=1)
         c_w = y_w * (y_tilde_w == 1).float()
-        print("[DEBUG]: ", y_w.size())
-        print("[DEBUG]: ", y_s.size())
+        # print("[DEBUG]: ", y_w.size())
+        # print("[DEBUG]: ", y_s.size())
 
 
         # c_s(t,k) = ŷ_s(t,k) · ŷ_w(k) · I(ỹ_s(t,k)=1)
         # Expand y_w to match dimensions of y_s: (batch, classes, frames)
         y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
-        print("[DEBUG]: ", y_w_expanded.size())
-        print("[DEBUG]: ", y_tilde_s.size())
+        # print("[DEBUG]: ", y_w_expanded.size())
+        # print("[DEBUG]: ", y_tilde_s.size())
         c_s = y_s * y_w_expanded * (y_tilde_s == 1).float()
 
         return c_w, c_s
