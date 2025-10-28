@@ -1721,7 +1721,6 @@ class SEDTask4(pl.LightningModule):
                 self.validation_step(moved_batch, batch_idx)
 
         print(f"Validation pass complete. Collected {len(self.val_buffer_sed_scores_eval_student)} scores for tuning.")
-        # ★注意: ここで validation_epoch_end() は呼び出さない（バッファがクリアされてしまうため）
 
         if self.evaluation:
             os.makedirs(os.path.join(self.exp_dir, "codecarbon"), exist_ok=True)
