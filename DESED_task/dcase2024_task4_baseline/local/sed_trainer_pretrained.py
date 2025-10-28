@@ -148,8 +148,6 @@ class SEDTask4(pl.LightningModule):
         self.cmt_enabled = self.hparams.get("cmt", {}).get("enabled", False)
         self.cmt_phi_clip = self.hparams.get("cmt", {}).get("phi_clip", 0.5)
         self.cmt_phi_frame = self.hparams.get("cmt", {}).get("phi_frame", 0.7)
-        self.cmt_filter_size = self.hparams.get("cmt", {}).get("median_filter_size", 7)
-
 
         if self.hparams["pretrained"]["e2e"]:
             self.pretrained_model = pretrained_model
