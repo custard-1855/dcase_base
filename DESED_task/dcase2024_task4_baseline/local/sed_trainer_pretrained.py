@@ -703,16 +703,6 @@ class SEDTask4(pl.LightningModule):
         }
 
 
-        # SEBBをtune
-        if not hasattr(self, "csebbs_predictor"):
-            print("\nTune csebbs for DESED classes ...")
-            self.csebbs_predictor, _ = csebbs.tune(
-                scores=desed_scores,
-                ground_truth=desed_ground_truth,
-                audio_durations=desed_audio_durations,
-                selection_fn=csebbs.select_best_psds
-            )
-
         psds1_sed_scores_eval_student = compute_psds_from_scores(
             desed_scores,
             desed_ground_truth,
@@ -971,6 +961,53 @@ class SEDTask4(pl.LightningModule):
 
             self.log("test/student/loss_strong", loss_strong_student)
             self.log("test/teacher/loss_strong", loss_strong_teacher)
+
+        # SEBBsを正しくtuneする. 最終的なモデルのvalidationスコアをもらい,それでtune
+        # desed synth dataset
+        desed_ground_truth = sed_scores_eval.io.read_ground_truth_events(
+            self.hparams["data"]["synth_val_tsv"]
+        )
+
+        desed_audio_durations = sed_scores_eval.io.read_audio_durations(
+            self.hparams["data"]["synth_val_dur"]
+        )
+
+
+        # --- ここから修正 ---
+        # 両方のメタデータに共通して存在するaudio_idのみに絞り込む
+        common_audio_ids = desed_ground_truth.keys() & desed_audio_durations.keys()
+        desed_ground_truth = {
+            audio_id: desed_ground_truth[audio_id] for audio_id in common_audio_ids
+        }
+        desed_audio_durations = {
+            audio_id: desed_audio_durations[audio_id] for audio_id in common_audio_ids
+        }
+        # --- ここまで修正 ---
+
+        # drop audios without events
+        desed_ground_truth = {
+            audio_id: gt for audio_id, gt in desed_ground_truth.items() if len(gt) > 0
+        }
+        desed_audio_durations = {
+            audio_id: desed_audio_durations[audio_id]
+            for audio_id in desed_ground_truth.keys()
+        }
+        keys = ["onset", "offset"] + sorted(classes_labels_desed.keys())
+        desed_scores = {
+            clip_id: self.val_buffer_sed_scores_eval_student[clip_id][keys]
+            for clip_id in desed_ground_truth.keys()
+        }
+
+        # SEBBをtune
+        if not hasattr(self, "csebbs_predictor"):
+            print("\nTune csebbs for DESED classes ...")
+            self.csebbs_predictor, _ = csebbs.tune(
+                scores=desed_scores,
+                ground_truth=desed_ground_truth,
+                audio_durations=desed_audio_durations,
+                selection_fn=csebbs.select_best_psds
+            )
+
 
         # compute psds
         (
