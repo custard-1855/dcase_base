@@ -1505,6 +1505,43 @@ class SEDTask4(pl.LightningModule):
         print("Loading MAESTRO audio durations and ground truth for test...")
         self.load_maestro_audio_durations_and_gt()
 
+        # SEBBsチューニング用の検証スコアを取得するため、手動で検証パスを実行する
+        # trainer.test() は best_ckpt をロード済みなので、これは最良モデルでの検証になる
+        print("\nRunning validation pass to get scores for SEBBs tuning...")
+
+        # 1. バッファを初期化
+        self.val_buffer_sed_scores_eval_student = {}
+        self.val_buffer_sed_scores_eval_teacher = {}
+        
+        # 2. 検証データローダーを取得
+        val_loader = self.val_dataloader()
+        
+        # 3. モデルを評価モードに設定
+        self.sed_student.eval()
+        self.sed_teacher.eval()
+        
+        # 4. 手動でループを実行し、validation_step を呼び出す
+        with torch.no_grad():
+            for batch_idx, batch in enumerate(val_loader):
+                # validation_step が期待する形式 (タプル) でバッチをアンパック
+                audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = batch
+                
+                # 必要なテンソルを現在のデバイスに移動
+                audio = audio.to(self.device)
+                labels = labels.to(self.device)
+                padded_indxs = padded_indxs.to(self.device)
+                embeddings = embeddings.to(self.device)
+                valid_class_mask = valid_class_mask.to(self.device)
+                
+                # デバイス移動後のバッチを再構築
+                moved_batch = (audio, labels, padded_indxs, filenames, embeddings, valid_class_mask)
+                
+                # validation_step を実行してバッファにスコアを蓄積
+                self.validation_step(moved_batch, batch_idx)
+
+        print(f"Validation pass complete. Collected {len(self.val_buffer_sed_scores_eval_student)} scores for tuning.")
+        # ★注意: ここで validation_epoch_end() は呼び出さない（バッファがクリアされてしまうため）
+
         if self.evaluation:
             os.makedirs(os.path.join(self.exp_dir, "codecarbon"), exist_ok=True)
             self.tracker_eval = OfflineEmissionsTracker(
