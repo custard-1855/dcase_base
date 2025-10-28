@@ -8,7 +8,6 @@ cmt:
   enabled: True          # CMTを有効化
   phi_clip: 0.5             # クリップレベル閾値 (論文では0.5)
   phi_frame: 0.7            # フレームレベル閾値 (論文では0.7)
-  median_filter_size: 7     # メディアンフィルタのサイズ (デフォルト7)
 
 training:
   # バッチサイズ（論文推奨）
