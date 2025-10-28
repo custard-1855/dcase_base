@@ -10,63 +10,31 @@ cmt:
   phi_frame: 0.7            # フレームレベル閾値 (論文では0.7)
   median_filter_size: 7     # メディアンフィルタのサイズ (デフォルト7)
 
-
 training:
-  # # ===== 論文ベースのConfident Mean Teacher設定 =====
-  
-  # # 基本的なConfident Teacher設定
-  # use_confident_teacher: true
-  # confidence_threshold: 0.8        # 初期閾値（高めに設定）
-  # dynamic_confidence: true         # 動的調整有効
-  # min_confidence_threshold: 0.6    # 最終閾値（適度に下げる）
-  # confidence_loss_weight: 0.7      # バランス調整（0.8→0.7）
-  # apply_confidence_to_weak: true   # 弱予測にも適用
-  
-  # # 論文ベースの信頼度重み付き一貫性損失
-  # use_paper_consistency_loss: true    # 🔥 NEW: 論文の一貫性損失
-  # consistency_loss_weight: 1.0       # フレーム一貫性損失重み
-  # weak_consistency_weight: 0.5       # クリップ一貫性損失重み
-  # include_weak_consistency: true     # クリップレベル損失含む
-  
-  # # 論文ベースの閾値処理
-  # use_paper_thresholding: true       # 🔥 NEW: 論文の閾値処理
-  # phi_clip: 0.5                      # クリップレベル閾値 φclip
-  # phi_frame: 0.5                     # フレームレベル閾値 φframe
-  
-  # # PSDS1/PSDS2バランス戦略
-  # balance_psds: true                 # バランス調整有効
-  # fp_suppression_strength: 0.1       # FP抑制強度
-  # fp_suppression_weight: 0.15        # FP抑制重み（0.1→0.15）
-  # # negative_confidence_boost: 1.2   # 🚧 未実装（将来的に追加予定）
-  
-  # 学習率とスケジューリング（既存のPyTorch Lightning設定を使用）
-  # lr_scheduler: cosine            # 🚧 未実装（デフォルトスケジューラを使用）
-  # warmup_epochs: 20               # 🚧 未実装（n_epochs_warmupを使用）
-  
   # バッチサイズ（論文推奨）
   batch_size: [12, 6, 6, 12, 24]    # [maestro, synth, strong, weak, unlabel]
   batch_size_val: 24
   
   # Mean Teacher設定
-  ema_factor: 0.999                 # EMA係数（標準）
-  self_sup_loss: bce                # 🔥 CHANGED: BCE損失（論文準拠）
+  ema_factor: 0.999
+  self_sup_loss: bce
   
   # 損失重み調整
-  const_max: 2.5                    # 自己教師学習最大重み（2→2.5）
-  n_epochs_warmup: 30               # ウォームアップ期間（50→30）
+  const_max: 2                 # 自己教師学習最大重み
+  n_epochs_warmup: 50               # ウォームアップ期間
   epoch_decay: 100
   
   # 訓練制御
   num_workers: 6
-  n_epochs: 300           # エポック数（10→200）
-  early_stop_patience: 200           # 早期停止（200→50）
+  n_epochs: 300
+  early_stop_patience: 200
   accumulate_batches: 1
   gradient_clip: 5.0
   
   # 検証設定
   val_thresholds: [0.5]
   n_test_thresholds: 50
-  validation_interval: 10           # 検証間隔短縮（10→5）
+  validation_interval: 10
   
   # データ分割
   weak_split: 0.9
