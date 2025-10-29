@@ -34,16 +34,12 @@ def mix_style(content_feature): # ok
     perm = torch.randperm(B, device=content_feature.device) # ランダムにシャッフル 本当はチャンクごとに区切るのが良い??? 現実的に適用する場合はランダムになりそうだが...
 
     mu2, sig2 = content_mean[perm], content_std[perm]
-    # style_mean, style_std = content_mean[perm].mean(dim=1, keepdim=True), content_mean[perm].std(dim=1, keepdim=True)
 
     # ランダムな比率で統計量を混ぜる
-    # lam = random.uniform(0, 1)
     alpha = 0.1
     lam = Beta(alpha, alpha).sample((B, 1, 1, 1))
     lam = lam.to(device=content_feature.device)
 
-    # mixed_mean = lam * style_mean + (1 - lam) * content_mean
-    # mixed_std = lam * style_std + (1 - lam) * content_std
     mixed_mean = lam * content_mean + (1 - lam) * mu2
     mixed_std = lam * content_std + (1 - lam) *  sig2
 
@@ -81,12 +77,8 @@ class FrequencyAttentionMixStyle(nn.Module):
         """
         # --- 1. 時間次元の情報を集約 ---
         # 時間方向の平均をとって、各周波数の静的な特徴を取得
-        # (B, C, F, T) -> (B, C, F)
-
-        # inputはTime(Frame)とFrequencyが逆かも
         # input size : (batch_size, n_channels, n_frames, n_freq)
 
-        # x_content_avg = x_content.mean(dim=3)
         x_content_avg = x_content.mean(dim=2) # Time(Frames)方向で平均を取得
         # print("[DEBUG]", x_content.size()) # [DEBUG] torch.Size([59, 1, 626, 128])
         # print("[DEBUG]", x_content_avg.size()) # [DEBUG] torch.Size([59, 1, 128])
@@ -103,15 +95,20 @@ class FrequencyAttentionMixStyle(nn.Module):
         attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
         # print("[DEBUG]", attn_weights.size()) #[DEBUG] torch.Size([59, 1, 128, 1]) < 本来Time(Frame)が入る部分がFrequencyになっている
 
+        # attentonを適用 スケーリング
+        x_attended = attn_weights * x_content
+
+
         # --- 3. MixStyleを適用 ---
         # スタイルを混ぜた特徴量を生成
-        x_mixed = mix_style(x_content)
+        output = mix_style(x_attended)
         # print("[DEBUG]", x_mixed.size()) # [DEBUG] torch.Size([59, 1, 626, 128])
 
 
         # --- 4. 計算した重みで元の特徴量と混ぜ合わせる ---
         # 重みが大きい周波数帯ほど、スタイルが混ざった特徴量(x_mixed)の比率が高くなる
         # x_out = (重み * スタイル適用後) + ((1 - 重み) * 元の特徴量)
-        output = attn_weights * x_mixed + (1 - attn_weights) * x_content
+        # output = attn_weights * x_mixed + (1 - attn_weights) * x_content
+        # output = x_mixed
 
         return output
