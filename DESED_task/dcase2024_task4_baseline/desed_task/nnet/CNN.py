@@ -149,22 +149,26 @@ class CNN(nn.Module):
         # conv features
         # x = self.cnn(x)
 
-        # 1. 1層目の前に適用
-        x = self.attn_mixstyle_pre(x)
-        
-        # 2. 1層目の畳み込みブロックを適用
-        x = self.conv_blocks[0](x)
-        
-        # 3. 1層目の後に適用
-        x = self.attn_mixstyle_post1(x)
-        
-        # 4. 2層目の畳み込みブロックを適用
-        x = self.conv_blocks[1](x)
+        if self.training: #MixStyleは学習時のみ適用
+            # 1. 1層目の前に適用
+            x = self.attn_mixstyle_pre(x)
+            
+            # 2. 1層目の畳み込みブロックを適用
+            x = self.conv_blocks[0](x)
+            
+            # 3. 1層目の後に適用
+            x = self.attn_mixstyle_post1(x)
+            
+            # 4. 2層目の畳み込みブロックを適用
+            x = self.conv_blocks[1](x)
 
-        # 5. 2層目の後に適用
-        x = self.attn_mixstyle_post2(x)
-        
-        # 6. 3層目以降の畳み込みブロックを適用
-        for i in range(2, len(self.conv_blocks)):
-            x = self.conv_blocks[i](x)
+            # 5. 2層目の後に適用
+            x = self.attn_mixstyle_post2(x)
+            
+            # 6. 3層目以降の畳み込みブロックを適用
+            for i in range(2, len(self.conv_blocks)):
+                x = self.conv_blocks[i](x)
+        else:
+            for i in range(0, len(self.conv_blocks)):
+                x = self.conv_blocks[i](x)
         return x

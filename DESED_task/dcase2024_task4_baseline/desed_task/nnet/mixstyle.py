@@ -91,7 +91,7 @@ class FrequencyAttentionMixStyle(nn.Module):
 
         # Sigmoid関数で重みを0〜1の範囲に正規化
         # 各周波数が独立して重要かどうかを判断するため、SoftmaxよりSigmoidが適している場合が多い
-        # (B, 1, F) -> (B, 1, F, 1) に変形してブロードキャスト可能にする
+        # (B, 1, F) -> (B, 1, 1, F) に変形してブロードキャスト可能にする
         attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
         # print("[DEBUG]", attn_weights.size()) #[DEBUG] torch.Size([59, 1, 128, 1]) < 本来Time(Frame)が入る部分がFrequencyになっている
 
