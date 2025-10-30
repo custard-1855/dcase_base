@@ -62,35 +62,6 @@ class CNN(nn.Module):
         super(CNN, self).__init__()
 
         self.nb_filters = nb_filters
-        # cnn = nn.Sequential()
-
-        # def conv(i, normalization="batch", dropout=None, activ="relu"):
-        #     nIn = n_in_channel if i == 0 else nb_filters[i - 1]
-        #     nOut = nb_filters[i]
-        #     cnn.add_module(
-        #         "conv{0}".format(i),
-        #         nn.Conv2d(nIn, nOut, kernel_size[i], stride[i], padding[i]),
-        #     )
-        #     if normalization == "batch":
-        #         cnn.add_module(
-        #             "batchnorm{0}".format(i),
-        #             nn.BatchNorm2d(nOut, eps=0.001, momentum=0.99),
-        #         )
-        #     elif normalization == "layer":
-        #         cnn.add_module("layernorm{0}".format(i), nn.GroupNorm(1, nOut))
-
-        #     if activ.lower() == "leakyrelu":
-        #         cnn.add_module("relu{0}".format(i), nn.LeakyReLU(0.2))
-        #     elif activ.lower() == "relu":
-        #         cnn.add_module("relu{0}".format(i), nn.ReLU())
-        #     elif activ.lower() == "glu":
-        #         cnn.add_module("glu{0}".format(i), GLU(nOut))
-        #     elif activ.lower() == "cg":
-        #         cnn.add_module("cg{0}".format(i), ContextGating(nOut))
-
-        #     if dropout is not None:
-        #         cnn.add_module("dropout{0}".format(i), nn.Dropout(dropout))
-
         # --- 畳み込みブロックを個別に定義 ---
         # 単一のnn.Sequentialではなく、各ブロックをリストで管理
         self.conv_blocks = nn.ModuleList()
@@ -168,15 +139,8 @@ class CNN(nn.Module):
             # 5. 2層目の後に適用
             x = self.attn_mixstyle_post2(x)
 
-
-            x = self.conv_blocks[2](x)
-            x = self.attn_mixstyle_post3(x)
-
-            x = self.conv_blocks[3](x)
-            x = self.attn_mixstyle_post4(x)
-
             # 6. 3層目以降の畳み込みブロックを適用
-            for i in range(4, len(self.conv_blocks)):
+            for i in range(2, len(self.conv_blocks)):
                 x = self.conv_blocks[i](x)
         else: 
             for i in range(0, len(self.conv_blocks)):
