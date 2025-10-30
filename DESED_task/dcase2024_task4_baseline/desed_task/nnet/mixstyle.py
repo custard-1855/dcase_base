@@ -95,20 +95,15 @@ class FrequencyAttentionMixStyle(nn.Module):
         attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
         # print("[DEBUG]", attn_weights.size()) #[DEBUG] torch.Size([59, 1, 128, 1]) < 本来Time(Frame)が入る部分がFrequencyになっている
 
-        # attentonを適用 スケーリング
-        x_attended = attn_weights * x_content
-
 
         # --- 3. MixStyleを適用 ---
         # スタイルを混ぜた特徴量を生成
-        output = mix_style(x_attended)
+        x_mixed = mix_style(x_content)
         # print("[DEBUG]", x_mixed.size()) # [DEBUG] torch.Size([59, 1, 626, 128])
 
 
         # --- 4. 計算した重みで元の特徴量と混ぜ合わせる ---
-        # 重みが大きい周波数帯ほど、スタイルが混ざった特徴量(x_mixed)の比率が高くなる
-        # x_out = (重み * スタイル適用後) + ((1 - 重み) * 元の特徴量)
-        # output = attn_weights * x_mixed + (1 - attn_weights) * x_content
-        # output = x_mixed
+        # attentonを適用 スケーリング
+        output = attn_weights * x_mixed
 
         return output
