@@ -126,6 +126,9 @@ class CNN(nn.Module):
         # 2層目の後
         self.attn_mixstyle_post2 = FrequencyAttentionMixStyle(channels=nb_filters[1])
 
+        self.attn_mixstyle_post3 = FrequencyAttentionMixStyle(channels=nb_filters[2])
+        self.attn_mixstyle_post4 = FrequencyAttentionMixStyle(channels=nb_filters[3])
+
 
         # # 128x862x64
         # for i in range(len(nb_filters)):
@@ -149,22 +152,33 @@ class CNN(nn.Module):
         # conv features
         # x = self.cnn(x)
 
-        # 1. 1層目の前に適用
-        x = self.attn_mixstyle_pre(x)
-        
-        # 2. 1層目の畳み込みブロックを適用
-        x = self.conv_blocks[0](x)
-        
-        # 3. 1層目の後に適用
-        x = self.attn_mixstyle_post1(x)
-        
-        # 4. 2層目の畳み込みブロックを適用
-        x = self.conv_blocks[1](x)
+        if self.training:
+            # 1. 1層目の前に適用
+            x = self.attn_mixstyle_pre(x)
+            
+            # 2. 1層目の畳み込みブロックを適用
+            x = self.conv_blocks[0](x)
+            
+            # 3. 1層目の後に適用
+            x = self.attn_mixstyle_post1(x)
+            
+            # 4. 2層目の畳み込みブロックを適用
+            x = self.conv_blocks[1](x)
 
-        # 5. 2層目の後に適用
-        x = self.attn_mixstyle_post2(x)
-        
-        # 6. 3層目以降の畳み込みブロックを適用
-        for i in range(2, len(self.conv_blocks)):
-            x = self.conv_blocks[i](x)
+            # 5. 2層目の後に適用
+            x = self.attn_mixstyle_post2(x)
+
+
+            x = self.conv_blocks[2](x)
+            x = self.attn_mixstyle_post3(x)
+
+            x = self.conv_blocks[3](x)
+            x = self.attn_mixstyle_post4(x)
+
+            # 6. 3層目以降の畳み込みブロックを適用
+            for i in range(4, len(self.conv_blocks)):
+                x = self.conv_blocks[i](x)
+        else: 
+            for i in range(0, len(self.conv_blocks)):
+                x = self.conv_blocks[i](x)
         return x
