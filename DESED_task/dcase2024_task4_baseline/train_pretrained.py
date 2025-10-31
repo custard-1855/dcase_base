@@ -704,6 +704,9 @@ def prepare_run(argv=None):
     parser.add_argument(
         "--sebbs", action="store_true",
     )
+    parser.add_argument(
+        "--wandb_dir"
+    )
 
     args = parser.parse_args(argv)
     with open(args.conf_file, "r") as f:
@@ -713,12 +716,14 @@ def prepare_run(argv=None):
         configs["net"]["attn_type"] = args.attn_type
     if args.attn_deepen is not None:
         configs["net"]["attn_deepen"] = args.attn_deepen
-    if args.attn_deepen is not None:
+    if args.mixstyle_type is not None:
         configs["net"]["mixstyle_type"] = args.mixstyle_type
-    if args.attn_deepen is not None:
+    if args.cmt is not None:
         configs["cmt"]["enabled"] = args.cmt
-    if args.attn_deepen is not None:
+    if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs
+    if args.wandb_dir is not None:
+        configs["net"]["wandb_dir"] = args.wandb_dir
 
 
 

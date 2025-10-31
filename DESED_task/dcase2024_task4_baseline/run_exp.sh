@@ -9,6 +9,8 @@
 
 uv run train_pretrained.py \
     --mixstyle_type moreMix\
+    --wandb_dir moreMix\
 
 uv run train_pretrained.py \
     --mixstyle_type mix2attn\
+    --wandb_dir mix2attn\

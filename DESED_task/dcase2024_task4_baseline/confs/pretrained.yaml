@@ -139,7 +139,7 @@ net:
   median_filter: [3, 9, 9, 5, 5, 5, 9, 7, 11, 9, 7, 3, 9, 13, 7, 1, 13, 3, 13, 7, 5, 5, 1, 13, 17, 13, 15]
   # wandb
   use_wandb: True
-  wandb_dir: "exp/wandb"
+  wandb_dir: "MixStyle"
   # for MixStyle
   attn_type: normal
   attn_deepen: true
