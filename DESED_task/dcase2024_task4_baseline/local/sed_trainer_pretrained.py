@@ -1180,22 +1180,97 @@ class SEDTask4(pl.LightningModule):
             for clip_id in desed_ground_truth.keys()
         }
 
-        # SEBBをtune
-        if not hasattr(self, "csebbs_predictor"):
-            print("\nTune csebbs for DESED classes ...")
-            self.csebbs_predictor, _ = csebbs.tune(
+        # ========================================================================
+        # cSEBBs (change-point based Sound Event Bounding Boxes) のチューニング
+        # ========================================================================
+        # cSEBBsは、フレームレベルのスコアから変化点検出によりイベント境界を推定し、
+        # 適応的なセグメントマージによって最終的なイベント候補(bounding boxes)を生成する。
+        # ここでは、validation setを用いてハイパーパラメータをチューニングする。
+
+        # --- 1. DESEDクラス用のcSEBBsチューニング ---
+        if not hasattr(self, "csebbs_predictor_desed"):
+            print("\n=== Tuning cSEBBs for DESED classes ===")
+            # ハイパーパラメータ:
+            #   - step_filter_length: 変化点検出用のステップフィルタ長
+            #   - merge_threshold_abs: セグメント統合の絶対閾値
+            #   - merge_threshold_rel: セグメント統合の相対閾値
+            # これらをグリッドサーチでPSDSが最大となるように最適化
+            self.csebbs_predictor_desed, _ = csebbs.tune(
                 scores=desed_scores,
                 ground_truth=desed_ground_truth,
                 audio_durations=desed_audio_durations,
-                selection_fn=csebbs.select_best_psds
+                selection_fn=csebbs.select_best_psds  # PSDS1を最大化
             )
+            print(f"✓ DESED cSEBBs tuning completed")
+
+        # --- 2. MAESTROクラス用のcSEBBsチューニング ---
+        # MAESTROとDESEDでは音響特性が異なるため、別々にチューニング
+        if not hasattr(self, "csebbs_predictor_maestro"):
+            print("\n=== Tuning cSEBBs for MAESTRO classes ===")
+
+            # on_test_start()で読み込んだMAESTROのメタデータを取得
+            maestro_ground_truth = getattr(self, "_maestro_ground_truth", {})
+            maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
+
+            if maestro_ground_truth and maestro_audio_durations:
+                # MAESTROクラスのみを含むvalidationスコアを抽出
+                event_classes_maestro = sorted(classes_labels_maestro_real.keys())
+                keys = ["onset", "offset"] + event_classes_maestro
+
+                # MAESTROはclip単位で保存されているため、clip IDからfile IDを抽出
+                # clip ID形式: "file_id-{onset*100}-{offset*100}"
+                maestro_val_scores = {}
+                for clip_id in self.val_buffer_sed_scores_eval_student.keys():
+                    # clip IDをパースしてfile IDを取得
+                    if "-" in clip_id and len(clip_id.rsplit("-", maxsplit=2)) == 3:
+                        file_id = clip_id.rsplit("-", maxsplit=2)[0]
+                        # このfile IDがMAESTRO ground truthに含まれているか確認
+                        if file_id in maestro_ground_truth:
+                            # MAESTROクラスのスコアのみを抽出
+                            maestro_val_scores[clip_id] = self.val_buffer_sed_scores_eval_student[clip_id][keys]
+
+                if maestro_val_scores:
+                    # 十分なvalidationデータがある場合はチューニング実行
+                    self.csebbs_predictor_maestro, _ = csebbs.tune(
+                        scores=maestro_val_scores,
+                        ground_truth=maestro_ground_truth,
+                        audio_durations=maestro_audio_durations,
+                        selection_fn=csebbs.select_best_psds  # PSDS1を最大化
+                    )
+                    print(f"✓ MAESTRO cSEBBs tuning completed with {len(maestro_val_scores)} clips")
+                else:
+                    # validationデータが見つからない場合はデフォルトパラメータを使用
+                    print("⚠ Warning: No MAESTRO validation scores found")
+                    print("  Using default cSEBBs parameters for MAESTRO")
+                    self.csebbs_predictor_maestro = csebbs.CSEBBsPredictor(
+                        step_filter_length=0.48,   # 中程度のフィルタ長
+                        merge_threshold_abs=0.2,   # 中程度の絶対閾値
+                        merge_threshold_rel=2.0    # 中程度の相対閾値
+                    )
+            else:
+                # ground truthやdurationsが読み込まれていない場合
+                print("⚠ Warning: MAESTRO ground truth or durations not available")
+                print("  Using default cSEBBs parameters for MAESTRO")
+                self.csebbs_predictor_maestro = csebbs.CSEBBsPredictor(
+                    step_filter_length=0.48,
+                    merge_threshold_abs=0.2,
+                    merge_threshold_rel=2.0
+                )
 
 
-        # compute psds
+        # ========================================================================
+        # Student modelのスコア生成とcSEBBs後処理
+        # ========================================================================
+
+        # --- ステップ1: median filterによる基本的な後処理 ---
+        # batched_decode_preds()は以下を実行:
+        #   1. median filterによるスコアの平滑化
+        #   2. 複数の閾値でのバイナリ検出（PSDS計算用）
+        #   3. sed_scores_eval形式への変換
         (
-            scores_unprocessed_student_strong,
-            _,# scores_postprocessed_student_strong,
-            decoded_student_strong,
+            scores_unprocessed_student_strong,  # median filter適用前のスコア
+            _,  # scores_postprocessed_student_strong（使用しない、cSEBBsで置き換える）
+            decoded_student_strong,  # 閾値別のバイナリ検出結果
         ) = batched_decode_preds(
             strong_preds_student,
             filenames,
@@ -1204,14 +1279,22 @@ class SEDTask4(pl.LightningModule):
             thresholds=list(self.test_buffer_psds_eval_student.keys()) + [0.5],
         )
 
-        # cSEBBsで後処理を行い、新しいスコアファイルを書き出す
+        # --- ステップ2: cSEBBsによる高度な後処理 ---
+        # median filterの代わりにcSEBBsを使用してイベント境界を精緻化
+        # cSEBBsの利点:
+        #   - 変化点検出による正確なonset/offset推定
+        #   - 適応的なセグメントマージによるノイズ除去
+        #   - フレームレベル閾値の影響を受けないイベント検出
+        # 入力: median filter適用前のスコア（より細かい時間分解能を保持）
+        # 出力: cSEBBsにより生成されたイベント候補のスコア
         scores_postprocessed_student_strong = get_sebbs(self, scores_unprocessed_student_strong)
-        # もしかして入力はstrong_preds_student?
 
-
+        # --- ステップ3: バッファに蓄積 ---
+        # 後処理前後のスコアを保存（比較・分析用）
         self.test_buffer_sed_scores_eval_unprocessed_student.update(
             scores_unprocessed_student_strong
         )
+        # cSEBBs後処理済みスコア（最終的な評価に使用）
         self.test_buffer_sed_scores_eval_student.update(
             scores_postprocessed_student_strong
         )
@@ -1221,10 +1304,16 @@ class SEDTask4(pl.LightningModule):
                 ignore_index=True,
             )
 
+        # ========================================================================
+        # Teacher modelのスコア生成とcSEBBs後処理
+        # ========================================================================
+        # Teacher modelについてもStudent modelと同様の処理を実行
+
+        # --- ステップ1: median filterによる基本的な後処理 ---
         (
-            scores_unprocessed_teacher_strong,
-            scores_postprocessed_teacher_strong,
-            decoded_teacher_strong,
+            scores_unprocessed_teacher_strong,  # median filter適用前のスコア
+            scores_postprocessed_teacher_strong,  # 使用しない、cSEBBsで置き換える
+            decoded_teacher_strong,  # 閾値別のバイナリ検出結果
         ) = batched_decode_preds(
             strong_preds_teacher,
             filenames,
@@ -1233,9 +1322,12 @@ class SEDTask4(pl.LightningModule):
             thresholds=list(self.test_buffer_psds_eval_teacher.keys()) + [0.5],
         )
 
-        # SEBB
+        # --- ステップ2: cSEBBsによる高度な後処理 ---
+        # Teacher modelにも同じcSEBBs predictorを適用
+        # （Student/Teacherで異なるpredictorを使う理由はない）
         scores_postprocessed_teacher_strong = get_sebbs(self, scores_unprocessed_teacher_strong)
 
+        # --- ステップ3: バッファに蓄積 ---
         self.test_buffer_sed_scores_eval_unprocessed_teacher.update(
             scores_unprocessed_teacher_strong
         )
@@ -1684,43 +1776,75 @@ class SEDTask4(pl.LightningModule):
         )
 
     def on_test_start(self) -> None:
+        """Test開始時の初期化処理。
+
+        cSEBBsのチューニングに必要なvalidationスコアを収集するため、
+        test実行前に一度validationパスを実行する。
+
+        処理の流れ:
+            1. MAESTROのメタデータ（ground truth, audio durations）を読み込み
+            2. Validationパスを実行してスコアを収集
+            3. 収集したスコアはval_buffer_sed_scores_eval_studentに保存
+            4. test_step内でこのバッファを使ってcSEBBsをチューニング
+        """
+        # ========================================================================
+        # ステップ1: MAESTROメタデータの読み込み
+        # ========================================================================
         print("Loading MAESTRO audio durations and ground truth for test...")
+        # MAESTROのground truthとaudio durationsを読み込み
+        # 結果は self._maestro_ground_truth, self._maestro_audio_durations に保存
         self.load_maestro_audio_durations_and_gt()
 
-        # SEBBsチューニング用の検証スコアを取得するため、手動で検証パスを実行する
-        # trainer.test() は best_ckpt をロード済みなので、これは最良モデルでの検証になる
-        print("\nRunning validation pass to get scores for SEBBs tuning...")
+        # ========================================================================
+        # ステップ2: cSEBBsチューニング用のValidationパス実行
+        # ========================================================================
+        # なぜValidationパスを実行するのか:
+        #   - cSEBBsのハイパーパラメータ（step_filter_length, merge_thresholds）を
+        #     validation setでチューニングする必要がある
+        #   - trainer.test()はbest checkpointをロード済みなので、
+        #     ここでvalidationを実行すれば最良モデルでのスコアが得られる
+        #   - これらのスコアをtest_step内でcSEBBsチューニングに使用
+        print("\n" + "="*70)
+        print("Running validation pass to collect scores for cSEBBs tuning")
+        print("="*70)
 
-        # 1. バッファを初期化
+        # バッファを初期化（以前のスコアをクリア）
         self.val_buffer_sed_scores_eval_student = {}
         self.val_buffer_sed_scores_eval_teacher = {}
-        
-        # 2. 検証データローダーを取得
+
+        # Validationデータローダーを取得
         val_loader = self.val_dataloader()
-        
-        # 3. モデルを評価モードに設定
+
+        # モデルを評価モードに設定（Dropout等を無効化）
         self.sed_student.eval()
         self.sed_teacher.eval()
-        
-        # 4. 手動でループを実行し、validation_step を呼び出す
+
+        # Validationパスを実行してスコアを収集
+        # torch.no_grad()で勾配計算を無効化（メモリ節約＆高速化）
         with torch.no_grad():
             for batch_idx, batch in enumerate(val_loader):
-                # validation_step が期待する形式 (タプル) でバッチをアンパック
+                # バッチデータをアンパック
                 audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = batch
-                
-                # 必要なテンソルを現在のデバイスに移動
+
+                # 全テンソルを現在のデバイス（GPU/CPU）に移動
                 audio = audio.to(self.device)
                 labels = labels.to(self.device)
                 embeddings = embeddings.to(self.device)
                 valid_class_mask = valid_class_mask.to(self.device)
-                
+
                 # デバイス移動後のバッチを再構築
                 moved_batch = (audio, labels, padded_indxs, filenames, embeddings, valid_class_mask)
-                
-                # validation_step を実行してバッファにスコアを蓄積
+
+                # validation_stepを実行
+                # この中でval_buffer_sed_scores_eval_studentにスコアが蓄積される
                 self.validation_step(moved_batch, batch_idx)
 
-        print(f"Validation pass complete. Collected {len(self.val_buffer_sed_scores_eval_student)} scores for tuning.")
+        print(f"\n✓ Validation pass complete")
+        print(f"  Collected scores for {len(self.val_buffer_sed_scores_eval_student)} clips")
+
+        # 重要: validation_epoch_end()は呼び出さない
+        # 理由: validation_epoch_end()内でバッファがクリアされてしまい、
+        #       test_step内でのcSEBBsチューニングに使えなくなるため
 
         if self.evaluation:
             os.makedirs(os.path.join(self.exp_dir, "codecarbon"), exist_ok=True)
@@ -1926,100 +2050,112 @@ def _get_segment_scores(scores_df, clip_length, segment_length=1.0):
     )
 
 def get_sebbs(self, scores_all_classes):
-    '''Use cSEBBs
-        SEBBのサンプルコードに忠実に直す
-        下のPSDS付近のコードに寄せないで実装
-    '''
+    """Apply cSEBBs post-processing to both DESED and MAESTRO classes.
 
-    # cSEBBsで後処理を行い、新しいスコアファイルを出力
-    # scores_all_classes = scores_unprocessed_{student | teacher}_strong
+    cSEBBs (change-point based Sound Event Bounding Boxes)は、
+    フレームレベルの事後確率スコアから以下の処理によりイベント候補を生成:
 
-    # 1. DESEDクラスのスコアに対してcSEBBsを適用         
-    desed_classes = list(classes_labels_desed.keys()) # ラベル一覧を獲得
-    keys_desed = ["onset", "offset"] + sorted(desed_classes) # 辞書から取り出すためのkeyを設定 # 下ではsortedしているが,sebbではしてない. どちらが正しい?
-    # sebbの実装ではスコアを受け取っている なぜ?
+    1. 変化点検出: ステップフィルタを用いてスコアの変化点を検出
+    2. セグメント生成: 変化点を境界として候補セグメントを生成
+    3. セグメントマージ: 類似スコアを持つ隣接セグメントを統合
+    4. 信頼度計算: 各セグメントの平均スコアを信頼度として出力
+
+    この関数では、DESEDとMAESTROの両クラスに対してcSEBBsを適用し、
+    結果を統合して最終的なスコアDataFrameを生成する。
+
+    Args:
+        self: SEDTask4 instance (csebbs_predictor_desed, csebbs_predictor_maestroを保持)
+        scores_all_classes: Dictionary of score DataFrames for all clips
+                           各clipのDataFrameは全クラスのスコアを含む
+                           形式: {clip_id: pd.DataFrame(onset, offset, class1, class2, ...)}
+
+    Returns:
+        sed_scores_postprocessed: Dictionary of post-processed score DataFrames
+                                  cSEBBsにより生成されたイベント候補のスコア
+                                  形式: {clip_id: pd.DataFrame(onset, offset, class1, class2, ...)}
+
+    処理フロー:
+        1. DESED/MAESTROクラスのスコアを個別に抽出
+        2. 各データセットに最適化されたcSEBBs predictorで処理
+        3. 生成されたイベント候補を統合
+        4. sed_scores_eval形式のDataFrameに変換
+    """
+
+    # ========================================================================
+    # ステップ1: DESEDクラスに対するcSEBBs適用
+    # ========================================================================
+    # DESEDは家庭内音（食器、掃除機、猫など）の10クラス
+    desed_classes = list(classes_labels_desed.keys())
+    keys_desed = ["onset", "offset"] + sorted(desed_classes)
+
+    # 全クラスのスコアからDESEDクラスのみを抽出
     scores_desed_classes = {
-        clip_id: scores_all_classes[clip_id][keys_desed] 
+        clip_id: scores_all_classes[clip_id][keys_desed]
         for clip_id in scores_all_classes.keys()
     }
-    # csebbsでdesedデータセットのスコアを後処理
-    csebbs_desed_events = self.csebbs_predictor.predict(
+
+    # cSEBBsでDESEDデータセットのスコアを後処理
+    # 戻り値: {clip_id: [(onset, offset, class_name, confidence), ...]}
+    csebbs_desed_events = self.csebbs_predictor_desed.predict(
         scores_desed_classes
     )
 
-
-    # 2. Maestroも計算
-    maestro_classes = list(classes_labels_maestro_real.keys()) # classes_labels_maestro_real_eval?
+    # ========================================================================
+    # ステップ2: MAESTROクラスに対するcSEBBs適用
+    # ========================================================================
+    # MAESTROは都市音・屋内音（足音、会話、車など）の17クラス
+    maestro_classes = list(classes_labels_maestro_real.keys())
     keys_maestro = ["onset", "offset"] + sorted(maestro_classes)
+
+    # 全クラスのスコアからMAESTROクラスのみを抽出
     scores_maestro_classes = {
-        clip_id: scores_all_classes[clip_id][keys_maestro] 
+        clip_id: scores_all_classes[clip_id][keys_maestro]
         for clip_id in scores_all_classes.keys()
     }
-    
 
-    maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
+    # cSEBBsでMAESTROデータセットのスコアを後処理
+    # DESEDとは異なる音響特性に最適化されたパラメータを使用
+    # 戻り値: {clip_id: [(onset, offset, class_name, confidence), ...]}
+    csebbs_maestro_events = self.csebbs_predictor_maestro.predict(
+        scores_maestro_classes
+    )
 
-    # この処理が分かってない... 要理解
-    segment_scores_maestro_classes = {}
-    for clip_id, clip_scores in scores_maestro_classes.items():
-            clip_length = maestro_audio_durations.get(clip_id)
-            if clip_length is None:
-                try:
-                    clip_length = float(list(clip_scores["offset"])[-1])
-                except Exception:
-                    # loggerが使えないためprintで代替
-                    print(f"[Warning] Cannot determine clip_length for {clip_id}; skipping.")
-                    continue
-
-            segment_scores_maestro_classes[clip_id] = get_segment_scores(
-                clip_scores,
-                clip_length=clip_length,
-                segment_length=1.0,
-            )
-
-    # 全クラスのリスト
+    # ========================================================================
+    # ステップ3: イベント候補の統合
+    # ========================================================================
+    # DESEDとMAESTROの全クラスのリスト（重複なし、ソート済み）
     all_sound_classes = sorted(list(set(desed_classes + maestro_classes)))
-    
+
+    # 両データセットのclip IDを統合
+    all_clip_ids = set(csebbs_desed_events.keys()) | set(csebbs_maestro_events.keys())
+
+    # clip毎にDESEDとMAESTROのイベントを結合
     sebbs_all_events = {}
-    all_clip_ids = set(csebbs_desed_events.keys()) | set(segment_scores_maestro_classes.keys())
-
     for clip_id in all_clip_ids:
-        
-        # (A) DESEDのイベントリストを取得
+        # DESEDのイベントリストを取得（存在しない場合は空リスト）
         desed_events = csebbs_desed_events.get(clip_id, [])
-        
-        # (B) MAESTROのイベントリストを生成
-        maestro_events = []
-        if clip_id in segment_scores_maestro_classes:
-            df_maestro = segment_scores_maestro_classes[clip_id]
-            
-            # DataFrameから (onset, offset, class_name, score) のタプルリストを作成
-            maestro_classes_local = [c for c in maestro_classes if c in df_maestro.columns]
-            
-            for onset, offset, scores_vec in zip(
-                df_maestro["onset"],
-                df_maestro["offset"],
-                df_maestro[maestro_classes_local].to_numpy(),
-            ):
-                for class_name, seg_score in zip(maestro_classes_local, scores_vec):
-                    # 0点以上のイベントのみ追加 (0点は不要)
-                    if seg_score > 0.0:
-                        maestro_events.append(
-                            (float(onset), float(offset), class_name, float(seg_score))
-                        )
 
-        # (C) DESEDとMAESTROのイベントリストを結合してソート
+        # MAESTROのイベントリストを取得（存在しない場合は空リスト）
+        maestro_events = csebbs_maestro_events.get(clip_id, [])
+
+        # イベントリストを結合してonset時間順にソート
+        # 各イベント: (onset, offset, class_name, confidence)
         sebbs_all_events[clip_id] = sorted(
             desed_events + maestro_events,
-            key=lambda x: x[0] # onsetでソート
+            key=lambda x: x[0]  # onset時間でソート
         )
 
-    # --- 5. ★ 追加: 統合したイベントリストから、連続したスコアDataFrameを生成 ---
+    # ========================================================================
+    # ステップ4: sed_scores_eval形式への変換
+    # ========================================================================
+    # イベント候補リストからsed_scores_eval形式のDataFrameに変換
+    # - 各イベントの時間範囲で該当クラスのスコアを設定
+    # - イベントが存在しない時間・クラスは0.0で埋める
+    # - 評価ツール(sed_scores_eval)で直接使用可能な形式
     sed_scores_postprocessed = sed_scores_from_sebbs(
         sebbs_all_events,
         sound_classes=all_sound_classes,
-        fill_value=0.0 # 存在しない場所は0.0で埋める
+        fill_value=0.0  # イベントが存在しない箇所は0.0
     )
 
     return sed_scores_postprocessed
-
