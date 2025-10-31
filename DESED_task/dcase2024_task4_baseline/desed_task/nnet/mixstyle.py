@@ -5,25 +5,82 @@ import torch.nn.functional as F
 from torch.distributions.beta import Beta
 
 
-# --- MixStyleのコア機能 ---
-# 2つの特徴量の統計量（スタイル）を混ぜ合わせる関数
+# ========== Attention Network Building Blocks ==========
+
+class ResidualConvBlock(nn.Module):
+    """残差接続付き畳み込みブロック"""
+    def __init__(self, channels, kernel_size=3):
+        super().__init__()
+        self.conv = nn.Sequential(
+            nn.Conv1d(channels, channels, kernel_size, padding=kernel_size//2),
+            nn.BatchNorm1d(channels),
+            nn.ReLU(),
+            nn.Conv1d(channels, channels, kernel_size, padding=kernel_size//2),
+            nn.BatchNorm1d(channels)
+        )
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        return self.relu(x + self.conv(x))  # 残差接続
+
+
+class MultiScaleConvBlock(nn.Module):
+    """マルチスケール畳み込みブロック（異なる受容野を並列処理）"""
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        # 異なるkernel sizeで周波数パターンを捉える
+        out_per_branch = out_channels // 3
+        remainder = out_channels - (out_per_branch * 3)
+
+        self.conv1 = nn.Conv1d(in_channels, out_per_branch + remainder, kernel_size=1)
+        self.conv3 = nn.Conv1d(in_channels, out_per_branch, kernel_size=3, padding=1)
+        self.conv5 = nn.Conv1d(in_channels, out_per_branch, kernel_size=5, padding=2)
+        self.bn = nn.BatchNorm1d(out_channels)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x1 = self.conv1(x)
+        x3 = self.conv3(x)
+        x5 = self.conv5(x)
+        out = torch.cat([x1, x3, x5], dim=1)  # チャネル方向に結合
+        return self.relu(self.bn(out))
+
+
+class SEBlock(nn.Module):
+    """Squeeze-and-Excitation Block (チャネルattention)"""
+    def __init__(self, channels, reduction=4):
+        super().__init__()
+        self.squeeze = nn.AdaptiveAvgPool1d(1)  # Global average pooling
+        self.excitation = nn.Sequential(
+            nn.Linear(channels, max(channels // reduction, 1)),
+            nn.ReLU(),
+            nn.Linear(max(channels // reduction, 1), channels),
+            nn.Sigmoid()
+        )
+
+    def forward(self, x):
+        b, c, _ = x.size()
+        # Squeeze: グローバルな情報を集約
+        y = self.squeeze(x).view(b, c)
+        # Excitation: チャネル重要度を計算
+        y = self.excitation(y).view(b, c, 1)
+        # 元の特徴量に重み付け
+        return x * y.expand_as(x)
+
+
+# ========== MixStyle Function ==========
+
 def mix_style(content_feature): # ok
     """
     Args:
         content_feature (Tensor): スタイルを適用したい元の特徴量
-        style_feature (Tensor): スタイルを提供するための特徴量
+            (batch_size, n_channels, n_frames, n_freq)
     Returns:
         Tensor: スタイルが適用された新しい特徴量
     """
-    # チャンネル次元で統計量を計算
-    # 若干実装がRFNに寄っている
-
-    # input size : (batch_size, n_channels, n_frames, n_freq)
-    # 3は周波数
-    # 時間を割るよう,3 > 2に修正
-
-    content_mean = content_feature.mean(dim=(1,2), keepdim=True)
-    content_var = content_feature.var(dim=(1,2), keepdim=True)
+    # 周波数とチャネルの統計量を計算. 特徴量を重ねる都合上,チャネルを捨てるのは惜しい
+    content_mean = content_feature.mean(dim=(2), keepdim=True)
+    content_var = content_feature.var(dim=(2), keepdim=True)
     content_std = (content_var + 1e-6).sqrt()
 
     content_mean, content_std = content_mean.detach(), content_std.detach()
@@ -31,12 +88,12 @@ def mix_style(content_feature): # ok
 
     # x_styleを内部で用意
     B = content_feature.size(0)
-    perm = torch.randperm(B, device=content_feature.device) # ランダムにシャッフル 本当はチャンクごとに区切るのが良い??? 現実的に適用する場合はランダムになりそうだが...
+    perm = torch.randperm(B, device=content_feature.device) # ランダムにシャッフル
 
     mu2, sig2 = content_mean[perm], content_std[perm]
 
     # ランダムな比率で統計量を混ぜる
-    alpha = 0.1
+    alpha = 0.1 # デフォルトは0.1
     lam = Beta(alpha, alpha).sample((B, 1, 1, 1))
     lam = lam.to(device=content_feature.device)
 
@@ -46,64 +103,166 @@ def mix_style(content_feature): # ok
     # 元の特徴量を新しい統計量で正規化・スケールし直す
     return  content_normed * mixed_std + mixed_mean
 
-# --- AttentionとMixStyleを組み合わせたモジュール ---
+
 class FrequencyAttentionMixStyle(nn.Module):
-    def __init__(self, channels):
+    def __init__(self, channels, **kwargs):
         """
         Args:
             channels (int): 入力特徴量のチャンネル数
-            freq_bins (int): 周波数次元のサイズ (e.g., メルスペクトログラムの次元数)
+            kwargs:
+                attn_type (str): attention network type
+                    - "default": 浅い2層CNN
+                    - "residual_deep": 残差接続で深いネットワーク
+                    - "multiscale": マルチスケール畳み込み
+                    - "se_deep": SE-Block組み込み深層ネットワーク
+                    - "dilated_deep": Dilated Convolution
+                attn_deepen (int): 深さ（層数）
+                mixstyle_type (str): MixStyleとの組み合わせ方
         """
         super().__init__()
         self.channels = channels
-        # self.freq_bins = freq_bins
 
-        # 周波数ごとの重要度を学習するための小さなAttentionネットワーク
-        # ここでは単純なConv1dを使用
+        # 実験設定変更用
+        self.attention_type = kwargs.get("attn_type", "default")
+        self.deepen = kwargs.get("attn_deepen", 2)
+        self.mixstyle_type = kwargs["mixstyle_type"]
+
+        # チャネル数の計算
         specific_channels = channels if channels == 1 else channels // 2
 
-
-        self.attention_network = nn.Sequential(
-            nn.Conv1d(in_channels=channels, out_channels=specific_channels, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv1d(in_channels=specific_channels, out_channels=1, kernel_size=1)
+        # Attention Networkの構築（attention_typeに応じて切り替え）
+        self.attention_network = self._build_attention_network(
+            channels, specific_channels, self.attention_type, self.deepen
         )
+
+    def _build_attention_network(self, in_channels, mid_channels, attn_type, depth):
+        """
+        Attention Networkを構築
+
+        Args:
+            in_channels: 入力チャネル数
+            mid_channels: 中間層のチャネル数
+            attn_type: attentionのタイプ
+            depth: ネットワークの深さ
+
+        Returns:
+            nn.Module: 構築されたattention network
+        """
+
+        if attn_type == "default":
+            # デフォルト: 浅い2層CNN
+            return nn.Sequential(
+                nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv1d(mid_channels, in_channels, kernel_size=1)
+            )
+
+        elif attn_type == "residual_deep":
+            # 残差接続で深いネットワーク
+            layers = [
+                nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
+                nn.BatchNorm1d(mid_channels),
+                nn.ReLU()
+            ]
+
+            # 残差ブロックを複数積み重ね
+            for _ in range(depth):
+                layers.append(ResidualConvBlock(mid_channels, kernel_size=3))
+
+            # 出力変換
+            layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
+
+            return nn.Sequential(*layers)
+
+        elif attn_type == "multiscale":
+            # マルチスケール畳み込み
+            layers = []
+            layers.append(MultiScaleConvBlock(in_channels, mid_channels))
+
+            # 追加の層
+            for _ in range(depth - 1):
+                layers.extend([
+                    nn.Conv1d(mid_channels, mid_channels, kernel_size=3, padding=1),
+                    nn.BatchNorm1d(mid_channels),
+                    nn.ReLU()
+                ])
+
+            layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
+
+            return nn.Sequential(*layers)
+
+        elif attn_type == "se_deep":
+            # SE-Block組み込み深層ネットワーク
+            layers = [
+                nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
+                nn.BatchNorm1d(mid_channels),
+                nn.ReLU()
+            ]
+
+            # SE Blockを挟みながら層を深くする
+            for _ in range(depth):
+                layers.extend([
+                    nn.Conv1d(mid_channels, mid_channels, kernel_size=3, padding=1),
+                    nn.BatchNorm1d(mid_channels),
+                    nn.ReLU(),
+                    SEBlock(mid_channels, reduction=4)
+                ])
+
+            layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
+
+            return nn.Sequential(*layers)
+
+        elif attn_type == "dilated_deep":
+            # Dilated Convolution（広い受容野）
+            layers = [
+                nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
+                nn.BatchNorm1d(mid_channels),
+                nn.ReLU()
+            ]
+
+            # Dilationを増やしながら層を深くする
+            for i in range(depth):
+                dilation = 2 ** i  # 1, 2, 4, 8, ...
+                padding = dilation  # dilationに応じてpaddingを調整
+                layers.extend([
+                    nn.Conv1d(mid_channels, mid_channels, kernel_size=3,
+                             padding=padding, dilation=dilation),
+                    nn.BatchNorm1d(mid_channels),
+                    nn.ReLU()
+                ])
+
+            layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
+
+            return nn.Sequential(*layers)
+
+        else:
+            raise ValueError(f"Unknown attention_type: {attn_type}. "
+                           f"Choose from ['default', 'residual_deep', 'multiscale', 'se_deep', 'dilated_deep']")
 
     def forward(self, x_content):
         """
         Args:
             x_content (Tensor): スタイル適用対象の特徴量 (Batch, Channels, Frame, Frequency)
-            # x_style (Tensor): スタイルソースの特徴量 (Batch, Channels, Frame, Frequency)
         """
-        # --- 1. 時間次元の情報を集約 ---
-        # 時間方向の平均をとって、各周波数の静的な特徴を取得
-        # input size : (batch_size, n_channels, n_frames, n_freq)
-
-        x_content_avg = x_content.mean(dim=2) # Time(Frames)方向で平均を取得
-        # print("[DEBUG]", x_content.size()) # [DEBUG] torch.Size([59, 1, 626, 128])
-        # print("[DEBUG]", x_content_avg.size()) # [DEBUG] torch.Size([59, 1, 128])
-
-        # --- 2. Attentionで周波数ごとの重みを計算 ---
-        # (B, C, F) -> (B, 1, F)
-        attn_logits = self.attention_network(x_content_avg)
-        # print("[DEBUG]", attn_logits.size()) # [DEBUG] torch.Size([59, 1, 128])
-
-
-        # Sigmoid関数で重みを0〜1の範囲に正規化
-        # 各周波数が独立して重要かどうかを判断するため、SoftmaxよりSigmoidが適している場合が多い
-        # (B, 1, F) -> (B, 1, 1, F) に変形してブロードキャスト可能にする
-        attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
-        # print("[DEBUG]", attn_weights.size()) #[DEBUG] torch.Size([59, 1, 128, 1]) < 本来Time(Frame)が入る部分がFrequencyになっている
-
-
-        # --- 3. MixStyleを適用 ---
-        # スタイルを混ぜた特徴量を生成
+        # common
+        # MixStyleを適用
         x_mixed = mix_style(x_content)
         # print("[DEBUG]", x_mixed.size()) # [DEBUG] torch.Size([59, 1, 626, 128])
 
+        # 時間方向の平均をとり、周波数の静的な特徴を取得
+        x_avg = x_mixed.mean(dim=2) # 実際に使用するMixedの周波数で重要度を得る
 
-        # --- 4. 計算した重みで元の特徴量と混ぜ合わせる ---
-        # attentonを適用 スケーリング
-        output = attn_weights * x_mixed
+        # 周波数動的注意 重みを作成
+        # (B, C, F)
+        attn_logits = self.attention_network(x_avg)
 
+        # Sigmoid関数で重みを0〜1の範囲に正規化
+        # 各周波数が独立して重要かどうかを判断するため、SoftmaxよりSigmoidが適している?
+        # (B, C, F) -> (B, C, 1, F) に変形してブロードキャスト可能に
+        attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
+
+        if self.mixstyle_type == "resMix":
+            output = attn_weights * x_mixed + (1-attn_weights) * x_content # 残差接続的らしい. 情報損失を防ぐ?
+        else:
+            output = x_mixed # attentionなし
         return output
