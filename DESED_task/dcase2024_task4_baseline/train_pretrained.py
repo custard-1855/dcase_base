@@ -686,10 +686,41 @@ def prepare_run(argv=None):
     parser.add_argument(
         "--eval_from_checkpoint", default=None, help="Evaluate the model specified"
     )
+    # 実験管理用
+    parser.add_argument(
+        "--attn_type", default="normal",
+    )
+    parser.add_argument(
+        "--attn_deepen", 
+        default=False,
+        action="store_true",
+    )
+    parser.add_argument(
+        "--mixstyle_type", default="moreMix",
+    )
+    parser.add_argument(
+        "--cmt", action="store_true",
+    )
+    parser.add_argument(
+        "--sebbs", action="store_true",
+    )
 
     args = parser.parse_args(argv)
     with open(args.conf_file, "r") as f:
         configs = yaml.safe_load(f)
+
+    if args.attn_type is not None:
+        configs["net"]["attn_type"] = args.attn_type
+    if args.attn_deepen is not None:
+        configs["net"]["attn_deepen"] = args.attn_deepen
+    if args.attn_deepen is not None:
+        configs["net"]["mixstyle_type"] = args.mixstyle_type
+    if args.attn_deepen is not None:
+        configs["cmt"]["enabled"] = args.cmt
+    if args.attn_deepen is not None:
+        configs["sebbs"]["enabled"] = args.sebbs
+
+
 
     evaluation = False
     test_from_checkpoint = args.test_from_checkpoint

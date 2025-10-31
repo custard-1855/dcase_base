@@ -39,47 +39,77 @@ def mix_style(content_feature): # ok
 
 
 class FrequencyAttentionMixStyle(nn.Module):
-    def __init__(self, channels):
+    def __init__(self, channels, **kwargs):
         """
         Args:
             channels (int): 入力特徴量のチャンネル数
         """
         super().__init__()
         self.channels = channels
+        
+        # 実験設定変更用
+        self.attention_type = kwargs["attn_type"]
+        self.deepen = kwargs["attn_deepen"]
+        self.mixstyle_type = kwargs["mixstyle_type"]
+
 
         # 周波数ごとの重要度を学習するための小さなAttentionネットワーク
         # ここでは単純なConv1dを使用
         specific_channels = channels if channels == 1 else channels // 2
 
-
-        self.attention_network = nn.Sequential(
-            nn.Conv1d(in_channels=channels, out_channels=specific_channels, kernel_size=3, padding=1),
-            nn.ReLU(),
-            nn.Conv1d(in_channels=specific_channels, out_channels=1, kernel_size=1)
-        )
+        if self.attention_type == "hoge":
+            pass
+        elif self.attention_type == "huga":
+            # self.attention_network
+            pass
+        else:
+            self.attention_network = nn.Sequential(
+                nn.Conv1d(in_channels=channels, out_channels=specific_channels, kernel_size=3, padding=1),
+                nn.ReLU(),
+                nn.Conv1d(in_channels=specific_channels, out_channels=1, kernel_size=1)
+            )
 
     def forward(self, x_content):
         """
         Args:
             x_content (Tensor): スタイル適用対象の特徴量 (Batch, Channels, Frame, Frequency)
         """
-        # MixStyleを適用
-        x_mixed = mix_style(x_content)
+        if self.mixstyle_type == "mix2attn":
+            # MixStyleを適用
+            x_mixed = mix_style(x_content)
 
-        # --- MixStyle適用後の特徴量を対象にattentionを計算--- #
-        # 時間方向の平均をとって、各周波数の静的な特徴を取得
-        x_avg = x_mixed.mean(dim=2) # Time(Frames)方向で平均を取得
+            # --- MixStyle適用後の特徴量を対象にattentionを計算--- #
+            # 時間方向の平均をとって、各周波数の静的な特徴を取得
+            x_avg = x_content.mean(dim=2) # Time(Frames)方向で平均を取得
 
-        # 周波数動的注意 重みを作成
-        # (B, C, F) -> (B, 1, F)
-        attn_logits = self.attention_network(x_avg)
+            # 周波数動的注意 重みを作成
+            # (B, C, F) -> (B, 1, F)
+            attn_logits = self.attention_network(x_avg)
 
-        # Sigmoid関数で重みを0〜1の範囲に正規化
-        # 各周波数が独立して重要かどうかを判断するため、SoftmaxよりSigmoidが適している?
-        # (B, 1, F) -> (B, 1, 1, F) に変形してブロードキャスト可能に
-        attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
+            # Sigmoid関数で重みを0〜1の範囲に正規化
+            # 各周波数が独立して重要かどうかを判断するため、SoftmaxよりSigmoidが適している?
+            # (B, 1, F) -> (B, 1, 1, F) に変形してブロードキャスト可能に
+            attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
 
-        # attention重みでスケーリング
-        output = attn_weights * x_mixed
+            # attention重みでスケーリング
+            output = attn_weights * x_mixed
+        elif self.mixstyle_type == "moreMix":
+            # MixStyleを適用
+            x_mixed = mix_style(x_content)
 
+            # --- MixStyle適用後の特徴量を対象にattentionを計算--- #
+            # 時間方向の平均をとって、各周波数の静的な特徴を取得
+            x_avg = x_content.mean(dim=2) # Time(Frames)方向で平均を取得
+
+            # 周波数動的注意 重みを作成
+            # (B, C, F) -> (B, 1, F)
+            attn_logits = self.attention_network(x_avg)
+
+            # Sigmoid関数で重みを0〜1の範囲に正規化
+            # 各周波数が独立して重要かどうかを判断するため、SoftmaxよりSigmoidが適している?
+            # (B, 1, F) -> (B, 1, 1, F) に変形してブロードキャスト可能に
+            attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
+
+            # attention重みでスケーリング
+            output = attn_weights * x_mixed + (1-attn_weights) * x_content
         return output
