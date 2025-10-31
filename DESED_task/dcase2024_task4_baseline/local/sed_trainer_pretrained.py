@@ -1647,7 +1647,6 @@ class SEDTask4(pl.LightningModule):
                 # 全テンソルを現在のデバイス（GPU/CPU）に移動
                 audio = audio.to(self.device)
                 labels = labels.to(self.device)
-                padded_indxs = padded_indxs.to(self.device)
                 embeddings = embeddings.to(self.device)
                 valid_class_mask = valid_class_mask.to(self.device)
 
