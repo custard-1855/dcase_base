@@ -9,7 +9,11 @@ cmt:
   phi_clip: 0.5             # クリップレベル閾値 (論文では0.5)
   phi_frame: 0.7            # フレームレベル閾値 (論文では0.7)
 
-training:
+sebbs:
+  enabled: false
+
+
+training:  
   # バッチサイズ（論文推奨）
   batch_size: [12, 6, 6, 12, 24]    # [maestro, synth, strong, weak, unlabel]
   batch_size_val: 24
@@ -135,3 +139,10 @@ net:
   specaugm_f_p: 0.0
   specaugm_f_l: 10
   median_filter: [3, 9, 9, 5, 5, 5, 9, 7, 11, 9, 7, 3, 9, 13, 7, 1, 13, 3, 13, 7, 5, 5, 1, 13, 17, 13, 15]
+  # wandb
+  use_wandb: True
+  wandb_dir: "MixStyle"
+  # for MixStyle
+  attn_type: normal
+  attn_deepen: true
+  mixstyle_type: moreMix

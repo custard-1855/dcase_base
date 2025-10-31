@@ -38,7 +38,9 @@ from sebbs.scripts.utils  import get_segment_scores
 
 # データ不足の対策
 from torch.utils.data.dataloader import DataLoader, default_collate
+import wandb
 
+PROJECT_NAME = "SED-pl-noise"
 
 
 scores_path = "path/to/your/validation/scores" # モデルが出力したスコア
@@ -138,6 +140,9 @@ class SEDTask4(pl.LightningModule):
     ):
         super(SEDTask4, self).__init__()
         self.hparams.update(hparams)
+
+        if self.hparams["net"]["use_wandb"]:
+            self._init_wandb_project()
 
         self.encoder = encoder
         self.sed_student = sed_student
@@ -259,6 +264,102 @@ class SEDTask4(pl.LightningModule):
             except Exception as e:
                 self._exp_dir = self.hparams["log_dir"]
         return self._exp_dir
+
+    def log(self, name, value, *args, **kwargs):
+        """Override LightningModule.log to mirror logs to wandb when enabled.
+
+        This calls the original pl.LightningModule.log and then attempts to
+        send the same key/value to wandb.log (if wandb is initialized and
+        use_wandb is enabled in hparams). Conversion of tensors/ndarrays to
+        Python scalars/lists is handled to avoid serialization issues.
+        """
+        # call parent logging first to preserve Lightning behavior
+        res = super(SEDTask4, self).log(name, value, *args, **kwargs)
+        try:
+            self._maybe_wandb_log({name: value})
+        except Exception:
+            # avoid any logging errors interfering with training
+            pass
+        return res
+
+    def log_dict(self, dictionary, *args, **kwargs):
+        """Mirror a dictionary of metrics to wandb in addition to Lightning's log_dict."""
+        res = super(SEDTask4, self).log_dict(dictionary, *args, **kwargs)
+        try:
+            self._maybe_wandb_log(dictionary)
+        except Exception:
+            pass
+        return res
+
+    def _maybe_wandb_log(self, log_dict):
+        """Safely log a dict to wandb if enabled and initialized.
+
+        Converts torch tensors and numpy arrays to Python scalars or lists.
+        If wandb isn't active or hparams disable it, this is a no-op.
+        """
+        try:
+            if not self.hparams.get("net", {}).get("use_wandb"):
+                return
+        except Exception:
+            return
+
+        # bail out if wandb is not initialized
+        try:
+            if wandb.run is None:
+                return
+        except Exception:
+            return
+
+        def _to_native(x):
+            # torch tensors
+            try:
+                import numbers
+
+                if isinstance(x, torch.Tensor):
+                    if x.numel() == 1:
+                        return x.detach().cpu().item()
+                    return x.detach().cpu().numpy().tolist()
+                # numpy arrays
+                if isinstance(x, (np.ndarray,)):
+                    return x.tolist()
+                # built-in number types
+                if isinstance(x, (int, float, bool, str)):
+                    return x
+                # pandas scalars
+                try:
+                    import pandas as _pd
+
+                    if isinstance(x, (_pd.Series, _pd.DataFrame)):
+                        return x.to_dict()
+                except Exception:
+                    pass
+                # fallback: try to cast to float, else str
+                try:
+                    return float(x)
+                except Exception:
+                    return str(x)
+            except Exception:
+                return str(x)
+
+        payload = {k: _to_native(v) for k, v in log_dict.items()}
+        # attempt to set step if available
+        step = None
+        try:
+            step = int(getattr(self, "global_step", None))
+        except Exception:
+            step = None
+        try:
+            if step is not None:
+                wandb.log(payload, step=step)
+            else:
+                wandb.log(payload)
+        except Exception:
+            # never raise from logging
+            pass
+
+
+    def _init_wandb_project(self):
+        wandb.init(project=PROJECT_NAME, name=self.hparams["net"]["wandb_dir"])
 
     def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
         scheduler.step()
@@ -1734,6 +1835,7 @@ class SEDTask4(pl.LightningModule):
 
         for key in results.keys():
             self.log(key, results[key], prog_bar=True, logger=True)
+        wandb.finish()
 
     def configure_optimizers(self):
         return [self.opt], [self.scheduler]

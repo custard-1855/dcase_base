@@ -43,7 +43,7 @@ class CNN(nn.Module):
         nb_filters=[64, 64, 64],
         pooling=[(1, 4), (1, 4), (1, 4)],
         normalization="batch",
-        **transformer_kwargs
+        **kwargs
     ):
         """
             Initialization of CNN network s
@@ -62,34 +62,7 @@ class CNN(nn.Module):
         super(CNN, self).__init__()
 
         self.nb_filters = nb_filters
-        # cnn = nn.Sequential()
-
-        # def conv(i, normalization="batch", dropout=None, activ="relu"):
-        #     nIn = n_in_channel if i == 0 else nb_filters[i - 1]
-        #     nOut = nb_filters[i]
-        #     cnn.add_module(
-        #         "conv{0}".format(i),
-        #         nn.Conv2d(nIn, nOut, kernel_size[i], stride[i], padding[i]),
-        #     )
-        #     if normalization == "batch":
-        #         cnn.add_module(
-        #             "batchnorm{0}".format(i),
-        #             nn.BatchNorm2d(nOut, eps=0.001, momentum=0.99),
-        #         )
-        #     elif normalization == "layer":
-        #         cnn.add_module("layernorm{0}".format(i), nn.GroupNorm(1, nOut))
-
-        #     if activ.lower() == "leakyrelu":
-        #         cnn.add_module("relu{0}".format(i), nn.LeakyReLU(0.2))
-        #     elif activ.lower() == "relu":
-        #         cnn.add_module("relu{0}".format(i), nn.ReLU())
-        #     elif activ.lower() == "glu":
-        #         cnn.add_module("glu{0}".format(i), GLU(nOut))
-        #     elif activ.lower() == "cg":
-        #         cnn.add_module("cg{0}".format(i), ContextGating(nOut))
-
-        #     if dropout is not None:
-        #         cnn.add_module("dropout{0}".format(i), nn.Dropout(dropout))
+        self.mixstyle_type = kwargs["mixstyle_type"]
 
         # --- 畳み込みブロックを個別に定義 ---
         # 単一のnn.Sequentialではなく、各ブロックをリストで管理
@@ -120,12 +93,11 @@ class CNN(nn.Module):
 
         # --- FrequencyAttentionMixStyleレイヤーを定義 ---
         # 1層目の前
-        self.attn_mixstyle_pre = FrequencyAttentionMixStyle(channels=n_in_channel)
+        self.attn_mixstyle_pre = FrequencyAttentionMixStyle(channels=n_in_channel, **kwargs)
         # 1層目の後
-        self.attn_mixstyle_post1 = FrequencyAttentionMixStyle(channels=nb_filters[0])
+        self.attn_mixstyle_post1 = FrequencyAttentionMixStyle(channels=nb_filters[0], **kwargs)
         # 2層目の後
-        self.attn_mixstyle_post2 = FrequencyAttentionMixStyle(channels=nb_filters[1])
-
+        self.attn_mixstyle_post2 = FrequencyAttentionMixStyle(channels=nb_filters[1], **kwargs)
 
         # # 128x862x64
         # for i in range(len(nb_filters)):
@@ -149,7 +121,7 @@ class CNN(nn.Module):
         # conv features
         # x = self.cnn(x)
 
-        if self.training: #MixStyleは学習時のみ適用
+        if self.training and self.mixstyle_type != "disabled":
             # 1. 1層目の前に適用
             x = self.attn_mixstyle_pre(x)
             
@@ -164,11 +136,11 @@ class CNN(nn.Module):
 
             # 5. 2層目の後に適用
             x = self.attn_mixstyle_post2(x)
-            
+
             # 6. 3層目以降の畳み込みブロックを適用
             for i in range(2, len(self.conv_blocks)):
                 x = self.conv_blocks[i](x)
-        else:
+        else: 
             for i in range(0, len(self.conv_blocks)):
                 x = self.conv_blocks[i](x)
         return x
