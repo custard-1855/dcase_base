@@ -688,12 +688,11 @@ def prepare_run(argv=None):
     )
     # 実験管理用
     parser.add_argument(
-        "--attn_type", default="normal",
+        "--attn_type", default="default",
     )
     parser.add_argument(
         "--attn_deepen", 
-        default=False,
-        action="store_true",
+        default=2,
     )
     parser.add_argument(
         "--mixstyle_type", default="resMix",
