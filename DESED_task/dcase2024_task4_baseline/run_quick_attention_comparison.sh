@@ -27,7 +27,8 @@ echo "=========================================="
 echo ""
 
 # 実験するattentionタイプ
-ATTENTION_TYPES=("default" "residual_deep" "multiscale" "se_deep" "dilated_deep")
+# default
+ATTENTION_TYPES=("residual_deep" "multiscale" "se_deep" "dilated_deep")
 
 # カウンター
 TOTAL=${#ATTENTION_TYPES[@]}

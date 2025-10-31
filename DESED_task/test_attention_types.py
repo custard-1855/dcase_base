@@ -5,7 +5,7 @@ import torch
 import sys
 sys.path.append('dcase2024_task4_baseline')
 
-from desed_task.nnet.mixstyle import FrequencyAttentionMixStyle
+from dcase2024_task4_baseline.desed_task.nnet.mixstyle import FrequencyAttentionMixStyle
 
 def test_attention_pattern(attn_type, deepen=2):
     """各attention typeの動作をテスト"""

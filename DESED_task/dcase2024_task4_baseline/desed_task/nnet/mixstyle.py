@@ -132,7 +132,7 @@ class FrequencyAttentionMixStyle(nn.Module):
 
         # Attention Networkの構築（attention_typeに応じて切り替え）
         self.attention_network = self._build_attention_network(
-            channels, specific_channels, self.attention_type, self.deepen
+            channels, specific_channels, self.attention_type, int(self.deepen)
         )
 
     def _build_attention_network(self, in_channels, mid_channels, attn_type, depth):
