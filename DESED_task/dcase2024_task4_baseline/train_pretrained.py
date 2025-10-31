@@ -696,7 +696,7 @@ def prepare_run(argv=None):
         action="store_true",
     )
     parser.add_argument(
-        "--mixstyle_type", default="moreMix",
+        "--mixstyle_type", default="resMix",
     )
     parser.add_argument(
         "--cmt", action="store_true",
