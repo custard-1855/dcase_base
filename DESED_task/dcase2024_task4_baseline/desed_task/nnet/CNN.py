@@ -121,7 +121,7 @@ class CNN(nn.Module):
         # conv features
         # x = self.cnn(x)
 
-        if self.training or self.mixstyle_type != "disabled":
+        if self.training and self.mixstyle_type != "disabled":
             # 1. 1層目の前に適用
             x = self.attn_mixstyle_pre(x)
             
