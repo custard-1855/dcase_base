@@ -354,6 +354,63 @@ def single_run(
     ##### model definition  ############
     sed_student = CRNN(**config["net"])
 
+    # Validation dataset creation (needed for both training and evaluation modes)
+    # This is required for cSEBBs tuning even in evaluation-only mode
+    weak_df = pd.read_csv(config["data"]["weak_tsv"], sep="\t")
+    train_weak_df = weak_df.sample(
+        frac=config["training"]["weak_split"],
+        random_state=config["training"]["seed"],
+    )
+    valid_weak_df = weak_df.drop(train_weak_df.index).reset_index(drop=True)
+    train_weak_df = train_weak_df.reset_index(drop=True)
+
+    synth_df_val = pd.read_csv(config["data"]["synth_val_tsv"], sep="\t")
+
+    synth_val = StronglyAnnotatedSet(
+        config["data"]["synth_val_folder"],
+        synth_df_val,
+        encoder,
+        return_filename=True,
+        pad_to=config["data"]["audio_max_len"],
+        feats_pipeline=feature_extraction,
+        embeddings_hdf5_file=get_embeddings_name(config, "synth_val"),
+        embedding_type=config["net"]["embedding_type"],
+        mask_events_other_than=mask_events_desed,
+    )
+
+    weak_val = WeakSet(
+        config["data"]["weak_folder"],
+        valid_weak_df,
+        encoder,
+        pad_to=config["data"]["audio_max_len"],
+        return_filename=True,
+        feats_pipeline=feature_extraction,
+        embeddings_hdf5_file=get_embeddings_name(config, "weak_val"),
+        embedding_type=config["net"]["embedding_type"],
+        mask_events_other_than=mask_events_desed,
+    )
+
+    maestro_real_train_df = pd.read_csv(
+        config["data"]["real_maestro_train_tsv"], sep="\t"
+    )
+    maestro_real_train_df, maestro_real_valid_df = split_maestro(
+        config, maestro_real_train_df
+    )
+
+    maestro_real_valid = StronglyAnnotatedSet(
+        config["data"]["real_maestro_train_folder"],
+        maestro_real_valid_df,
+        encoder,
+        pad_to=config["data"]["audio_max_len"],
+        return_filename=True,
+        feats_pipeline=feature_extraction,
+        embeddings_hdf5_file=get_embeddings_name(config, "maestro_real_train"),
+        embedding_type=config["net"]["embedding_type"],
+        mask_events_other_than=mask_events_maestro_real,
+    )
+
+    valid_dataset = torch.utils.data.ConcatDataset([synth_val, weak_val, maestro_real_valid])
+
     if test_state_dict is None:
         ##### data prep train valid ##########
         synth_df = pd.read_csv(config["data"]["synth_tsv"], sep="\t")
@@ -390,15 +447,6 @@ def single_run(
             mask_events_other_than=mask_events_desed
         )
 
-        weak_df = pd.read_csv(config["data"]["weak_tsv"], sep="\t")
-        #weak_df = filter_missing(weak_df) # データ欠損対策
-        train_weak_df = weak_df.sample(
-            frac=config["training"]["weak_split"],
-            random_state=config["training"]["seed"],
-        )
-        valid_weak_df = weak_df.drop(train_weak_df.index).reset_index(drop=True)
-        train_weak_df = train_weak_df.reset_index(drop=True)
-
         weak_set = WeakSet(
             config["data"]["weak_folder"],
             train_weak_df,
@@ -420,61 +468,14 @@ def single_run(
             mask_events_other_than=mask_events_desed,
         )
 
-        synth_df_val = pd.read_csv(config["data"]["synth_val_tsv"], sep="\t")
-        #synth_df_val = filter_missing(synth_df_val) # データ欠損対策
-        
-
-        synth_val = StronglyAnnotatedSet(
-            config["data"]["synth_val_folder"],
-            synth_df_val,
-            encoder,
-            return_filename=True,
-            pad_to=config["data"]["audio_max_len"],
-            feats_pipeline=feature_extraction,
-            embeddings_hdf5_file=get_embeddings_name(config, "synth_val"),
-            embedding_type=config["net"]["embedding_type"],
-            mask_events_other_than=mask_events_desed,
-        )
-
-        weak_val = WeakSet(
-            config["data"]["weak_folder"],
-            valid_weak_df,
-            encoder,
-            pad_to=config["data"]["audio_max_len"],
-            return_filename=True,
-            feats_pipeline=feature_extraction,
-            embeddings_hdf5_file=get_embeddings_name(config, "weak_val"),
-            embedding_type=config["net"]["embedding_type"],
-            mask_events_other_than=mask_events_desed,
-        )
-
-        maestro_real_train = pd.read_csv(
-            config["data"]["real_maestro_train_tsv"], sep="\t"
-        )
-
-        maestro_real_train, maestro_real_valid = split_maestro(
-            config, maestro_real_train
-        )
-        maestro_real_train = process_tsvs(
-            maestro_real_train, alias_map=maestro_desed_alias
+        maestro_real_train_processed = process_tsvs(
+            maestro_real_train_df, alias_map=maestro_desed_alias
         )
         maestro_real_train = StronglyAnnotatedSet(
             config["data"]["real_maestro_train_folder"],
-            maestro_real_train,
+            maestro_real_train_processed,
             encoder,
             pad_to=config["data"]["audio_max_len"],
-            feats_pipeline=feature_extraction,
-            embeddings_hdf5_file=get_embeddings_name(config, "maestro_real_train"),
-            embedding_type=config["net"]["embedding_type"],
-            mask_events_other_than=mask_events_maestro_real,
-        )
-
-        maestro_real_valid = StronglyAnnotatedSet(
-            config["data"]["real_maestro_train_folder"],
-            maestro_real_valid,
-            encoder,
-            pad_to=config["data"]["audio_max_len"],
-            return_filename=True,
             feats_pipeline=feature_extraction,
             embeddings_hdf5_file=get_embeddings_name(config, "maestro_real_train"),
             embedding_type=config["net"]["embedding_type"],
@@ -490,8 +491,6 @@ def single_run(
         batch_sizes = config["training"]["batch_size"]
         samplers = [torch.utils.data.RandomSampler(x) for x in tot_train_data]
         batch_sampler = ConcatDatasetBatchSampler(samplers, batch_sizes)
-
-        valid_dataset = torch.utils.data.ConcatDataset([synth_val, weak_val, maestro_real_valid])
 
         ##### training params and optimizers ############
         epoch_len = min(
@@ -544,7 +543,6 @@ def single_run(
             ]
     else:
         train_dataset = None
-        valid_dataset = None
         batch_sampler = None
         opt = None
         exp_scheduler = None
