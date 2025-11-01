@@ -69,8 +69,6 @@ class _NoneSafeIterator:
             print("Skipping a batch that was None internally.")
 
 
-
-
 class SafeCollate:
     """
     データセットから返される None 値をフィルタリングする collate_fn。
@@ -102,7 +100,6 @@ class SafeDataLoader(DataLoader):
         dataloader_iter = super().__iter__()
         # Noneをスキップする機能を持つラッパーで包んで返す
         return _NoneSafeIterator(dataloader_iter)
-
 
 
 class SEDTask4(pl.LightningModule):
@@ -154,6 +151,11 @@ class SEDTask4(pl.LightningModule):
         self.cmt_phi_clip = self.hparams.get("cmt", {}).get("phi_clip", 0.5)
         self.cmt_phi_frame = self.hparams.get("cmt", {}).get("phi_frame", 0.7)
 
+        # cSEBBs param
+        self.sebbs_enabled = self.hparams.get("sebbs", {}).get("enabled", False)
+
+
+
         if self.hparams["pretrained"]["e2e"]:
             self.pretrained_model = pretrained_model
         # else we use pre-computed embeddings from hdf5
@@ -189,21 +191,6 @@ class SEDTask4(pl.LightningModule):
             wkwargs={"periodic": False},
             power=1,
         )
-
-        # self.mfcc = MFCC(
-        #     sample_rate=feat_params["sample_rate"],
-        #     melkwargs= {
-        #     "n_fft": feat_params["n_window"],
-        #     "win_length": feat_params["n_window"],
-        #     "hop_length": feat_params["hop_length"],
-        #     "f_min": feat_params["f_min"],
-        #     "f_max": feat_params["f_max"],
-        #     "n_mels": feat_params["n_mels"],
-        #     "window_fn": torch.hamming_window,
-        #     "wkwargs": {"periodic": False},
-        #     "power": 1,
-        #     },
-        # )
 
 
         for param in self.sed_teacher.parameters():
@@ -474,15 +461,14 @@ class SEDTask4(pl.LightningModule):
         """
         # y_s: (batch, classes, frames), y_w: (batch, classes)
 
-        # Step 1: Apply clip-level threshold # クリップレベルで閾値で二値化
+        # Step 1: Apply clip-level threshold
         y_tilde_w = (y_w > phi_clip).float()
         y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s) # クリップとフレームでサイズが合わないので拡張
 
         # Step 2 & 3: Apply two-stage thresholding, frame-level
-        # フレームレベルで二値化 おそらく元論文はクリップの判定とフレームの判定をかけて算出しろ,と言っている
         y_s_temp = y_s.clone()    
-        # クリップ予測の二値化とフレーム予測の二値化をかける
-        y_s_binary = y_w_expanded * ((y_s_temp > phi_frame).float()) # bool値をfloatにしているっぽい. 最初からそれでいいのでは?
+        # クリップ予測の二値化とフレーム予測の二値化をかける クリップの予測が0の時,フレームも0とする
+        y_s_binary = y_w_expanded * ((y_s_temp > phi_frame).float())
 
         # Step 4: Apply class-wise constraint and median filter
         # Expand y_tilde_w to (batch, classes, 1) for broadcasting
@@ -495,18 +481,8 @@ class SEDTask4(pl.LightningModule):
             constrained_s = constrained_s.transpose(0, 1).detach().cpu().numpy()
             y_tilde_s.append(self.median_filter(constrained_s)) 
 
-        # constrained_s = # y_s_binary * y_tilde_w.unsqueeze(-1)
-        # c_scores.transpose(0, 1).detach().cpu().numpy()
-
-        # Apply the median filter which expects (batch, classes, frames)
-        # n_classes = y_w.shape[1]
-        # median_filter_list = [filter_size] * n_classes
-        # median_filter = ClassWiseMedianFilter(median_filter_list)
-
         # 窓のサイズをconfsから読み取るように変更
         original_device = y_s.device
-        # constrained_s = constrained_s.cpu().numpy()
-        # y_tilde_s = self.median_filter(constrained_s)
         y_tilde_s = np.stack(y_tilde_s, axis=0)
         y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
         y_tilde_s = y_tilde_s.transpose(1, 2) # class,framesを入れ替え
@@ -519,15 +495,9 @@ class SEDTask4(pl.LightningModule):
         """
         # c_w(k) = ŷ_w(k) · I(ỹ_w(k)=1)
         c_w = y_w * (y_tilde_w == 1).float()
-        # print("[DEBUG]: ", y_w.size())
-        # print("[DEBUG]: ", y_s.size())
 
-
-        # c_s(t,k) = ŷ_s(t,k) · ŷ_w(k) · I(ỹ_s(t,k)=1)
         # Expand y_w to match dimensions of y_s: (batch, classes, frames)
         y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
-        # print("[DEBUG]: ", y_w_expanded.size())
-        # print("[DEBUG]: ", y_tilde_s.size())
         c_s = y_s * y_w_expanded * (y_tilde_s == 1).float()
 
         return c_w, c_s
@@ -549,26 +519,6 @@ class SEDTask4(pl.LightningModule):
         Returns:
             loss_w_con: torch.Tensor, weighted weak consistency loss
             loss_s_con: torch.Tensor, weighted strong consistency loss
-        """
-
-        """ 参考実装
-        if torch.any(mask_unlabeled):
-            strong_self_sup_loss = self.selfsup_loss(
-                strong_preds_student[mask_unlabeled],
-                strong_preds_teacher.detach()[mask_unlabeled],
-            )
-            weak_self_sup_loss = self.selfsup_loss(
-                weak_preds_student[mask_unlabeled],
-                weak_preds_teacher.detach()[mask_unlabeled],
-            )
-        else:
-            strong_self_sup_loss = torch.tensor(0.0, device=features.device)
-            strong_self_sup_loss.requires_grad_()
-            weak_self_sup_loss = torch.tensor(0.0, device=features.device)
-            weak_self_sup_loss.requires_grad_()
-        tot_self_loss = (strong_self_sup_loss + weak_self_sup_loss) * weight
-
-        tot_loss = tot_loss_supervised + tot_self_loss
         """
 
         # Weak consistency loss: ℓ_w,con = (1/|K|) ∑_{k=1}^K c_w(k) · BCE(ỹ_w(k), f_{θ_s}(x)_w(k))
@@ -1245,7 +1195,6 @@ class SEDTask4(pl.LightningModule):
             self.log("test/student/loss_strong", loss_strong_student)
             self.log("test/teacher/loss_strong", loss_strong_teacher)
 
-        # SEBBsを正しくtuneする. 最終的なモデルのvalidationスコアをもらい,それでtune
         # desed synth dataset
         desed_ground_truth = sed_scores_eval.io.read_ground_truth_events(
             self.hparams["data"]["synth_val_tsv"]
@@ -1286,7 +1235,7 @@ class SEDTask4(pl.LightningModule):
         # ========================================================================
         # cSEBBsは、フレームレベルのスコアから変化点検出によりイベント境界を推定し、
         # 適応的なセグメントマージによって最終的なイベント候補(bounding boxes)を生成する。
-        # ここでは、validation setを用いてハイパーパラメータをチューニングする。
+        # ここでは、validation setを用いてハイパーパラメータをチューニング
 
         # --- 1. DESEDクラス用のcSEBBsチューニング ---
         if not hasattr(self, "csebbs_predictor_desed"):
@@ -1363,14 +1312,13 @@ class SEDTask4(pl.LightningModule):
         # Student modelのスコア生成とcSEBBs後処理
         # ========================================================================
 
-        # --- ステップ1: median filterによる基本的な後処理 ---
         # batched_decode_preds()は以下を実行:
         #   1. median filterによるスコアの平滑化
         #   2. 複数の閾値でのバイナリ検出（PSDS計算用）
         #   3. sed_scores_eval形式への変換
         (
             scores_unprocessed_student_strong,  # median filter適用前のスコア
-            _,  # scores_postprocessed_student_strong（使用しない、cSEBBsで置き換える）
+            scores_postprocessed_student_strong, # 検証用に有効化したが,本当は使用しない
             decoded_student_strong,  # 閾値別のバイナリ検出結果
         ) = batched_decode_preds(
             strong_preds_student,
@@ -1380,7 +1328,6 @@ class SEDTask4(pl.LightningModule):
             thresholds=list(self.test_buffer_psds_eval_student.keys()) + [0.5],
         )
 
-        # --- ステップ2: cSEBBsによる高度な後処理 ---
         # median filterの代わりにcSEBBsを使用してイベント境界を精緻化
         # cSEBBsの利点:
         #   - 変化点検出による正確なonset/offset推定
@@ -1388,9 +1335,10 @@ class SEDTask4(pl.LightningModule):
         #   - フレームレベル閾値の影響を受けないイベント検出
         # 入力: median filter適用前のスコア（より細かい時間分解能を保持）
         # 出力: cSEBBsにより生成されたイベント候補のスコア
-        scores_postprocessed_student_strong = get_sebbs(self, scores_unprocessed_student_strong)
 
-        # --- ステップ3: バッファに蓄積 ---
+        if self.sebbs_enabled:
+            scores_postprocessed_student_strong = get_sebbs(self, scores_unprocessed_student_strong)
+
         # 後処理前後のスコアを保存（比較・分析用）
         self.test_buffer_sed_scores_eval_unprocessed_student.update(
             scores_unprocessed_student_strong
@@ -1405,12 +1353,7 @@ class SEDTask4(pl.LightningModule):
                 ignore_index=True,
             )
 
-        # ========================================================================
-        # Teacher modelのスコア生成とcSEBBs後処理
-        # ========================================================================
         # Teacher modelについてもStudent modelと同様の処理を実行
-
-        # --- ステップ1: median filterによる基本的な後処理 ---
         (
             scores_unprocessed_teacher_strong,  # median filter適用前のスコア
             scores_postprocessed_teacher_strong,  # 使用しない、cSEBBsで置き換える
@@ -1423,12 +1366,9 @@ class SEDTask4(pl.LightningModule):
             thresholds=list(self.test_buffer_psds_eval_teacher.keys()) + [0.5],
         )
 
-        # --- ステップ2: cSEBBsによる高度な後処理 ---
-        # Teacher modelにも同じcSEBBs predictorを適用
-        # （Student/Teacherで異なるpredictorを使う理由はない）
-        scores_postprocessed_teacher_strong = get_sebbs(self, scores_unprocessed_teacher_strong)
+        if self.sebbs_enabled:
+            scores_postprocessed_teacher_strong = get_sebbs(self, scores_unprocessed_teacher_strong)
 
-        # --- ステップ3: バッファに蓄積 ---
         self.test_buffer_sed_scores_eval_unprocessed_teacher.update(
             scores_unprocessed_teacher_strong
         )
@@ -1881,7 +1821,7 @@ class SEDTask4(pl.LightningModule):
         """Test開始時の初期化処理。
 
         cSEBBsのチューニングに必要なvalidationスコアを収集するため、
-        test実行前に一度validationパスを実行する。
+        test実行前に一度validationパスを実行
 
         処理の流れ:
             1. MAESTROのメタデータ（ground truth, audio durations）を読み込み
@@ -1889,64 +1829,60 @@ class SEDTask4(pl.LightningModule):
             3. 収集したスコアはval_buffer_sed_scores_eval_studentに保存
             4. test_step内でこのバッファを使ってcSEBBsをチューニング
         """
-        # ========================================================================
-        # ステップ1: MAESTROメタデータの読み込み
-        # ========================================================================
-        print("Loading MAESTRO audio durations and ground truth for test...")
-        # MAESTROのground truthとaudio durationsを読み込み
-        # 結果は self._maestro_ground_truth, self._maestro_audio_durations に保存
-        self.load_maestro_audio_durations_and_gt()
 
-        # ========================================================================
-        # ステップ2: cSEBBsチューニング用のValidationパス実行
-        # ========================================================================
-        # なぜValidationパスを実行するのか:
-        #   - cSEBBsのハイパーパラメータ（step_filter_length, merge_thresholds）を
-        #     validation setでチューニングする必要がある
-        #   - trainer.test()はbest checkpointをロード済みなので、
-        #     ここでvalidationを実行すれば最良モデルでのスコアが得られる
-        #   - これらのスコアをtest_step内でcSEBBsチューニングに使用
-        print("\n" + "="*70)
-        print("Running validation pass to collect scores for cSEBBs tuning")
-        print("="*70)
+        if self.sebbs_enabled:
+            # MAESTROのground truthとaudio durationsを読み込み
+            # 結果は self._maestro_ground_truth, self._maestro_audio_durations に保存
+            print("Loading MAESTRO audio durations and ground truth for test...")
+            self.load_maestro_audio_durations_and_gt()
 
-        # バッファを初期化（以前のスコアをクリア）
-        self.val_buffer_sed_scores_eval_student = {}
-        self.val_buffer_sed_scores_eval_teacher = {}
+            # Validationパスを実行. 理由は以下:
+            #   - cSEBBsのハイパーパラメータ（step_filter_length, merge_thresholds）を
+            #     validation setでチューニングする必要がある
+            #   - trainer.test()はbest checkpointをロード済みなので、
+            #     ここでvalidationを実行すれば最良モデルでのスコアが得られる
+            #   - これらのスコアをtest_step内でcSEBBsチューニングに使用
+            print("\n" + "="*70)
+            print("Running validation pass to collect scores for cSEBBs tuning")
+            print("="*70)
 
-        # Validationデータローダーを取得
-        val_loader = self.val_dataloader()
+            # バッファを初期化（以前のスコアをクリア）
+            self.val_buffer_sed_scores_eval_student = {}
+            self.val_buffer_sed_scores_eval_teacher = {}
 
-        # モデルを評価モードに設定（Dropout等を無効化）
-        self.sed_student.eval()
-        self.sed_teacher.eval()
+            # Validationデータローダーを取得
+            val_loader = self.val_dataloader()
 
-        # Validationパスを実行してスコアを収集
-        # torch.no_grad()で勾配計算を無効化（メモリ節約＆高速化）
-        with torch.no_grad():
-            for batch_idx, batch in enumerate(val_loader):
-                # バッチデータをアンパック
-                audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = batch
+            # モデルを評価モードに設定（Dropout等を無効化）
+            self.sed_student.eval()
+            self.sed_teacher.eval()
 
-                # 全テンソルを現在のデバイス（GPU/CPU）に移動
-                audio = audio.to(self.device)
-                labels = labels.to(self.device)
-                embeddings = embeddings.to(self.device)
-                valid_class_mask = valid_class_mask.to(self.device)
+            # Validationパスを実行してスコアを収集
+            # torch.no_grad()で勾配計算を無効化（メモリ節約＆高速化）
+            with torch.no_grad():
+                for batch_idx, batch in enumerate(val_loader):
+                    # バッチデータをアンパック
+                    audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = batch
 
-                # デバイス移動後のバッチを再構築
-                moved_batch = (audio, labels, padded_indxs, filenames, embeddings, valid_class_mask)
+                    # 全テンソルを現在のデバイス（GPU/CPU）に移動
+                    audio = audio.to(self.device)
+                    labels = labels.to(self.device)
+                    embeddings = embeddings.to(self.device)
+                    valid_class_mask = valid_class_mask.to(self.device)
 
-                # validation_stepを実行
-                # この中でval_buffer_sed_scores_eval_studentにスコアが蓄積される
-                self.validation_step(moved_batch, batch_idx)
+                    # デバイス移動後のバッチを再構築
+                    moved_batch = (audio, labels, padded_indxs, filenames, embeddings, valid_class_mask)
 
-        print(f"\n✓ Validation pass complete")
-        print(f"  Collected scores for {len(self.val_buffer_sed_scores_eval_student)} clips")
+                    # validation_stepを実行
+                    # この中でval_buffer_sed_scores_eval_studentにスコアが蓄積される
+                    self.validation_step(moved_batch, batch_idx)
 
-        # 重要: validation_epoch_end()は呼び出さない
-        # 理由: validation_epoch_end()内でバッファがクリアされてしまい、
-        #       test_step内でのcSEBBsチューニングに使えなくなるため
+            print(f"\n✓ Validation pass complete")
+            print(f"  Collected scores for {len(self.val_buffer_sed_scores_eval_student)} clips")
+
+            # 重要: validation_epoch_end()は呼び出さない
+            # 理由: validation_epoch_end()内でバッファがクリアされてしまい、
+            #       test_step内でのcSEBBsチューニングに使えなくなるため
 
         if self.evaluation:
             os.makedirs(os.path.join(self.exp_dir, "codecarbon"), exist_ok=True)
@@ -2012,9 +1948,6 @@ class SEDTask4(pl.LightningModule):
         if missing:
             warnings.warn(f"maestro_audio_durations missing for {len(missing)} files. Examples: {list(missing)[:5]}. Using fallback for those clips.")
             # 欠損は許容するが、fallback 用に空のエントリは作らない（fallbackはget()で対応）
-
-        # ログ（あると便利）
-        # self.logger.info(f"Loaded {len(maestro_audio_durations_filtered)} maestro durations for {len(maestro_ground_truth)} ground truth clips.")
 
         # キャッシュしておく（後で呼び出し直すときのため）
         self._maestro_audio_durations = maestro_audio_durations_filtered
@@ -2183,9 +2116,7 @@ def get_sebbs(self, scores_all_classes):
         4. sed_scores_eval形式のDataFrameに変換
     """
 
-    # ========================================================================
     # ステップ1: DESEDクラスに対するcSEBBs適用
-    # ========================================================================
     # DESEDは家庭内音（食器、掃除機、猫など）の10クラス
     desed_classes = list(classes_labels_desed.keys())
     keys_desed = ["onset", "offset"] + sorted(desed_classes)
@@ -2202,9 +2133,7 @@ def get_sebbs(self, scores_all_classes):
         scores_desed_classes
     )
 
-    # ========================================================================
     # ステップ2: MAESTROクラスに対するcSEBBs適用
-    # ========================================================================
     # MAESTROは都市音・屋内音（足音、会話、車など）の17クラス
     maestro_classes = list(classes_labels_maestro_real.keys())
     keys_maestro = ["onset", "offset"] + sorted(maestro_classes)
@@ -2222,9 +2151,7 @@ def get_sebbs(self, scores_all_classes):
         scores_maestro_classes
     )
 
-    # ========================================================================
     # ステップ3: イベント候補の統合
-    # ========================================================================
     # DESEDとMAESTROの全クラスのリスト（重複なし、ソート済み）
     all_sound_classes = sorted(list(set(desed_classes + maestro_classes)))
 
@@ -2247,9 +2174,7 @@ def get_sebbs(self, scores_all_classes):
             key=lambda x: x[0]  # onset時間でソート
         )
 
-    # ========================================================================
     # ステップ4: sed_scores_eval形式への変換
-    # ========================================================================
     # イベント候補リストからsed_scores_eval形式のDataFrameに変換
     # - 各イベントの時間範囲で該当クラスのスコアを設定
     # - イベントが存在しない時間・クラスは0.0で埋める

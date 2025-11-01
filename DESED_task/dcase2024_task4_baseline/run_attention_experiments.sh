@@ -32,30 +32,30 @@ echo ""
 ################################################################################
 # 実験1: デフォルトAttention (ベースライン)
 ################################################################################
-echo "[1/9] Running: default attention (depth=2)"
-uv run train_pretrained.py \
-    --attn_type default \
-    --attn_deepen 2 \
-    --mixstyle_type ${MIXSTYLE_TYPE} \
-    --wandb_dir ${BASE_WANDB_DIR}/default_d2 \
-    2>&1 | tee ${LOG_DIR}/default_d2_${TIMESTAMP}.log
+# echo "[1/9] Running: default attention (depth=2)"
+# uv run train_pretrained.py \
+#     --attn_type default \
+#     --attn_deepen 2 \
+#     --mixstyle_type ${MIXSTYLE_TYPE} \
+#     --wandb_dir ${BASE_WANDB_DIR}/default_d2 \
+#     2>&1 | tee ${LOG_DIR}/default_d2_${TIMESTAMP}.log
 
-echo "Completed: default (depth=2)"
-echo ""
+# echo "Completed: default (depth=2)"
+# echo ""
 
 ################################################################################
 # 実験2-3: Residual Deep Attention (異なる深さ)
 ################################################################################
-echo "[2/9] Running: residual_deep attention (depth=2)"
-uv run train_pretrained.py \
-    --attn_type residual_deep \
-    --attn_deepen 2 \
-    --mixstyle_type ${MIXSTYLE_TYPE} \
-    --wandb_dir ${BASE_WANDB_DIR}/residual_deep_d2 \
-    2>&1 | tee ${LOG_DIR}/residual_deep_d2_${TIMESTAMP}.log
+# echo "[2/9] Running: residual_deep attention (depth=2)"
+# uv run train_pretrained.py \
+#     --attn_type residual_deep \
+#     --attn_deepen 2 \
+#     --mixstyle_type ${MIXSTYLE_TYPE} \
+#     --wandb_dir ${BASE_WANDB_DIR}/residual_deep_d2 \
+#     2>&1 | tee ${LOG_DIR}/residual_deep_d2_${TIMESTAMP}.log
 
-echo "Completed: residual_deep (depth=2)"
-echo ""
+# echo "Completed: residual_deep (depth=2)"
+# echo ""
 
 echo "[3/9] Running: residual_deep attention (depth=4)"
 uv run train_pretrained.py \
@@ -96,16 +96,16 @@ echo ""
 ################################################################################
 # 実験6-7: SE-Deep Attention (異なる深さ)
 ################################################################################
-echo "[6/9] Running: se_deep attention (depth=2)"
-uv run train_pretrained.py \
-    --attn_type se_deep \
-    --attn_deepen 2 \
-    --mixstyle_type ${MIXSTYLE_TYPE} \
-    --wandb_dir ${BASE_WANDB_DIR}/se_deep_d2 \
-    2>&1 | tee ${LOG_DIR}/se_deep_d2_${TIMESTAMP}.log
+# echo "[6/9] Running: se_deep attention (depth=2)"
+# uv run train_pretrained.py \
+#     --attn_type se_deep \
+#     --attn_deepen 2 \
+#     --mixstyle_type ${MIXSTYLE_TYPE} \
+#     --wandb_dir ${BASE_WANDB_DIR}/se_deep_d2 \
+#     2>&1 | tee ${LOG_DIR}/se_deep_d2_${TIMESTAMP}.log
 
-echo "Completed: se_deep (depth=2)"
-echo ""
+# echo "Completed: se_deep (depth=2)"
+# echo ""
 
 echo "[7/9] Running: se_deep attention (depth=3)"
 uv run train_pretrained.py \

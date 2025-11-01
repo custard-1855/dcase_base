@@ -695,13 +695,13 @@ def prepare_run(argv=None):
         default=2,
     )
     parser.add_argument(
-        "--mixstyle_type", default="resMix",
+        "--mixstyle_type", default="disabled",
     )
     parser.add_argument(
-        "--cmt", action="store_true",
+        "--cmt", action="store_true", default=False
     )
     parser.add_argument(
-        "--sebbs", action="store_true",
+        "--sebbs", action="store_true", default=False
     )
     parser.add_argument(
         "--wandb_dir"
