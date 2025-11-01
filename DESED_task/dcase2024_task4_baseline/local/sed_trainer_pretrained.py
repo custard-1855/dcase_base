@@ -485,7 +485,7 @@ class SEDTask4(pl.LightningModule):
         original_device = y_s.device
         y_tilde_s = np.stack(y_tilde_s, axis=0)
         y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
-        y_tilde_s = y_tilde_s.transpose(1, 2) # class,framesを入れ替え
+        y_tilde_s = y_tilde_s.transpose(1, 2) # (batch, frames, classes) -> (batch, classes, frames)
 
         return y_tilde_w, y_tilde_s
 
