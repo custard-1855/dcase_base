@@ -524,30 +524,12 @@ def single_run(
         )
         logger.log_hyperparams(config)
         print(f"experiment dir: {logger.log_dir}")
-
-        if callbacks is None:
-            callbacks = [
-                EarlyStopping(
-                    monitor="val/obj_metric",
-                    patience=config["training"]["early_stop_patience"],
-                    verbose=True,
-                    mode="max",
-                ),
-                ModelCheckpoint(
-                    logger.log_dir,
-                    monitor="val/obj_metric",
-                    save_top_k=1,
-                    mode="max",
-                    save_last=True,
-                ),
-            ]
     else:
         train_dataset = None
         batch_sampler = None
         opt = None
         exp_scheduler = None
         logger = True
-        callbacks = None
 
     # calulate multiply–accumulate operation (MACs)
     #macs, _ = calculate_macs(sed_student, config, test_dataset)
@@ -568,6 +550,34 @@ def single_run(
         fast_dev_run=fast_dev_run,
         evaluation=evaluation,
     )
+
+    # callbacksの設定（desed_training作成後に移動）
+    if test_state_dict is None:
+        # wandbが有効な場合はwandのcheckpointディレクトリを使用
+        if hasattr(desed_training, '_wandb_checkpoint_dir') and desed_training._wandb_checkpoint_dir:
+            checkpoint_dir = desed_training._wandb_checkpoint_dir
+            print(f"Using wandb checkpoint directory: {checkpoint_dir}")
+        else:
+            checkpoint_dir = logger.log_dir
+            print(f"Using default checkpoint directory: {checkpoint_dir}")
+
+        callbacks = [
+            EarlyStopping(
+                monitor="val/obj_metric",
+                patience=config["training"]["early_stop_patience"],
+                verbose=True,
+                mode="max",
+            ),
+            ModelCheckpoint(
+                checkpoint_dir,
+                monitor="val/obj_metric",
+                save_top_k=1,
+                mode="max",
+                save_last=True,
+            ),
+        ]
+    else:
+        callbacks = None
 
     # Not using the fast_dev_run of Trainer because creates a DummyLogger so cannot check problems with the Logger
     if fast_dev_run:
