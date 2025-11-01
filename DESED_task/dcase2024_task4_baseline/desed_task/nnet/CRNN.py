@@ -150,8 +150,9 @@ class CRNN(nn.Module):
                 self.cat_tf = torch.nn.Linear(2 * nb_in, nb_in)
 
         # 一旦ハードコード
-        dct_mat = torchaudio.functional.create_dct(40, 128, "ortho")
-        self.register_buffer("dct_mat", dct_mat)
+        # 訓練時のみ???
+        # dct_mat = torchaudio.functional.create_dct(40, 128, "ortho")
+        # self.register_buffer("dct_mat", dct_mat)
 
     def _get_logits_one_head(
         self, x, pad_mask, dense, dense_softmax, classes_mask=None
