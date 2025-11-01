@@ -1835,49 +1835,59 @@ class SEDTask4(pl.LightningModule):
             print("Loading MAESTRO audio durations and ground truth for test...")
             self.load_maestro_audio_durations_and_gt()
 
-            # Validationパスを実行. 理由は以下:
-            #   - cSEBBsのハイパーパラメータ（step_filter_length, merge_thresholds）を
-            #     validation setでチューニングする必要がある
-            #   - trainer.test()はbest checkpointをロード済みなので、
-            #     ここでvalidationを実行すれば最良モデルでのスコアが得られる
-            #   - これらのスコアをtest_step内でcSEBBsチューニングに使用
-            print("\n" + "="*70)
-            print("Running validation pass to collect scores for cSEBBs tuning")
-            print("="*70)
+            # Validation dataが存在しない場合はスキップ
+            if self.valid_data is None:
+                print("\n" + "="*70)
+                print("WARNING: Validation data not available, skipping cSEBBs tuning")
+                print("cSEBBs will use default parameters without validation-based tuning")
+                print("="*70)
+                # 空のバッファを初期化（test_stepでエラーが出ないように）
+                self.val_buffer_sed_scores_eval_student = {}
+                self.val_buffer_sed_scores_eval_teacher = {}
+            else:
+                # Validationパスを実行. 理由は以下:
+                #   - cSEBBsのハイパーパラメータ（step_filter_length, merge_thresholds）を
+                #     validation setでチューニングする必要がある
+                #   - trainer.test()はbest checkpointをロード済みなので、
+                #     ここでvalidationを実行すれば最良モデルでのスコアが得られる
+                #   - これらのスコアをtest_step内でcSEBBsチューニングに使用
+                print("\n" + "="*70)
+                print("Running validation pass to collect scores for cSEBBs tuning")
+                print("="*70)
 
-            # バッファを初期化（以前のスコアをクリア）
-            self.val_buffer_sed_scores_eval_student = {}
-            self.val_buffer_sed_scores_eval_teacher = {}
+                # バッファを初期化（以前のスコアをクリア）
+                self.val_buffer_sed_scores_eval_student = {}
+                self.val_buffer_sed_scores_eval_teacher = {}
 
-            # Validationデータローダーを取得
-            val_loader = self.val_dataloader()
+                # Validationデータローダーを取得
+                val_loader = self.val_dataloader()
 
-            # モデルを評価モードに設定（Dropout等を無効化）
-            self.sed_student.eval()
-            self.sed_teacher.eval()
+                # モデルを評価モードに設定（Dropout等を無効化）
+                self.sed_student.eval()
+                self.sed_teacher.eval()
 
-            # Validationパスを実行してスコアを収集
-            # torch.no_grad()で勾配計算を無効化（メモリ節約＆高速化）
-            with torch.no_grad():
-                for batch_idx, batch in enumerate(val_loader):
-                    # バッチデータをアンパック
-                    audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = batch
+                # Validationパスを実行してスコアを収集
+                # torch.no_grad()で勾配計算を無効化（メモリ節約＆高速化）
+                with torch.no_grad():
+                    for batch_idx, batch in enumerate(val_loader):
+                        # バッチデータをアンパック
+                        audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = batch
 
-                    # 全テンソルを現在のデバイス（GPU/CPU）に移動
-                    audio = audio.to(self.device)
-                    labels = labels.to(self.device)
-                    embeddings = embeddings.to(self.device)
-                    valid_class_mask = valid_class_mask.to(self.device)
+                        # 全テンソルを現在のデバイス（GPU/CPU）に移動
+                        audio = audio.to(self.device)
+                        labels = labels.to(self.device)
+                        embeddings = embeddings.to(self.device)
+                        valid_class_mask = valid_class_mask.to(self.device)
 
-                    # デバイス移動後のバッチを再構築
-                    moved_batch = (audio, labels, padded_indxs, filenames, embeddings, valid_class_mask)
+                        # デバイス移動後のバッチを再構築
+                        moved_batch = (audio, labels, padded_indxs, filenames, embeddings, valid_class_mask)
 
-                    # validation_stepを実行
-                    # この中でval_buffer_sed_scores_eval_studentにスコアが蓄積される
-                    self.validation_step(moved_batch, batch_idx)
+                        # validation_stepを実行
+                        # この中でval_buffer_sed_scores_eval_studentにスコアが蓄積される
+                        self.validation_step(moved_batch, batch_idx)
 
-            print(f"\n✓ Validation pass complete")
-            print(f"  Collected scores for {len(self.val_buffer_sed_scores_eval_student)} clips")
+                print(f"\n✓ Validation pass complete")
+                print(f"  Collected scores for {len(self.val_buffer_sed_scores_eval_student)} clips")
 
             # 重要: validation_epoch_end()は呼び出さない
             # 理由: validation_epoch_end()内でバッファがクリアされてしまい、
