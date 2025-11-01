@@ -27,8 +27,9 @@ echo "=========================================="
 echo ""
 
 # 実験するattentionタイプ
-# default
-ATTENTION_TYPES=("residual_deep" "multiscale" "se_deep" "dilated_deep")
+# default residual_deep
+# multiscaleはチャネル数が3以上あることが前提のため,動かない
+ATTENTION_TYPES=( "se_deep" "dilated_deep")
 
 # カウンター
 TOTAL=${#ATTENTION_TYPES[@]}
