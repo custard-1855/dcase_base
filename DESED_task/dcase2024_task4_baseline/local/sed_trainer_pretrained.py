@@ -140,6 +140,9 @@ class SEDTask4(pl.LightningModule):
 
         if self.hparams["net"]["use_wandb"]:
             self._init_wandb_project()
+        else:
+            # wandbを使わない場合はNoneに設定
+            self._wandb_checkpoint_dir = None
 
         self.encoder = encoder
         self.sed_student = sed_student
@@ -347,6 +350,15 @@ class SEDTask4(pl.LightningModule):
 
     def _init_wandb_project(self):
         wandb.init(project=PROJECT_NAME, name=self.hparams["net"]["wandb_dir"])
+
+        # wandb runディレクトリ内にcheckpointsディレクトリを作成
+        # 結果: wandb/run-20250102_123456-abcd1234/checkpoints/
+        if wandb.run is not None:
+            self._wandb_checkpoint_dir = os.path.join(wandb.run.dir, "checkpoints")
+            os.makedirs(self._wandb_checkpoint_dir, exist_ok=True)
+            print(f"Checkpoint directory: {self._wandb_checkpoint_dir}")
+        else:
+            self._wandb_checkpoint_dir = None
 
     def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
         scheduler.step()
