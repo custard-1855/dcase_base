@@ -12,10 +12,11 @@ import warnings
 from pathlib import Path
 
 import matplotlib
-matplotlib.use('TkAgg')  # インタラクティブバックエンドを使用
+matplotlib.use('Agg')  # 非対話型バックエンド（保存用）
 import matplotlib.pyplot as plt
 import numpy as np
 import sounddevice as sd
+import soundfile as sf
 import torch
 import torchaudio
 import yaml
@@ -108,7 +109,7 @@ class RealtimeSED:
 
         # チェックポイントのロード
         if checkpoint_path and os.path.exists(checkpoint_path):
-            checkpoint = torch.load(checkpoint_path, map_location=self.device)
+            checkpoint = torch.load(checkpoint_path, map_location=self.device, weights_only=False)
             # PyTorch Lightningのチェックポイントの場合
             if 'state_dict' in checkpoint:
                 state_dict = checkpoint['state_dict']
@@ -154,6 +155,24 @@ class RealtimeSED:
 
         return self.audio_buffer
 
+    def save_audio(self, audio, save_path):
+        """録音した音声を保存
+
+        Args:
+            audio: numpy配列の音声データ
+            save_path: 保存先のパス (.wav)
+        """
+        if audio is None:
+            print("警告: 保存する音声データがありません")
+            return
+
+        # 保存先ディレクトリを作成
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+        # WAVファイルとして保存
+        sf.write(save_path, audio, self.sample_rate)
+        print(f"音声を保存しました: {save_path}")
+
     def extract_features(self, audio):
         """音声からメル・スペクトログラムを抽出"""
         # numpy配列をTensorに変換
@@ -172,6 +191,9 @@ class RealtimeSED:
 
         # 正規化（簡易版）
         mel_spec_db = (mel_spec_db - mel_spec_db.mean()) / (mel_spec_db.std() + 1e-8)
+
+        # チャネル次元を削除して (n_mels, time) の形状にする
+        mel_spec_db = mel_spec_db.squeeze(0)
 
         return mel_spec_db
 
@@ -201,7 +223,7 @@ class RealtimeSED:
         self.detection_results = {
             'strong': strong_preds,
             'weak': weak_preds,
-            'features': features.cpu().numpy()[0, 0]  # メル・スペクトログラム
+            'features': features.cpu().numpy()[0]  # メル・スペクトログラム (n_mels, time)
         }
 
         print("検出完了!")
@@ -305,7 +327,8 @@ class RealtimeSED:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
             print(f"可視化結果を保存しました: {save_path}")
 
-        plt.show()
+        # メモリ解放
+        plt.close(fig)
 
     def print_detection_summary(self, threshold=0.5):
         """検出結果のサマリーを表示"""
@@ -373,6 +396,11 @@ class RealtimeSED:
 
                 # 録音
                 audio = self.record_audio()
+
+                # 音声を保存
+                if save_dir:
+                    audio_save_path = os.path.join(save_dir, f'audio_{iteration:03d}.wav')
+                    self.save_audio(audio, audio_save_path)
 
                 # イベント検出
                 results = self.detect_events(audio)
@@ -451,12 +479,18 @@ def main():
     else:
         # 1回のみ実行
         audio = sed_system.record_audio()
+
+        # 音声を保存
+        if args.save_dir:
+            os.makedirs(args.save_dir, exist_ok=True)
+            audio_save_path = os.path.join(args.save_dir, 'audio.wav')
+            sed_system.save_audio(audio, audio_save_path)
+
         results = sed_system.detect_events(audio)
         sed_system.print_detection_summary()
 
         save_path = None
         if args.save_dir:
-            os.makedirs(args.save_dir, exist_ok=True)
             save_path = os.path.join(args.save_dir, 'detection.png')
 
         sed_system.visualize_results(save_path)

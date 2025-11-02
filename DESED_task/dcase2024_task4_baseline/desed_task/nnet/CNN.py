@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-from .mixstyle import FrequencyAttentionMixStyle
 
 
 class GLU(nn.Module):
@@ -43,7 +42,7 @@ class CNN(nn.Module):
         nb_filters=[64, 64, 64],
         pooling=[(1, 4), (1, 4), (1, 4)],
         normalization="batch",
-        **kwargs
+        **transformer_kwargs
     ):
         """
             Initialization of CNN network s
@@ -62,51 +61,43 @@ class CNN(nn.Module):
         super(CNN, self).__init__()
 
         self.nb_filters = nb_filters
-        self.mixstyle_type = kwargs["mixstyle_type"]
+        cnn = nn.Sequential()
 
-        # --- 畳み込みブロックを個別に定義 ---
-        # 単一のnn.Sequentialではなく、各ブロックをリストで管理
-        self.conv_blocks = nn.ModuleList()
-        for i in range(len(nb_filters)):
+        def conv(i, normalization="batch", dropout=None, activ="relu"):
             nIn = n_in_channel if i == 0 else nb_filters[i - 1]
             nOut = nb_filters[i]
-            
-            block = nn.Sequential()
-            block.add_module(f"conv{i}", nn.Conv2d(nIn, nOut, kernel_size[i], stride[i], padding[i]))
-            
+            cnn.add_module(
+                "conv{0}".format(i),
+                nn.Conv2d(nIn, nOut, kernel_size[i], stride[i], padding[i]),
+            )
             if normalization == "batch":
-                block.add_module(f"batchnorm{i}", nn.BatchNorm2d(nOut, eps=0.001, momentum=0.99))
+                cnn.add_module(
+                    "batchnorm{0}".format(i),
+                    nn.BatchNorm2d(nOut, eps=0.001, momentum=0.99),
+                )
             elif normalization == "layer":
-                block.add_module(f"layernorm{i}", nn.GroupNorm(1, nOut))
+                cnn.add_module("layernorm{0}".format(i), nn.GroupNorm(1, nOut))
 
-            if activation.lower() == "leakyrelu":
-                block.add_module(f"relu{i}", nn.LeakyReLU(0.2))
-            elif activation.lower() == "relu":
-                block.add_module(f"relu{i}", nn.ReLU())
-            
-            if conv_dropout > 0:
-                block.add_module(f"dropout{i}", nn.Dropout(conv_dropout))
-            
-            block.add_module(f"pooling{i}", nn.AvgPool2d(pooling[i]))
-            
-            self.conv_blocks.append(block)
+            if activ.lower() == "leakyrelu":
+                cnn.add_module("relu{0}".format(i), nn.LeakyReLU(0.2))
+            elif activ.lower() == "relu":
+                cnn.add_module("relu{0}".format(i), nn.ReLU())
+            elif activ.lower() == "glu":
+                cnn.add_module("glu{0}".format(i), GLU(nOut))
+            elif activ.lower() == "cg":
+                cnn.add_module("cg{0}".format(i), ContextGating(nOut))
 
-        # --- FrequencyAttentionMixStyleレイヤーを定義 ---
-        # 1層目の前
-        self.attn_mixstyle_pre = FrequencyAttentionMixStyle(channels=n_in_channel, **kwargs)
-        # 1層目の後
-        self.attn_mixstyle_post1 = FrequencyAttentionMixStyle(channels=nb_filters[0], **kwargs)
-        # 2層目の後
-        self.attn_mixstyle_post2 = FrequencyAttentionMixStyle(channels=nb_filters[1], **kwargs)
+            if dropout is not None:
+                cnn.add_module("dropout{0}".format(i), nn.Dropout(dropout))
 
-        # # 128x862x64
-        # for i in range(len(nb_filters)):
-        #     conv(i, normalization=normalization, dropout=conv_dropout, activ=activation)
-        #     cnn.add_module(
-        #         "pooling{0}".format(i), nn.AvgPool2d(pooling[i])
-        #     )  # bs x tframe x mels
+        # 128x862x64
+        for i in range(len(nb_filters)):
+            conv(i, normalization=normalization, dropout=conv_dropout, activ=activation)
+            cnn.add_module(
+                "pooling{0}".format(i), nn.AvgPool2d(pooling[i])
+            )  # bs x tframe x mels
 
-        # self.cnn = cnn
+        self.cnn = cnn
 
     def forward(self, x):
         """
@@ -119,28 +110,5 @@ class CNN(nn.Module):
             Tensor: batch embedded
         """
         # conv features
-        # x = self.cnn(x)
-
-        if self.training and self.mixstyle_type != "disabled":
-            # 1. 1層目の前に適用
-            x = self.attn_mixstyle_pre(x)
-            
-            # 2. 1層目の畳み込みブロックを適用
-            x = self.conv_blocks[0](x)
-            
-            # 3. 1層目の後に適用
-            x = self.attn_mixstyle_post1(x)
-            
-            # 4. 2層目の畳み込みブロックを適用
-            x = self.conv_blocks[1](x)
-
-            # 5. 2層目の後に適用
-            x = self.attn_mixstyle_post2(x)
-
-            # 6. 3層目以降の畳み込みブロックを適用
-            for i in range(2, len(self.conv_blocks)):
-                x = self.conv_blocks[i](x)
-        else: 
-            for i in range(0, len(self.conv_blocks)):
-                x = self.conv_blocks[i](x)
+        x = self.cnn(x)
         return x

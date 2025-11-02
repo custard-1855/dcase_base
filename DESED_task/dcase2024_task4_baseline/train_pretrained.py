@@ -694,44 +694,9 @@ def prepare_run(argv=None):
     parser.add_argument(
         "--eval_from_checkpoint", default=None, help="Evaluate the model specified"
     )
-    # 実験管理用
-    parser.add_argument(
-        "--attn_type", default="default",
-    )
-    parser.add_argument(
-        "--attn_deepen", 
-        default=2,
-    )
-    parser.add_argument(
-        "--mixstyle_type", default="disabled",
-    )
-    parser.add_argument(
-        "--cmt", action="store_true", default=False
-    )
-    parser.add_argument(
-        "--sebbs", action="store_true", default=False
-    )
-    parser.add_argument(
-        "--wandb_dir"
-    )
-
     args = parser.parse_args(argv)
     with open(args.conf_file, "r") as f:
         configs = yaml.safe_load(f)
-
-    if args.attn_type is not None:
-        configs["net"]["attn_type"] = args.attn_type
-    if args.attn_deepen is not None:
-        configs["net"]["attn_deepen"] = args.attn_deepen
-    if args.mixstyle_type is not None:
-        configs["net"]["mixstyle_type"] = args.mixstyle_type
-    if args.cmt is not None:
-        configs["cmt"]["enabled"] = args.cmt
-    if args.sebbs is not None:
-        configs["sebbs"]["enabled"] = args.sebbs
-    if args.wandb_dir is not None:
-        configs["net"]["wandb_dir"] = args.wandb_dir
-
 
 
     evaluation = False
