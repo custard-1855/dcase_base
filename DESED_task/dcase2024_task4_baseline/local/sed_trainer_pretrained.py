@@ -474,46 +474,33 @@ class SEDTask4(pl.LightningModule):
         """
         # strong, weak
         # y_s: (batch, classes, frames), y_w: (batch, classes)
-        print(f"[DEBUG CMT] Input shapes - y_w: {y_w.shape}, y_s: {y_s.shape}")
 
         # Step 1: Apply clip-level threshold
         y_tilde_w = (y_w > phi_clip).float()
-        print(f"[DEBUG CMT] After clip threshold - y_tilde_w: {y_tilde_w.shape}")
-        
         y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s) # クリップとフレームでサイズが合わないので拡張
-        print(f"[DEBUG CMT] After expansion - y_w_expanded: {y_w_expanded.shape}")
 
         # Step 2 & 3: Apply two-stage thresholding, frame-level
         y_s_temp = y_s.clone()
         # クリップ予測の二値化とフレーム予測の二値化をかける クリップの予測が0の時,フレームも0とする
         y_s_binary = y_w_expanded * ((y_s_temp > phi_frame).float())
-        print(f"[DEBUG CMT] After frame threshold - y_s_binary: {y_s_binary.shape}")
 
         # Step 4: Apply class-wise constraint and median filter
         # Expand y_tilde_w to (batch, classes, 1) for broadcasting
 
         y_tilde_s = []
 
-        print(f"[DEBUG CMT] Starting median filter loop for {y_s.shape[0]} batches")
         for i in range(y_s.shape[0]):
             constrained_s = y_s_binary[i]
-            print(f"[DEBUG CMT] Batch {i} - before transpose: {constrained_s.shape}")
             constrained_s = constrained_s.transpose(0, 1).detach().cpu().numpy()
-            print(f"[DEBUG CMT] Batch {i} - after transpose to numpy: {constrained_s.shape}")
             filtered = self.median_filter(constrained_s)
-            print(f"[DEBUG CMT] Batch {i} - after median filter: {filtered.shape}")
             y_tilde_s.append(filtered) 
 
         # 形状を整える
         original_device = y_s.device
-        print(f"[DEBUG CMT] Before stack - list length: {len(y_tilde_s)}, first element shape: {y_tilde_s[0].shape}")
         y_tilde_s = np.stack(y_tilde_s, axis=0)
-        print(f"[DEBUG CMT] After np.stack: {y_tilde_s.shape}")
         y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
-        print(f"[DEBUG CMT] After torch conversion: {y_tilde_s.shape}")
-        # y_tilde_s = y_tilde_s.transpose(1, 2) # (batch, frames, classes) -> (batch, classes, frames)
+        y_tilde_s = y_tilde_s.transpose(1, 2) # (batch, frames, classes) -> (batch, classes, frames)
 
-        print(f"[DEBUG CMT] Final output shapes - y_tilde_w: {y_tilde_w.shape}, y_tilde_s: {y_tilde_s.shape}")
         return y_tilde_w, y_tilde_s
 
     def compute_cmt_confidence_weights(self, y_w, y_s, y_tilde_w, y_tilde_s):
