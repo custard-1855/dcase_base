@@ -470,7 +470,9 @@ class SEDTask4(pl.LightningModule):
     def apply_cmt_postprocessing(self, y_w, y_s, phi_clip=0.5, phi_frame=0.5):
         """Apply Confident Mean Teacher postprocessing to teacher predictions.
         (Input shape: batch, classes, frames)
+        OK
         """
+        # strong, weak
         # y_s: (batch, classes, frames), y_w: (batch, classes)
 
         # Step 1: Apply clip-level threshold
@@ -478,7 +480,7 @@ class SEDTask4(pl.LightningModule):
         y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s) # クリップとフレームでサイズが合わないので拡張
 
         # Step 2 & 3: Apply two-stage thresholding, frame-level
-        y_s_temp = y_s.clone()    
+        y_s_temp = y_s.clone()
         # クリップ予測の二値化とフレーム予測の二値化をかける クリップの予測が0の時,フレームも0とする
         y_s_binary = y_w_expanded * ((y_s_temp > phi_frame).float())
 
@@ -493,7 +495,7 @@ class SEDTask4(pl.LightningModule):
             constrained_s = constrained_s.transpose(0, 1).detach().cpu().numpy()
             y_tilde_s.append(self.median_filter(constrained_s)) 
 
-        # 窓のサイズをconfsから読み取るように変更
+        # 形状を整える
         original_device = y_s.device
         y_tilde_s = np.stack(y_tilde_s, axis=0)
         y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
@@ -504,12 +506,16 @@ class SEDTask4(pl.LightningModule):
     def compute_cmt_confidence_weights(self, y_w, y_s, y_tilde_w, y_tilde_s):
         """Compute confidence weights for CMT consistency loss.
         (Input shape: batch, classes, frames)
+        OK
         """
-        # c_w(k) = ŷ_w(k) · I(ỹ_w(k)=1)
+        # クリップレベルの信頼度重みを算出
+        # 擬似ラベルが教師信号として有効なら,予測値を重みとする
         c_w = y_w * (y_tilde_w == 1).float()
 
         # Expand y_w to match dimensions of y_s: (batch, classes, frames)
         y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
+
+        # クリップごとの確率とフレームを束ねた確率を乗算
         c_s = y_s * y_w_expanded * (y_tilde_s == 1).float()
 
         return c_w, c_s
@@ -522,11 +528,11 @@ class SEDTask4(pl.LightningModule):
         
         Args:
             student_w: torch.Tensor, student weak predictions [batch_size, n_classes]
-            student_s: torch.Tensor, student strong predictions [batch_size, n_frames, n_classes]
+            student_s: torch.Tensor, student strong predictions [batch_size, n_frames, n_classes] ???
             teacher_pseudo_w: torch.Tensor, teacher pseudo weak labels [batch_size, n_classes]
-            teacher_pseudo_s: torch.Tensor, teacher pseudo strong labels [batch_size, n_frames, n_classes]
+            teacher_pseudo_s: torch.Tensor, teacher pseudo strong labels [batch_size, n_classes, n_frames]
             confidence_w: torch.Tensor, confidence weights for weak [batch_size, n_classes]
-            confidence_s: torch.Tensor, confidence weights for strong [batch_size, n_frames, n_classes]
+            confidence_s: torch.Tensor, confidence weights for strong [batch_size, n_classes, n_frames]
             
         Returns:
             loss_w_con: torch.Tensor, weighted weak consistency loss
@@ -537,7 +543,7 @@ class SEDTask4(pl.LightningModule):
         bce_w = torch.nn.functional.binary_cross_entropy(
             student_w, # 生徒モデルのクリップ予測
             teacher_pseudo_w, # 教師モデルのクリップ予測
-            reduction='none'
+            reduction='none' # 後で平均を取るので,縮約時には計算しない
         )
         weighted_bce_w = confidence_w * bce_w # 信頼度重みをbce損失にかける
         loss_w_con = weighted_bce_w.mean() # 平均を取る
@@ -711,6 +717,14 @@ class SEDTask4(pl.LightningModule):
                     teacher_pseudo_w,
                     teacher_pseudo_s
                 )
+
+                # Debug statistics
+                pseudo_label_ratio_w = teacher_pseudo_w.mean()
+                pseudo_label_ratio_s = teacher_pseudo_s.mean()
+                confidence_w_mean = confidence_w.mean()
+                confidence_s_mean = confidence_s.mean()
+                teacher_pred_w_mean = weak_preds_teacher[mask_unlabeled].mean()
+                teacher_pred_s_mean = strong_preds_teacher[mask_unlabeled].mean()
             
             # Compute CMT consistency loss with confidence weighting
             weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
@@ -753,6 +767,12 @@ class SEDTask4(pl.LightningModule):
             self.log("train/cmt/enabled", True)
             self.log("train/cmt/phi_clip", self.cmt_phi_clip)
             self.log("train/cmt/phi_frame", self.cmt_phi_frame)
+            self.log("train/cmt/pseudo_label_ratio_w", pseudo_label_ratio_w)
+            self.log("train/cmt/pseudo_label_ratio_s", pseudo_label_ratio_s)
+            self.log("train/cmt/confidence_w_mean", confidence_w_mean)
+            self.log("train/cmt/confidence_s_mean", confidence_s_mean)
+            self.log("train/cmt/teacher_pred_w_mean", teacher_pred_w_mean)
+            self.log("train/cmt/teacher_pred_s_mean", teacher_pred_s_mean)
 
 
         return tot_loss
