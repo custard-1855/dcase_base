@@ -8,6 +8,9 @@ cmt:
   enabled: False          # CMTを有効化
   phi_clip: 0.5             # クリップレベル閾値 (論文では0.5)
   phi_frame: 0.5          # フレームレベル閾値 (論文では0.5)
+  scale: False
+  warmup_epochs: 50
+
 
 sebbs:
   enabled: false
