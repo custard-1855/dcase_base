@@ -1261,82 +1261,82 @@ class SEDTask4(pl.LightningModule):
                 for clip_id in desed_ground_truth.keys()
             }
 
-        # ========================================================================
-        # cSEBBs (change-point based Sound Event Bounding Boxes) のチューニング
-        # ========================================================================
-        # cSEBBsは、フレームレベルのスコアから変化点検出によりイベント境界を推定し、
-        # 適応的なセグメントマージによって最終的なイベント候補(bounding boxes)を生成する。
-        # ここでは、validation setを用いてハイパーパラメータをチューニング
+            # ========================================================================
+            # cSEBBs (change-point based Sound Event Bounding Boxes) のチューニング
+            # ========================================================================
+            # cSEBBsは、フレームレベルのスコアから変化点検出によりイベント境界を推定し、
+            # 適応的なセグメントマージによって最終的なイベント候補(bounding boxes)を生成する。
+            # ここでは、validation setを用いてハイパーパラメータをチューニング
 
-        # --- 1. DESEDクラス用のcSEBBsチューニング ---
-        if not hasattr(self, "csebbs_predictor_desed"):
-            print("\n=== Tuning cSEBBs for DESED classes ===")
-            # ハイパーパラメータ:
-            #   - step_filter_length: 変化点検出用のステップフィルタ長
-            #   - merge_threshold_abs: セグメント統合の絶対閾値
-            #   - merge_threshold_rel: セグメント統合の相対閾値
-            # これらをグリッドサーチでPSDSが最大となるように最適化
-            self.csebbs_predictor_desed, _ = csebbs.tune(
-                scores=desed_scores,
-                ground_truth=desed_ground_truth,
-                audio_durations=desed_audio_durations,
-                selection_fn=csebbs.select_best_psds  # PSDS1を最大化
-            )
-            print(f"✓ DESED cSEBBs tuning completed")
+            # --- 1. DESEDクラス用のcSEBBsチューニング ---
+            if not hasattr(self, "csebbs_predictor_desed"):
+                print("\n=== Tuning cSEBBs for DESED classes ===")
+                # ハイパーパラメータ:
+                #   - step_filter_length: 変化点検出用のステップフィルタ長
+                #   - merge_threshold_abs: セグメント統合の絶対閾値
+                #   - merge_threshold_rel: セグメント統合の相対閾値
+                # これらをグリッドサーチでPSDSが最大となるように最適化
+                self.csebbs_predictor_desed, _ = csebbs.tune(
+                    scores=desed_scores,
+                    ground_truth=desed_ground_truth,
+                    audio_durations=desed_audio_durations,
+                    selection_fn=csebbs.select_best_psds  # PSDS1を最大化
+                )
+                print(f"✓ DESED cSEBBs tuning completed")
 
-        # --- 2. MAESTROクラス用のcSEBBsチューニング ---
-        # MAESTROとDESEDでは音響特性が異なるため、別々にチューニング
-        if not hasattr(self, "csebbs_predictor_maestro"):
-            print("\n=== Tuning cSEBBs for MAESTRO classes ===")
+            # --- 2. MAESTROクラス用のcSEBBsチューニング ---
+            # MAESTROとDESEDでは音響特性が異なるため、別々にチューニング
+            if not hasattr(self, "csebbs_predictor_maestro"):
+                print("\n=== Tuning cSEBBs for MAESTRO classes ===")
 
-            # on_test_start()で読み込んだMAESTROのメタデータを取得
-            maestro_ground_truth = getattr(self, "_maestro_ground_truth", {})
-            maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
+                # on_test_start()で読み込んだMAESTROのメタデータを取得
+                maestro_ground_truth = getattr(self, "_maestro_ground_truth", {})
+                maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
 
-            if maestro_ground_truth and maestro_audio_durations:
-                # MAESTROクラスのみを含むvalidationスコアを抽出
-                event_classes_maestro = sorted(classes_labels_maestro_real.keys())
-                keys = ["onset", "offset"] + event_classes_maestro
+                if maestro_ground_truth and maestro_audio_durations:
+                    # MAESTROクラスのみを含むvalidationスコアを抽出
+                    event_classes_maestro = sorted(classes_labels_maestro_real.keys())
+                    keys = ["onset", "offset"] + event_classes_maestro
 
-                # MAESTROはclip単位で保存されているため、clip IDからfile IDを抽出
-                # clip ID形式: "file_id-{onset*100}-{offset*100}"
-                maestro_val_scores = {}
-                for clip_id in self.val_buffer_sed_scores_eval_student.keys():
-                    # clip IDをパースしてfile IDを取得
-                    if "-" in clip_id and len(clip_id.rsplit("-", maxsplit=2)) == 3:
-                        file_id = clip_id.rsplit("-", maxsplit=2)[0]
-                        # このfile IDがMAESTRO ground truthに含まれているか確認
-                        if file_id in maestro_ground_truth:
-                            # MAESTROクラスのスコアのみを抽出
-                            maestro_val_scores[clip_id] = self.val_buffer_sed_scores_eval_student[clip_id][keys]
+                    # MAESTROはclip単位で保存されているため、clip IDからfile IDを抽出
+                    # clip ID形式: "file_id-{onset*100}-{offset*100}"
+                    maestro_val_scores = {}
+                    for clip_id in self.val_buffer_sed_scores_eval_student.keys():
+                        # clip IDをパースしてfile IDを取得
+                        if "-" in clip_id and len(clip_id.rsplit("-", maxsplit=2)) == 3:
+                            file_id = clip_id.rsplit("-", maxsplit=2)[0]
+                            # このfile IDがMAESTRO ground truthに含まれているか確認
+                            if file_id in maestro_ground_truth:
+                                # MAESTROクラスのスコアのみを抽出
+                                maestro_val_scores[clip_id] = self.val_buffer_sed_scores_eval_student[clip_id][keys]
 
-                if maestro_val_scores:
-                    # 十分なvalidationデータがある場合はチューニング実行
-                    self.csebbs_predictor_maestro, _ = csebbs.tune(
-                        scores=maestro_val_scores,
-                        ground_truth=maestro_ground_truth,
-                        audio_durations=maestro_audio_durations,
-                        selection_fn=csebbs.select_best_psds  # PSDS1を最大化
-                    )
-                    print(f"✓ MAESTRO cSEBBs tuning completed with {len(maestro_val_scores)} clips")
+                    if maestro_val_scores:
+                        # 十分なvalidationデータがある場合はチューニング実行
+                        self.csebbs_predictor_maestro, _ = csebbs.tune(
+                            scores=maestro_val_scores,
+                            ground_truth=maestro_ground_truth,
+                            audio_durations=maestro_audio_durations,
+                            selection_fn=csebbs.select_best_psds  # PSDS1を最大化
+                        )
+                        print(f"✓ MAESTRO cSEBBs tuning completed with {len(maestro_val_scores)} clips")
+                    else:
+                        # validationデータが見つからない場合はデフォルトパラメータを使用
+                        print("⚠ Warning: No MAESTRO validation scores found")
+                        print("  Using default cSEBBs parameters for MAESTRO")
+                        self.csebbs_predictor_maestro = csebbs.CSEBBsPredictor(
+                            step_filter_length=0.48,   # 中程度のフィルタ長
+                            merge_threshold_abs=0.2,   # 中程度の絶対閾値
+                            merge_threshold_rel=2.0    # 中程度の相対閾値
+                        )
                 else:
-                    # validationデータが見つからない場合はデフォルトパラメータを使用
-                    print("⚠ Warning: No MAESTRO validation scores found")
+                    # ground truthやdurationsが読み込まれていない場合
+                    print("⚠ Warning: MAESTRO ground truth or durations not available")
                     print("  Using default cSEBBs parameters for MAESTRO")
                     self.csebbs_predictor_maestro = csebbs.CSEBBsPredictor(
-                        step_filter_length=0.48,   # 中程度のフィルタ長
-                        merge_threshold_abs=0.2,   # 中程度の絶対閾値
-                        merge_threshold_rel=2.0    # 中程度の相対閾値
+                        step_filter_length=0.48,
+                        merge_threshold_abs=0.2,
+                        merge_threshold_rel=2.0
                     )
-            else:
-                # ground truthやdurationsが読み込まれていない場合
-                print("⚠ Warning: MAESTRO ground truth or durations not available")
-                print("  Using default cSEBBs parameters for MAESTRO")
-                self.csebbs_predictor_maestro = csebbs.CSEBBsPredictor(
-                    step_filter_length=0.48,
-                    merge_threshold_abs=0.2,
-                    merge_threshold_rel=2.0
-                )
 
 
         # ========================================================================

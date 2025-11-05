@@ -49,8 +49,8 @@ echo ""
 echo "[2/3] Running: CMT"
 uv run train_pretrained.py \
     --cmt \
-    --wandb_dir ${BASE_WANDB_DIR}/mixstyle_cmt \
-    2>&1 | tee ${LOG_DIR}/mixstyle_cmt_${TIMESTAMP}.log
+    --wandb_dir ${BASE_WANDB_DIR}/cmt \
+    2>&1 | tee ${LOG_DIR}/cmt_${TIMESTAMP}.log
 
 echo "Completed: CMT"
 echo ""
@@ -61,8 +61,8 @@ echo ""
 echo "[3/3] Running: cSEBBs"
 uv run train_pretrained.py \
     --sebbs \
-    --wandb_dir ${BASE_WANDB_DIR}/cmt_csebbs \
-    2>&1 | tee ${LOG_DIR}/cmt_csebbs_${TIMESTAMP}.log
+    --wandb_dir ${BASE_WANDB_DIR}/csebbs \
+    2>&1 | tee ${LOG_DIR}/csebbs_${TIMESTAMP}.log
 
 echo "Completed: cSEBBs"
 echo ""
