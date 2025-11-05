@@ -78,6 +78,12 @@ def mix_style(content_feature): # ok
     Returns:
         Tensor: スタイルが適用された新しい特徴量
     """
+
+    # MixStyleの適用は確率的に行う
+    p = 0.5
+    if torch.rand(1).item() > p:
+        return content_feature
+
     # 周波数とチャネルの統計量を計算. 特徴量を重ねる都合上,チャネルを捨てるのは惜しい
     content_mean = content_feature.mean(dim=(2), keepdim=True)
     content_var = content_feature.var(dim=(2), keepdim=True)
