@@ -152,7 +152,10 @@ class SEDTask4(pl.LightningModule):
         # CMT parameters
         self.cmt_enabled = self.hparams.get("cmt", {}).get("enabled", False)
         self.cmt_phi_clip = self.hparams.get("cmt", {}).get("phi_clip", 0.5)
-        self.cmt_phi_frame = self.hparams.get("cmt", {}).get("phi_frame", 0.7)
+        self.cmt_phi_frame = self.hparams.get("cmt", {}).get("phi_frame", 0.5)
+        self.cmt_scale = self.hparams.get("cmt", {}).get("scale", False)
+        self.cmt_warmup_epochs = self.hparams.get("cmt", {}).get("warmup_epochs", 50)
+
 
         # cSEBBs param
         self.sebbs_enabled = self.hparams.get("sebbs", {}).get("enabled", False)
@@ -492,12 +495,13 @@ class SEDTask4(pl.LightningModule):
         for i in range(y_s.shape[0]):
             constrained_s = y_s_binary[i]
             constrained_s = constrained_s.transpose(0, 1).detach().cpu().numpy()
+            # frames, classes
             filtered = self.median_filter(constrained_s)
             y_tilde_s.append(filtered) 
 
         # 形状を整える
         original_device = y_s.device
-        y_tilde_s = np.stack(y_tilde_s, axis=0)
+        y_tilde_s = np.stack(y_tilde_s, axis=0) # batch, frames, classes
         y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
         y_tilde_s = y_tilde_s.transpose(1, 2) # (batch, frames, classes) -> (batch, classes, frames)
 
@@ -510,13 +514,14 @@ class SEDTask4(pl.LightningModule):
         """
         # クリップレベルの信頼度重みを算出
         # 擬似ラベルが教師信号として有効なら,予測値を重みとする
-        c_w = y_w * (y_tilde_w == 1).float()
-
-        # Expand y_w to match dimensions of y_s: (batch, classes, frames)
+        c_w = y_w * y_tilde_w
         y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
-
-        # クリップごとの確率とフレームを束ねた確率を乗算
-        c_s = y_s * y_w_expanded * (y_tilde_s == 1).float()
+        c_s = y_s * y_w_expanded * y_tilde_s
+        # c_w = y_w * (y_tilde_w == 1).float()
+        # # Expand y_w to match dimensions of y_s: (batch, classes, frames)
+        # y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
+        # # クリップごとの確率とフレームを束ねた確率を乗算
+        # c_s = y_s * y_w_expanded * (y_tilde_s == 1).float()
 
         return c_w, c_s
 
@@ -528,9 +533,9 @@ class SEDTask4(pl.LightningModule):
         
         Args:
             student_w: torch.Tensor, student weak predictions [batch_size, n_classes]
-            student_s: torch.Tensor, student strong predictions [batch_size, n_frames, n_classes] ???
+            student_s: torch.Tensor, student strong predictions [batch, classes, frames]
             teacher_pseudo_w: torch.Tensor, teacher pseudo weak labels [batch_size, n_classes]
-            teacher_pseudo_s: torch.Tensor, teacher pseudo strong labels [batch_size, n_classes, n_frames]
+            teacher_pseudo_s: torch.Tensor, teacher pseudo strong labels [batch_size, n_classes, n_frames] [batch_size, n_frames, n_classes]
             confidence_w: torch.Tensor, confidence weights for weak [batch_size, n_classes]
             confidence_s: torch.Tensor, confidence weights for strong [batch_size, n_classes, n_frames]
             
@@ -554,7 +559,12 @@ class SEDTask4(pl.LightningModule):
         # weighted_bce_w = (loss_pos + loss_neg).mean()
 
 
-        loss_w_con = weighted_bce_w.mean() # 平均を取る
+        if self.cmt_scale:
+            mask_w = (confidence_w > 0).float()
+            num_nonzero = mask_w.sum().clamp(min=1.0)
+            loss_w_con = weighted_bce_w.sum() / num_nonzero  # 非ゼロサンプルで割る
+        else:
+            loss_w_con = weighted_bce_w.mean() # 平均を取る
         
         # Strong consistency loss: ℓ_s,con = (1/|Ω|) ∑_{t,k} c_s(t,k) · BCE(ỹ_s(t,k), f_{θ_s}(x)_s(t,k))
         bce_s = torch.nn.functional.binary_cross_entropy(
@@ -562,8 +572,15 @@ class SEDTask4(pl.LightningModule):
             teacher_pseudo_s,  # 教師モデルのフレーム予測
             reduction='none'
         )
+
         weighted_bce_s = confidence_s * bce_s # 信頼度重みをbce損失にかける
-        loss_s_con = weighted_bce_s.mean() # 平均を取る
+
+        if self.cmt_scale:
+            mask_w = (confidence_w > 0).float()
+            num_nonzero = mask_w.sum().clamp(min=1.0)
+            loss_s_con = weighted_bce_s.sum() / num_nonzero  # 非ゼロサンプルで割る
+        else:
+            loss_s_con = weighted_bce_s.mean() # 平均を取る
         
         return loss_w_con, loss_s_con
 
@@ -706,8 +723,11 @@ class SEDTask4(pl.LightningModule):
         ) if self.current_epoch < self.hparams["training"]["epoch_decay"] else self.hparams["training"]["const_max"]
         # should we apply the valid mask for classes also here ?
 
+
+        cmt_active = self.cmt_enabled and (self.current_epoch >= self.cmt_warmup_epochs)
+
         # CMT
-        if self.cmt_enabled:
+        if cmt_active:
             # Apply CMT processing
             with torch.no_grad():
                 # Apply CMT postprocessing to teacher predictions
@@ -773,14 +793,19 @@ class SEDTask4(pl.LightningModule):
         # CMT specific logging
         if self.cmt_enabled:
             self.log("train/cmt/enabled", True)
+            self.log("train/cmt/active", cmt_active)  # ← 追加: 実際に適用されているか
+            self.log("train/cmt/warmup_epochs", self.cmt_warmup_epochs)  # ← 追加
             self.log("train/cmt/phi_clip", self.cmt_phi_clip)
             self.log("train/cmt/phi_frame", self.cmt_phi_frame)
-            self.log("train/cmt/pseudo_label_ratio_w", pseudo_label_ratio_w)
-            self.log("train/cmt/pseudo_label_ratio_s", pseudo_label_ratio_s)
-            self.log("train/cmt/confidence_w_mean", confidence_w_mean)
-            self.log("train/cmt/confidence_s_mean", confidence_s_mean)
-            self.log("train/cmt/teacher_pred_w_mean", teacher_pred_w_mean)
-            self.log("train/cmt/teacher_pred_s_mean", teacher_pred_s_mean)
+            if cmt_active:
+                self.log("train/cmt/pseudo_label_ratio_w", pseudo_label_ratio_w)
+                self.log("train/cmt/pseudo_label_ratio_s", pseudo_label_ratio_s)
+                self.log("train/cmt/confidence_w_mean", confidence_w_mean)
+                self.log("train/cmt/confidence_s_mean", confidence_s_mean)
+                self.log("train/cmt/teacher_pred_w_mean", teacher_pred_w_mean)
+                self.log("train/cmt/teacher_pred_s_mean", teacher_pred_s_mean)
+                self.log("train/cmt/nonzero_samples_w", (confidence_w > 0).float().mean())
+                self.log("train/cmt/nonzero_samples_s", (confidence_s > 0).float().mean())
 
 
         return tot_loss
