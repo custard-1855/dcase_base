@@ -72,7 +72,7 @@ scaler:
   statistic: dataset #instance
   normtype: standard #minmax
   dims: [2,3] #[1, 2]
-  savepath: "./scalers/cwt_mel_scaler.pt" #./scaler.ckpt
+  savepath: "./scalers/cwt_mel_scaler.ckpt" #./scaler.ckpt
 
 # データパス（既存設定をそのまま使用）
 data:

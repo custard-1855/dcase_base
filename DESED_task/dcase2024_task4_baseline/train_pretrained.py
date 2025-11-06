@@ -352,6 +352,17 @@ def single_run(
     test_dataset = devtest_dataset
 
     ##### model definition  ############
+    if config["features"]["use_imaginary"]:
+        if config["features"]["combine_with_logmel"]:
+            config["net"]["n_in_channel"] = 3
+        else:
+            config["net"]["n_in_channel"] = 2
+    elif config["features"]["use_wavelet"]:
+        if config["features"]["combine_with_logmel"]:
+            config["net"]["n_in_channel"] = 2
+        else:
+            config["net"]["n_in_channel"] = 1
+
     sed_student = CRNN(**config["net"])
 
     # Validation dataset creation (needed for both training and evaluation modes)

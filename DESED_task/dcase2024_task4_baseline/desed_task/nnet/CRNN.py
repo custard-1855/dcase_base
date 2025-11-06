@@ -224,14 +224,24 @@ class CRNN(nn.Module):
         return x
 
     def forward(self, x, pad_mask=None, embeddings=None, classes_mask=None):
+        # trainのsed_student = CRNN(**config["net"])で受け取れる
 
-        # input x: batch, time, freq?
         x = self.apply_specaugment(x)
 
         #--- normal ---
+        # B, freq, frame
         # print("[DEBUG]: x:", x.size()) # ([57, 128, 626])
 
-        x = x.transpose(1, 2).unsqueeze(1)
+        # (B, 3, n_mels, n_frames)
+        if self.n_in_channel != 1:
+            x.transpose(2,3)
+        else:
+            x = x.transpose(1, 2).unsqueeze(1)
+
+
+        # input size : (batch_size, n_channels, n_frames, n_freq)
+        # x = x.transpose(1, 2).unsqueeze(1)
+        #
         # print("[DEBUG]: x:", x.size()) # ([57, 1, 626, 128])
 
         # print("[DEBUG]: SpecAugument:", x.size()) # ([57, 128, 626])
