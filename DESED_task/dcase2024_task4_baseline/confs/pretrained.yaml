@@ -9,7 +9,7 @@ features:
   use_imaginary: False
   combine_with_logmel: False
   n_scales: 128
-  wavelet_name: 'morl'
+  wavelet_name: 'morlet' #'morl'
 
 
 cmt:
