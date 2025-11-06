@@ -65,6 +65,7 @@ scaler:
   normtype: minmax
   dims: [1, 2]
   savepath: ./scaler.ckpt
+  # cwt_path: ./cwt_scaler.ckpt 
 
 # データパス（既存設定をそのまま使用）
 data:
