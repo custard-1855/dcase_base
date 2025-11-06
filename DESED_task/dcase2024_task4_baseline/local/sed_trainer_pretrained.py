@@ -154,7 +154,7 @@ class SEDTask4(pl.LightningModule):
         self.cmt_phi_clip = self.hparams.get("cmt", {}).get("phi_clip", 0.5)
         self.cmt_phi_frame = self.hparams.get("cmt", {}).get("phi_frame", 0.5)
         self.cmt_scale = self.hparams.get("cmt", {}).get("scale", False)
-        self.cmt_warmup_epochs = self.hparams.get("cmt", {}).get("warmup_epochs", 50)
+        self.cmt_warmup_epochs = int(self.hparams.get("cmt", {}).get("warmup_epochs", 50))
 
 
         # cSEBBs param
@@ -576,8 +576,8 @@ class SEDTask4(pl.LightningModule):
         weighted_bce_s = confidence_s * bce_s # 信頼度重みをbce損失にかける
 
         if self.cmt_scale:
-            mask_w = (confidence_w > 0).float()
-            num_nonzero = mask_w.sum().clamp(min=1.0)
+            mask_s = (confidence_s > 0).float()
+            num_nonzero = mask_s.sum().clamp(min=1.0)
             loss_s_con = weighted_bce_s.sum() / num_nonzero  # 非ゼロサンプルで割る
         else:
             loss_s_con = weighted_bce_s.mean() # 平均を取る
