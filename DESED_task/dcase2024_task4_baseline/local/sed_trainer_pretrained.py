@@ -16,6 +16,10 @@ from codecarbon import OfflineEmissionsTracker
 from sed_scores_eval.base_modules.scores import (create_score_dataframe,
                                                  validate_score_dataframe)
 from torchaudio.transforms import AmplitudeToDB, MelSpectrogram, MFCC
+import pywt
+import cv2
+import librosa
+from tqdm import tqdm
 
 from desed_task.data_augm import mixup
 from desed_task.utils.postprocess import ClassWiseMedianFilter
@@ -403,57 +407,190 @@ class SEDTask4(pl.LightningModule):
         for ema_params, params in zip(ema_model.parameters(), model.parameters()):
             ema_params.data.mul_(alpha).add_(params.data, alpha=1 - alpha)
 
+    # def _init_scaler(self):
+    #     """Scaler inizialization
+
+    #     Raises:
+    #         NotImplementedError: in case of not Implemented scaler
+
+    #     Returns:
+    #         TorchScaler: returns the scaler
+    #     """
+
+    #     if self.hparams["scaler"]["statistic"] == "instance":
+    #         scaler = TorchScaler(
+    #             "instance",
+    #             self.hparams["scaler"]["normtype"],
+    #             self.hparams["scaler"]["dims"],
+    #         )
+
+    #         return scaler
+    #     elif self.hparams["scaler"]["statistic"] == "dataset":
+    #         # we fit the scaler
+    #         scaler = TorchScaler(
+    #             "dataset",
+    #             self.hparams["scaler"]["normtype"],
+    #             self.hparams["scaler"]["dims"],
+    #         )
+    #     else:
+    #         raise NotImplementedError
+    #     if self.hparams["scaler"]["savepath"] is not None:
+    #         if os.path.exists(self.hparams["scaler"]["savepath"]):
+    #             scaler = torch.load(self.hparams["scaler"]["savepath"])
+    #             print(
+    #                 "Loaded Scaler from previous checkpoint from {}".format(
+    #                     self.hparams["scaler"]["savepath"]
+    #                 )
+    #             )
+    #             return scaler
+
+    #     self.train_loader = self.train_dataloader()
+    #     scaler.fit(
+    #         self.train_loader,
+    #         transform_func=lambda x: self.take_log(self.mel_spec(x[0])),
+    #     )
+
+    #     if self.hparams["scaler"]["savepath"] is not None:
+    #         torch.save(scaler, self.hparams["scaler"]["savepath"])
+    #         print(
+    #             "Saving Scaler from previous checkpoint at {}".format(
+    #                 self.hparams["scaler"]["savepath"]
+    #             )
+    #         )
+    #         return scaler
+
+
     def _init_scaler(self):
-        """Scaler inizialization
-
-        Raises:
-            NotImplementedError: in case of not Implemented scaler
-
-        Returns:
-            TorchScaler: returns the scaler
         """
+        TorchScalerの初期化。
+        hparamsに基づき、"dataset"モードの場合は学習データでfitを実行する。
+        """
+        
+        # hparamsからスケーラー設定を読み込む
+        cfg = self.hparams.get("scaler", {})
+        statistic = cfg.get("statistic", "dataset")
+        normtype = cfg.get("normtype", "standard")
+        # (B, C, F, T) の FとTの次元を指定
+        dims = tuple(cfg.get("dims", (2, 3))) 
+        savepath = cfg.get("savepath", None)
 
-        if self.hparams["scaler"]["statistic"] == "instance":
-            scaler = TorchScaler(
-                "instance",
-                self.hparams["scaler"]["normtype"],
-                self.hparams["scaler"]["dims"],
-            )
+        # 1. スケーラーのインスタンスを作成
+        scaler = TorchScaler(statistic, normtype, dims)
 
+        # "instance" または "none" の場合は、fit不要
+        if statistic == "instance" or statistic is None:
             return scaler
-        elif self.hparams["scaler"]["statistic"] == "dataset":
-            # we fit the scaler
-            scaler = TorchScaler(
-                "dataset",
-                self.hparams["scaler"]["normtype"],
-                self.hparams["scaler"]["dims"],
-            )
-        else:
-            raise NotImplementedError
-        if self.hparams["scaler"]["savepath"] is not None:
-            if os.path.exists(self.hparams["scaler"]["savepath"]):
-                scaler = torch.load(self.hparams["scaler"]["savepath"])
-                print(
-                    "Loaded Scaler from previous checkpoint from {}".format(
-                        self.hparams["scaler"]["savepath"]
-                    )
-                )
-                return scaler
+        
+        # "dataset" モードの処理
+        # 2. 保存済みのスケーラーがあればロード
+        if savepath and os.path.exists(savepath):
+            print(f"Loaded Scaler from previous checkpoint from {savepath}")
+            # 参照コードに合わせて、オブジェクト全体をロード
+            scaler = torch.load(savepath) 
+            return scaler
 
-        self.train_loader = self.train_dataloader()
+        # 3. スケーラーのfitを実行
+        print(f"Fitting TorchScaler (statistic={statistic}, normtype={normtype})...")
+        if not hasattr(self, 'train_loader') or self.train_loader is None:
+            self.train_loader = self.train_dataloader()
+
+        # transform_func (ラムダ関数) を定義
+        # この関数が、オーディオバッチから最終特徴量テンソルを生成する
+        transform_func = lambda batch: self._get_combined_features_for_fit(batch[0])
+
         scaler.fit(
             self.train_loader,
-            transform_func=lambda x: self.take_log(self.mel_spec(x[0])),
+            transform_func=transform_func
         )
 
-        if self.hparams["scaler"]["savepath"] is not None:
-            torch.save(scaler, self.hparams["scaler"]["savepath"])
-            print(
-                "Saving Scaler from previous checkpoint at {}".format(
-                    self.hparams["scaler"]["savepath"]
-                )
-            )
-            return scaler
+        # 4. Fitしたスケーラーを保存
+        if savepath:
+            print(f"Saving Scaler checkpoint at {savepath}")
+            os.makedirs(os.path.dirname(savepath), exist_ok=True)
+            # 参照コードに合わせて、オブジェクト全体を保存
+            torch.save(scaler, savepath) 
+            
+        return scaler
+
+
+    def _get_combined_features_for_fit(self, audio_batch_tensor):
+        """
+        [HELPER] fit中に transform_func から呼ばれる
+        PyTorchオーディオテンソルを受け取り、
+        hparamsに基づいたNumpyベースのCWT/Log-Mel処理を行い、
+        最終的なPyTorch特徴量テンソルを返す。
+        """
+        
+        # --- hparamsから特徴量設定を読み込む ---
+        # (これは self.hparams["features"] などに定義されていると仮定)
+        f_cfg = self.hparams.get("features", {})
+        use_imaginary = f_cfg.get("use_imaginary", True) # 実部/虚部
+        combine_with_logmel = f_cfg.get("combine_with_logmel", True) # LogMelと結合
+
+        # CWTパラメータ
+        N_SCALES = f_cfg.get("n_scales", 128)
+        WAVELET_NAME = f_cfg.get("wavelet_name", 'morl')
+        scales = np.arange(1, N_SCALES + 1)  
+                
+        # テンソルをCPU/Numpyに移動
+        audio_batch_numpy = audio_batch_tensor.cpu().numpy()
+        batch_size = audio_batch_numpy.shape[0]
+        
+        # 1. Log-Mel
+        log_mel_list = []
+        for i in range(batch_size):
+            log_mel = self.take_log(self.mel_spec(audio_batch_tensor))
+            log_mel_list.append(log_mel.cpu().numpy())
+        
+        log_mel_batch_numpy = np.stack(log_mel_list, axis=0)
+        n_frames = log_mel_batch_numpy.shape[2] # (B, n_mels, n_frames)
+
+        # 2. CWT (Numpyで計算)
+        cwt_features_list = []
+        
+        for i in range(batch_size):
+            audio_sample = audio_batch_numpy[i]
+            coeffs, freqs = pywt.cwt(audio_sample, scales, WAVELET_NAME)
+
+            if use_imaginary:
+                cwt_real = np.real(coeffs)
+                cwt_imag = np.imag(coeffs)
+                # 時間軸リサイズ
+                cwt_real_resized = cv2.resize(cwt_real, (n_frames, N_SCALES))
+                cwt_imag_resized = cv2.resize(cwt_imag, (n_frames, N_SCALES))
+                
+                cwt_features_list.append(
+                    np.stack([cwt_real_resized, cwt_imag_resized], axis=0)
+                ) # (2, n_scales, n_frames)
+
+            else: # スカログラム
+                scalogram = np.abs(coeffs)
+                scalogram_db = librosa.amplitude_to_db(scalogram, ref=np.max)
+                # 時間軸リサイズ
+                scalogram_resized = cv2.resize(scalogram_db, (n_frames, N_SCALES))
+                
+                cwt_features_list.append(
+                    scalogram_resized[np.newaxis, :, :]
+                ) # (1, n_scales, n_frames)
+
+        cwt_batch_numpy = np.stack(cwt_features_list, axis=0) # (B, C_cwt, n_scales, n_frames)
+
+        # 3. 結合 (Combine)
+        if combine_with_logmel:
+            # Log-Mel (B, n_mels, n_frames) -> (B, 1, n_mels, n_frames)
+            log_mel_batch_numpy = log_mel_batch_numpy[:, np.newaxis, :, :]
+
+            # (B, 1, F, T) と (B, C_cwt, F, T) をチャネル軸で結合
+            final_features_numpy = np.concatenate(
+                [log_mel_batch_numpy, cwt_batch_numpy], axis=1
+            ) # (B, 1 + C_cwt, F, T)
+        else:
+            final_features_numpy = cwt_batch_numpy # CWTのみ
+
+        # 4. PyTorchテンソルに変換して返す
+        # (TorchScaler.fit がテンソルを期待するため)
+        return torch.from_numpy(final_features_numpy).float().to(audio_batch_tensor.device)
+
 
     def take_log(self, mels):
         """Apply the log transformation to mel spectrograms.
