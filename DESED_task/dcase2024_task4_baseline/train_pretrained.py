@@ -695,6 +695,20 @@ def prepare_run(argv=None):
         "--eval_from_checkpoint", default=None, help="Evaluate the model specified"
     )
     # 実験管理用
+    # features
+    parser.add_argument(
+        "--use_wavelet", action="store_true", default=False
+    )
+    parser.add_argument(
+        "--use_imaginary", action="store_true", default=False
+    )
+    parser.add_argument(
+        "--combine_with_logmel", action="store_true", default=False
+    )
+    parser.add_argument(
+        "--wavelet_name", default="morl",
+    )
+
     # MixStyle
     parser.add_argument(
         "--attn_type", default="default",
@@ -729,6 +743,17 @@ def prepare_run(argv=None):
     args = parser.parse_args(argv)
     with open(args.conf_file, "r") as f:
         configs = yaml.safe_load(f)
+
+    # Features
+    if args.use_wavelet:
+        configs["features"]["use_wavelet"] = args.use_wavelet
+    if args.use_imaginary:
+        configs["features"]["use_imaginary"] = args.use_imaginary
+    if args.combine_with_logmel:
+        configs["features"]["combine_with_logmel"] = args.combine_with_logmel
+    if args.wavelet_name is not None:
+        configs["features"]["wavelet_name"] = args.wavelet_name
+    
 
     # MixStyle
     if args.attn_type is not None:
