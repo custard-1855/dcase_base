@@ -562,16 +562,16 @@ class SEDTask4(pl.LightningModule):
         # wavelet for GPU
         wavelet_obj = ssq.Wavelet(WAVELET_NAME, N=N)
 
-        # 4. CWTをGPUで実行
-        #    astensor=True (デフォルト) で結果(coeffs)がGPU上に保持されます
-        Wx_gpu, scales_out_gpu = ssq.cwt(
-            audio_batch_tensor, 
-            wavelet=wavelet_obj, 
-            scales='log-piecewise',
-            astensor=True
-        )
-        coeffs = Wx_gpu # 係数 (GPU上)
-        n_scales_actual = Wx_gpu.shape[1]
+        # # 4. CWTをGPUで実行
+        # #    astensor=True (デフォルト) で結果(coeffs)がGPU上に保持されます
+        # Wx_gpu, scales_out_gpu = ssq.cwt(
+        #     audio_batch_tensor, 
+        #     wavelet=wavelet_obj, 
+        #     scales='log-piecewise',
+        #     astensor=True
+        # )
+        # coeffs = Wx_gpu # 係数 (GPU上)
+        # n_scales_actual = Wx_gpu.shape[1]
 
 
         # # 5. 周波数を計算 (この関数はCPUで実行されます)
@@ -583,69 +583,110 @@ class SEDTask4(pl.LightningModule):
         # 2. CWT (CPUで計算、その後GPUに戻す)
         # PyWaveletsはCPU専用のため、この部分はCPU処理が必須
         # audio_batch_numpy = audio_batch_tensor.cpu().numpy()
-        # cwt_features_list = []
+        cwt_features_list = []
+        chunk_size = min(4, batch_size)  # 一度に処理するサンプル数
+        
+        for chunk_start in range(0, batch_size, chunk_size):
+            chunk_end = min(chunk_start + chunk_size, batch_size)
+            audio_chunk = audio_batch_tensor[chunk_start:chunk_end]
+
+            # 4. CWTをGPUで実行（チャンク単位）
+            with torch.cuda.amp.autocast(enabled=False):  # mixed precisionを無効化（精度確保）
+                Wx_gpu, _ = ssq.cwt(
+                    audio_chunk, 
+                    wavelet=wavelet_obj, 
+                    scales='log-piecewise',
+                    astensor=True
+                )
+            
+            n_scales_actual = Wx_gpu.shape[1]
+
+
         # for i in range(batch_size):
         #     audio_sample = audio_batch_numpy[i]
         #     # CWT計算 (CPU)
         #     coeffs, freqs = pywt.cwt(audio_sample, scales, WAVELET_NAME)
 
-        if use_imaginary:
-            # 実部と虚部を分離
-            cwt_real = torch.real(coeffs).unsqueeze(1)  # (n_scales, time_samples)
-            cwt_imag = torch.imag(coeffs).unsqueeze(1)
-            
-            # NumPy配列をPyTorchテンソルに変換してGPUに転送
-            # cwt_real_tensor = torch.from_numpy(cwt_real).float().unsqueeze(0).unsqueeze(0).to(device)
-            # cwt_imag_tensor = torch.from_numpy(cwt_imag).float().unsqueeze(0).unsqueeze(0).to(device)
-            # 形状: (1, 1, n_scales, time_samples)
-            
-            # GPU上でリサイズ (torch.nn.functional.interpolate)
-            # target size: (n_scales, n_frames)
-            cwt_real_resized = torch.nn.functional.interpolate(
-                cwt_real, 
-                size=(n_scales_actual, n_frames), 
-                mode='bilinear', 
-                align_corners=False
-            ).squeeze(0)  # (1, n_scales, n_frames)
-            
-            cwt_imag_resized = torch.nn.functional.interpolate(
-                cwt_imag, 
-                size=(n_scales_actual, n_frames), 
-                mode='bilinear', 
-                align_corners=False
-            ).squeeze(0)  # (1, n_scales, n_frames)
-            
-            # 実部と虚部をチャネル軸で結合
-            cwt_batch = torch.cat([cwt_real_resized, cwt_imag_resized], dim=1)  # (B, 2, n_scales, n_frames)
-            # cwt_features = torch.cat([cwt_real_resized, cwt_imag_resized], dim=0)  # (2, n_scales, n_frames)
-            # cwt_features_list.append(cwt_features)
-            
-        else:  # スカログラム
-            # 振幅スペクトログラム
-            scalogram = torch.abs(coeffs)
-            # デシベル変換
-            # scalogram_db = librosa.amplitude_to_db(scalogram, ref=np.max)
-            scalogram_db = 20 * torch.log10(scalogram + 1e-10)
-            
-            # NumPy配列をPyTorchテンソルに変換してGPUに転送
-            # scalogram_tensor = torch.from_numpy(scalogram_db).float().unsqueeze(0).unsqueeze(0).to(device)
-            # 形状: (1, 1, n_scales, time_samples)
-            
-            scalogram_db = scalogram_db.unsqueeze(1)
-            # GPU上でリサイズ
-            #scalogram_resized
-            cwt_batch = torch.nn.functional.interpolate(
-                scalogram_db,
-                size=(n_scales_actual, n_frames),
-                mode='bilinear',
-                align_corners=False
-            ) # (B, 1, n_scales, n_frames)
-            
-            # cwt_features_list.append(scalogram_resized)
-    
+            if use_imaginary:
+                # 実部と虚部を分離
+                cwt_real = torch.real(Wx_gpu).unsqueeze(1)  # (B, 1,  n_scales, time_samples)
+                cwt_imag = torch.imag(Wx_gpu).unsqueeze(1)
+                
+                # NumPy配列をPyTorchテンソルに変換してGPUに転送
+                # cwt_real_tensor = torch.from_numpy(cwt_real).float().unsqueeze(0).unsqueeze(0).to(device)
+                # cwt_imag_tensor = torch.from_numpy(cwt_imag).float().unsqueeze(0).unsqueeze(0).to(device)
+                # 形状: (1, 1, n_scales, time_samples)
+                
+                # 不要になったWx_gpuを即座に解放
+                del Wx_gpu
+                torch.cuda.empty_cache()
+
+                # GPU上でリサイズ (torch.nn.functional.interpolate)
+                # target size: (n_scales, n_frames)
+                cwt_real_resized = torch.nn.functional.interpolate(
+                    cwt_real, 
+                    size=(n_scales_actual, n_frames), 
+                    mode='bilinear', 
+                    align_corners=False
+                ).squeeze(0)  # (1, n_scales, n_frames)
+                
+                del cwt_real
+
+                cwt_imag_resized = torch.nn.functional.interpolate(
+                    cwt_imag, 
+                    size=(n_scales_actual, n_frames), 
+                    mode='bilinear', 
+                    align_corners=False
+                ).squeeze(0)  # (1, n_scales, n_frames)
+                
+                del cwt_imag
+
+                # 実部と虚部をチャネル軸で結合
+                cwt_chunk = torch.cat([cwt_real_resized, cwt_imag_resized], dim=1)  # (B, 2, n_scales, n_frames)
+                # cwt_features = torch.cat([cwt_real_resized, cwt_imag_resized], dim=0)  # (2, n_scales, n_frames)
+                # cwt_features_list.append(cwt_features)
+
+                del cwt_real_resized, cwt_imag_resized
+                
+            else:  # スカログラム
+                # 振幅スペクトログラム
+                scalogram = torch.abs(Wx_gpu)
+
+                del Wx_gpu
+                torch.cuda.empty_cache()
+                
+
+                # デシベル変換
+                # scalogram_db = librosa.amplitude_to_db(scalogram, ref=np.max)
+                scalogram_db = 20 * torch.log10(scalogram + 1e-10)
+                del scalogram
+                
+                # NumPy配列をPyTorchテンソルに変換してGPUに転送
+                # scalogram_tensor = torch.from_numpy(scalogram_db).float().unsqueeze(0).unsqueeze(0).to(device)
+                # 形状: (1, 1, n_scales, time_samples)
+                
+                scalogram_db = scalogram_db.unsqueeze(1)
+                # GPU上でリサイズ
+                #scalogram_resized
+                cwt_chunk = torch.nn.functional.interpolate(
+                    scalogram_db,
+                    size=(n_scales_actual, n_frames),
+                    mode='bilinear',
+                    align_corners=False
+                ) # (B, 1, n_scales, n_frames)
+                
+                # cwt_features_list.append(scalogram_resized)
+
+                del scalogram_db
+            cwt_features_list.append(cwt_chunk)
+            torch.cuda.empty_cache()
+
         # バッチ次元でスタック (GPU上)
         # cwt_batch = torch.stack(cwt_features_list, dim=0)  # (B, C_cwt, n_scales, n_frames)
-        
+        cwt_batch = torch.cat(cwt_features_list, dim=0)  # (B, C_cwt, n_scales, n_frames)
+        del cwt_features_list
+
+
         # 3. 結合 (GPU処理)
         if combine_with_logmel:
             # Log-Mel (B, n_mels, n_frames) -> (B, 1, n_mels, n_frames)
