@@ -612,6 +612,7 @@ dependencies = [
     { name = "sounddevice" },
     { name = "sox" },
     { name = "soxbindings" },
+    { name = "ssqueezepy" },
     { name = "tensorboard" },
     { name = "thop" },
     { name = "torchaudio" },
@@ -639,6 +640,7 @@ requires-dist = [
     { name = "sounddevice", specifier = ">=0.5.1" },
     { name = "sox", specifier = ">=1.4.0" },
     { name = "soxbindings", specifier = "==1.2.3" },
+    { name = "ssqueezepy", specifier = ">=0.6.6" },
     { name = "tensorboard", specifier = ">=2.20.0" },
     { name = "thop", specifier = ">=0.1.1.post2209072238" },
     { name = "torchaudio", specifier = ">=2.8.0" },
@@ -3083,6 +3085,20 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/b8/38/bad15a9e615215c8219652ca554b601663ac3b7ac82a284aca53ec2ff48c/soxr-0.5.0.post1-cp312-abi3-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:bd052a66471a7335b22a6208601a9d0df7b46b8d087dce4ff6e13eed6a33a2a1", size = 216564, upload-time = "2024-08-31T03:43:20.789Z" },
     { url = "https://files.pythonhosted.org/packages/e1/1a/569ea0420a0c4801c2c8dd40d8d544989522f6014d51def689125f3f2935/soxr-0.5.0.post1-cp312-abi3-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:a3f16810dd649ab1f433991d2a9661e9e6a116c2b4101039b53b3c3e90a094fc", size = 248455, upload-time = "2024-08-31T03:43:22.165Z" },
     { url = "https://files.pythonhosted.org/packages/bc/10/440f1ba3d4955e0dc740bbe4ce8968c254a3d644d013eb75eea729becdb8/soxr-0.5.0.post1-cp312-abi3-win_amd64.whl", hash = "sha256:b1be9fee90afb38546bdbd7bde714d1d9a8c5a45137f97478a83b65e7f3146f6", size = 164937, upload-time = "2024-08-31T03:43:23.671Z" },
+]
+
+[[package]]
+name = "ssqueezepy"
+version = "0.6.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numba" },
+    { name = "numpy" },
+    { name = "scipy" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ca/5b/7c118af4d2688cd724b7490589c7de1cbeaa4a796e5abf5d4e660f0d7de0/ssqueezepy-0.6.6.tar.gz", hash = "sha256:1c6e4417db1623e26d1264a6b89e5ca212cea24b2c9de9002c3ea13c791ba625", size = 121881, upload-time = "2025-08-02T04:34:17.453Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fe/47/7716f05c037921bf74a66c7a48aedefa04a04c0beff5bdf8d53a71b15b94/ssqueezepy-0.6.6-py3-none-any.whl", hash = "sha256:ef9b8b805437613baf557701e68c64a4c56070adea64d79f326183f00892c164", size = 127715, upload-time = "2025-08-02T04:34:15.912Z" },
 ]
 
 [[package]]
