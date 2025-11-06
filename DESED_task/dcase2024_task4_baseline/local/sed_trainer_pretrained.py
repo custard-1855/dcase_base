@@ -153,6 +153,10 @@ class SEDTask4(pl.LightningModule):
         self.median_filter = ClassWiseMedianFilter(self.hparams["net"]["median_filter"])
 
 
+
+        # features
+        self.use_wavelet = self.hparams.get("features", {}).get("use_wavelet", False)
+
         # CMT parameters
         self.cmt_enabled = self.hparams.get("cmt", {}).get("enabled", False)
         self.cmt_phi_clip = self.hparams.get("cmt", {}).get("phi_clip", 0.5)
@@ -517,12 +521,16 @@ class SEDTask4(pl.LightningModule):
         """
         [HELPER] fit中に transform_func から呼ばれる
         PyTorchオーディオテンソルを受け取り、
-        hparamsに基づいたNumpyベースのCWT/Log-Mel処理を行い、
+        hparamsに基づいたGPUベースのCWT/Log-Mel処理を行い、
         最終的なPyTorch特徴量テンソルを返す。
+        
+        GPU最適化:
+        - Log-Melはバッチ全体を一度に処理
+        - CWTはサンプルごとにCPU処理（PyWavelets制約）
+        - リサイズはtorch.nn.functional.interpolateでGPU処理
         """
         
         # --- hparamsから特徴量設定を読み込む ---
-        # (これは self.hparams["features"] などに定義されていると仮定)
         f_cfg = self.hparams.get("features", {})
         use_imaginary = f_cfg.get("use_imaginary", True) # 実部/虚部
         combine_with_logmel = f_cfg.get("combine_with_logmel", True) # LogMelと結合
@@ -530,66 +538,93 @@ class SEDTask4(pl.LightningModule):
         # CWTパラメータ
         N_SCALES = f_cfg.get("n_scales", 128)
         WAVELET_NAME = f_cfg.get("wavelet_name", 'morl')
-        scales = np.arange(1, N_SCALES + 1)  
-                
-        # テンソルをCPU/Numpyに移動
+        scales = np.arange(1, N_SCALES + 1)
+        
+        device = audio_batch_tensor.device
+        batch_size = audio_batch_tensor.shape[0]
+        
+        # 1. Log-Mel (GPU処理 - バッチ全体を一度に処理)
+        log_mel_batch = self.take_log(self.mel_spec(audio_batch_tensor))  # (B, n_mels, n_frames)
+        n_frames = log_mel_batch.shape[2]
+        
+        if not self.use_wavelet:
+            # Waveletを使わない場合はLog-Melのみ返す
+            return log_mel_batch
+        
+        # 2. CWT (CPUで計算、その後GPUに戻す)
+        # PyWaveletsはCPU専用のため、この部分はCPU処理が必須
         audio_batch_numpy = audio_batch_tensor.cpu().numpy()
-        batch_size = audio_batch_numpy.shape[0]
-        
-        # 1. Log-Mel
-        log_mel_list = []
-        for i in range(batch_size):
-            log_mel = self.take_log(self.mel_spec(audio_batch_tensor))
-            log_mel_list.append(log_mel.cpu().numpy())
-        
-        log_mel_batch_numpy = np.stack(log_mel_list, axis=0)
-        n_frames = log_mel_batch_numpy.shape[2] # (B, n_mels, n_frames)
-
-        # 2. CWT (Numpyで計算)
         cwt_features_list = []
         
         for i in range(batch_size):
             audio_sample = audio_batch_numpy[i]
+            # CWT計算 (CPU)
             coeffs, freqs = pywt.cwt(audio_sample, scales, WAVELET_NAME)
-
+            
             if use_imaginary:
-                cwt_real = np.real(coeffs)
+                # 実部と虚部を分離
+                cwt_real = np.real(coeffs)  # (n_scales, time_samples)
                 cwt_imag = np.imag(coeffs)
-                # 時間軸リサイズ
-                cwt_real_resized = cv2.resize(cwt_real, (n_frames, N_SCALES))
-                cwt_imag_resized = cv2.resize(cwt_imag, (n_frames, N_SCALES))
                 
-                cwt_features_list.append(
-                    np.stack([cwt_real_resized, cwt_imag_resized], axis=0)
-                ) # (2, n_scales, n_frames)
-
-            else: # スカログラム
+                # NumPy配列をPyTorchテンソルに変換してGPUに転送
+                cwt_real_tensor = torch.from_numpy(cwt_real).float().unsqueeze(0).unsqueeze(0).to(device)
+                cwt_imag_tensor = torch.from_numpy(cwt_imag).float().unsqueeze(0).unsqueeze(0).to(device)
+                # 形状: (1, 1, n_scales, time_samples)
+                
+                # GPU上でリサイズ (torch.nn.functional.interpolate)
+                # target size: (n_scales, n_frames)
+                cwt_real_resized = torch.nn.functional.interpolate(
+                    cwt_real_tensor, 
+                    size=(N_SCALES, n_frames), 
+                    mode='bilinear', 
+                    align_corners=False
+                ).squeeze(0)  # (1, n_scales, n_frames)
+                
+                cwt_imag_resized = torch.nn.functional.interpolate(
+                    cwt_imag_tensor, 
+                    size=(N_SCALES, n_frames), 
+                    mode='bilinear', 
+                    align_corners=False
+                ).squeeze(0)  # (1, n_scales, n_frames)
+                
+                # 実部と虚部をチャネル軸で結合
+                cwt_features = torch.cat([cwt_real_resized, cwt_imag_resized], dim=0)  # (2, n_scales, n_frames)
+                cwt_features_list.append(cwt_features)
+                
+            else:  # スカログラム
+                # 振幅スペクトログラム
                 scalogram = np.abs(coeffs)
+                # デシベル変換
                 scalogram_db = librosa.amplitude_to_db(scalogram, ref=np.max)
-                # 時間軸リサイズ
-                scalogram_resized = cv2.resize(scalogram_db, (n_frames, N_SCALES))
                 
-                cwt_features_list.append(
-                    scalogram_resized[np.newaxis, :, :]
-                ) # (1, n_scales, n_frames)
-
-        cwt_batch_numpy = np.stack(cwt_features_list, axis=0) # (B, C_cwt, n_scales, n_frames)
-
-        # 3. 結合 (Combine)
+                # NumPy配列をPyTorchテンソルに変換してGPUに転送
+                scalogram_tensor = torch.from_numpy(scalogram_db).float().unsqueeze(0).unsqueeze(0).to(device)
+                # 形状: (1, 1, n_scales, time_samples)
+                
+                # GPU上でリサイズ
+                scalogram_resized = torch.nn.functional.interpolate(
+                    scalogram_tensor,
+                    size=(N_SCALES, n_frames),
+                    mode='bilinear',
+                    align_corners=False
+                ).squeeze(0)  # (1, n_scales, n_frames)
+                
+                cwt_features_list.append(scalogram_resized)
+        
+        # バッチ次元でスタック (GPU上)
+        cwt_batch = torch.stack(cwt_features_list, dim=0)  # (B, C_cwt, n_scales, n_frames)
+        
+        # 3. 結合 (GPU処理)
         if combine_with_logmel:
             # Log-Mel (B, n_mels, n_frames) -> (B, 1, n_mels, n_frames)
-            log_mel_batch_numpy = log_mel_batch_numpy[:, np.newaxis, :, :]
-
+            log_mel_batch = log_mel_batch.unsqueeze(1)
+            
             # (B, 1, F, T) と (B, C_cwt, F, T) をチャネル軸で結合
-            final_features_numpy = np.concatenate(
-                [log_mel_batch_numpy, cwt_batch_numpy], axis=1
-            ) # (B, 1 + C_cwt, F, T)
+            final_features = torch.cat([log_mel_batch, cwt_batch], dim=1)  # (B, 1 + C_cwt, F, T)
         else:
-            final_features_numpy = cwt_batch_numpy # CWTのみ
-
-        # 4. PyTorchテンソルに変換して返す
-        # (TorchScaler.fit がテンソルを期待するため)
-        return torch.from_numpy(final_features_numpy).float().to(audio_batch_tensor.device)
+            final_features = cwt_batch  # CWTのみ
+        
+        return final_features
 
 
     def take_log(self, mels):
@@ -721,13 +756,18 @@ class SEDTask4(pl.LightningModule):
         
         return loss_w_con, loss_s_con
 
-    def detect(self, mel_feats, model, embeddings=None, **kwargs):
+    def detect(self, feats, model, embeddings=None, **kwargs):
         if embeddings is None:
-            return model(self.scaler(self.take_log(mel_feats)), **kwargs)
+            return model(self.scaler(self.take_log(feats)), **kwargs)
         else:
-            return model(
-                self.scaler(self.take_log(mel_feats)), embeddings=embeddings, **kwargs
-            )
+            if self.use_wavelet:
+                # featsはaudio
+                return model(self.scaler(feats), embeddings=embeddings, **kwargs)
+            else:
+                # mel
+                return model(
+                    self.scaler(self.take_log(feats)), embeddings=embeddings, **kwargs
+                )
 
     def apply_mixup(self, features, embeddings, labels, start_indx, stop_indx):
         # made a dedicated method as we need to apply mixup only
@@ -818,6 +858,11 @@ class SEDTask4(pl.LightningModule):
             ~valid_class_mask[:, :, None].expand_as(labels), 0.0
         )
         labels_weak = labels_weak.masked_fill(~valid_class_mask[weak_mask], 0.0)
+
+        if self.use_wavelet:
+            features = features
+        else:
+            features = audio
 
         # sed student forward
         strong_preds_student, weak_preds_student = self.detect(
@@ -979,13 +1024,18 @@ class SEDTask4(pl.LightningModule):
             ]
 
         # prediction for student
-        mels = self.mel_spec(audio)
+        if self.use_wavelet:
+            # mels
+            features = self.mel_spec(audio)
+        else:
+            features = audio
+
         strong_preds_student, weak_preds_student = self.detect(
-            mels, self.sed_student, embeddings=embeddings, classes_mask=valid_class_mask
+            features, self.sed_student, embeddings=embeddings, classes_mask=valid_class_mask
         )
         # prediction for teacher
         strong_preds_teacher, weak_preds_teacher = self.detect(
-            mels, self.sed_teacher, embeddings=embeddings, classes_mask=valid_class_mask
+            features, self.sed_teacher, embeddings=embeddings, classes_mask=valid_class_mask
         )
 
         # we derive masks for each dataset based on folders of filenames
@@ -1381,13 +1431,18 @@ class SEDTask4(pl.LightningModule):
             ]
 
         # prediction for student
-        mels = self.mel_spec(audio)
+        if self.use_wavelet:
+            features = self.mel_spec(audio)
+        else:
+            features = audio
+
+        # mels = self.mel_spec(audio)
         strong_preds_student, weak_preds_student = self.detect(
-            mels, self.sed_student, embeddings
+            features, self.sed_student, embeddings
         )
         # prediction for teacher
         strong_preds_teacher, weak_preds_teacher = self.detect(
-            mels, self.sed_teacher, embeddings
+            features, self.sed_teacher, embeddings
         )
 
         if not self.evaluation:
