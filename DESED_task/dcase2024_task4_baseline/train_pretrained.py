@@ -706,7 +706,7 @@ def prepare_run(argv=None):
         "--combine_with_logmel", action="store_true", default=False
     )
     parser.add_argument(
-        "--wavelet_name", default="morl",
+        "--wavelet_name", default="morlet",
     )
 
     # MixStyle
