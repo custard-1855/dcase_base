@@ -72,6 +72,23 @@ class CRNN(nn.Module):
         self.specaugm_f_p = specaugm_f_p
         self.specaugm_f_l = specaugm_f_l
 
+
+        # feature flag
+        self.use_wavelet = kwargs["use_wavelet"]
+        self.use_imaginary = kwargs["use_imaginary"]
+        self.combine_with_logmel = kwargs["combine_with_logmel"]
+
+        if self.use_wavelet: # Falseならデフォルトの1,log mel
+            if self.use_imaginary:
+                if self.combine_with_logmel:
+                    n_in_channel = 3 # 実部 + 虚部 + log mel
+                else:
+                    n_in_channel = 2 # 実部 + 虚部
+            elif self.combine_with_logmel:
+                n_in_channel = 2 # sclogram + log mel
+        else:
+            n_in_channel = 1 # sclogram or log mel
+
         n_in_cnn = n_in_channel
 
         if cnn_integration:
@@ -235,7 +252,8 @@ class CRNN(nn.Module):
         # (B, 3, n_mels, n_frames)
         if self.n_in_channel != 1:
             x.transpose(2,3)
-        else:
+        elif self.use_wavelet:
+            # 同じではない?
             x = x.transpose(1, 2).unsqueeze(1)
 
 
