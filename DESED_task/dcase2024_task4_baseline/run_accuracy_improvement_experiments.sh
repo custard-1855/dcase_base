@@ -13,7 +13,7 @@
 
 # 実験設定
 MIXSTYLE_TYPE="resMix"
-BASE_WANDB_DIR="accuracy_improvement_experiments"
+BASE_WANDB_DIR="re_acc_improve_exp"
 ATTN_TYPE="default"  # 基本的なattentionタイプを使用
 ATTN_DEEPEN=2        # デフォルトの深さ
 
@@ -30,20 +30,39 @@ echo "Start Time: $(date)"
 echo "=========================================="
 echo ""
 
+# ################################################################################
+# # 実験1: MixStyle + cSEBBs
+# ################################################################################
+# echo "[1/4] Running: MixStyle + cSEBBs"
+# uv run train_pretrained.py \
+#     --attn_type ${ATTN_TYPE} \
+#     --attn_deepen ${ATTN_DEEPEN} \
+#     --mixstyle_type ${MIXSTYLE_TYPE} \
+#     --sebbs \
+#     --wandb_dir ${BASE_WANDB_DIR}/mixstyle_csebbs \
+#     2>&1 | tee ${LOG_DIR}/mixstyle_csebbs_${TIMESTAMP}.log
+
+# echo "Completed: MixStyle + cSEBBs"
+# echo ""
+
+
 ################################################################################
-# 実験1: MixStyle + cSEBBs
+# 実験4: All (MixStyle + CMT + cSEBBs)
 ################################################################################
-echo "[1/4] Running: MixStyle + cSEBBs"
+echo "[4/4] Running: All (MixStyle + CMT + cSEBBs)"
 uv run train_pretrained.py \
     --attn_type ${ATTN_TYPE} \
     --attn_deepen ${ATTN_DEEPEN} \
     --mixstyle_type ${MIXSTYLE_TYPE} \
+    --cmt \
+    --warmup_epochs 50 \
     --sebbs \
-    --wandb_dir ${BASE_WANDB_DIR}/mixstyle_csebbs \
-    2>&1 | tee ${LOG_DIR}/mixstyle_csebbs_${TIMESTAMP}.log
+    --wandb_dir ${BASE_WANDB_DIR}/all_techniques \
+    2>&1 | tee ${LOG_DIR}/all_techniques_${TIMESTAMP}.log
 
-echo "Completed: MixStyle + cSEBBs"
+echo "Completed: All (MixStyle + CMT + cSEBBs)"
 echo ""
+
 
 ################################################################################
 # 実験2: MixStyle + CMT
@@ -54,6 +73,7 @@ uv run train_pretrained.py \
     --attn_deepen ${ATTN_DEEPEN} \
     --mixstyle_type ${MIXSTYLE_TYPE} \
     --cmt \
+    --warmup_epochs 50 \
     --wandb_dir ${BASE_WANDB_DIR}/mixstyle_cmt \
     2>&1 | tee ${LOG_DIR}/mixstyle_cmt_${TIMESTAMP}.log
 
@@ -68,6 +88,7 @@ uv run train_pretrained.py \
     --attn_type ${ATTN_TYPE} \
     --attn_deepen ${ATTN_DEEPEN} \
     --cmt \
+    --warmup_epochs 50 \
     --sebbs \
     --wandb_dir ${BASE_WANDB_DIR}/cmt_csebbs \
     2>&1 | tee ${LOG_DIR}/cmt_csebbs_${TIMESTAMP}.log
@@ -75,21 +96,6 @@ uv run train_pretrained.py \
 echo "Completed: CMT + cSEBBs"
 echo ""
 
-################################################################################
-# 実験4: All (MixStyle + CMT + cSEBBs)
-################################################################################
-echo "[4/4] Running: All (MixStyle + CMT + cSEBBs)"
-uv run train_pretrained.py \
-    --attn_type ${ATTN_TYPE} \
-    --attn_deepen ${ATTN_DEEPEN} \
-    --mixstyle_type ${MIXSTYLE_TYPE} \
-    --cmt \
-    --sebbs \
-    --wandb_dir ${BASE_WANDB_DIR}/all_techniques \
-    2>&1 | tee ${LOG_DIR}/all_techniques_${TIMESTAMP}.log
-
-echo "Completed: All (MixStyle + CMT + cSEBBs)"
-echo ""
 
 ################################################################################
 # 完了

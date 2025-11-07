@@ -13,9 +13,9 @@
 # 実験設定
 BASE_WANDB_DIR="cmt_experiments"
 
-# ログディレクトリの作成
-LOG_DIR="logs/cmt_experiments"
-mkdir -p ${LOG_DIR}
+# # ログディレクトリの作成
+# LOG_DIR="logs/cmt_experiments"
+# mkdir -p ${LOG_DIR}
 
 # タイムスタンプ
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
