@@ -335,6 +335,19 @@ class SEDTask4(pl.LightningModule):
                 return str(x)
 
         payload = {k: _to_native(v) for k, v in log_dict.items()}
+
+        # デバッグ用: 複数のstep情報を追加
+        try:
+            # PyTorch Lightning標準のglobal_step（バッチ処理の累積回数）
+            payload["_debug/global_step"] = int(self.global_step)
+            # カスタムスケジューラのstep_num
+            if hasattr(self, "scheduler") and self.scheduler is not None:
+                payload["_debug/scheduler_step_num"] = int(self.scheduler["scheduler"].step_num)
+            # 現在のepoch数（ラウンド数）
+            payload["_debug/current_epoch"] = int(self.current_epoch)
+        except Exception:
+            pass
+
         # attempt to set step if available
         step = None
         try:
@@ -712,7 +725,21 @@ class SEDTask4(pl.LightningModule):
                 self.sed_teacher,
                 embeddings=embeddings,
                 classes_mask=valid_class_mask,    
-        )
+            )
+            unlabeled_strong_preds = strong_preds_teacher[mask_unlabeled] # (N_unlabel, Classes, Frames)
+            if unlabeled_strong_preds.numel() > 0:
+                # 1. クラス別のフレームレベル平均予測確率
+                # (Classes)
+                mean_strong_pred_per_class = unlabeled_strong_preds.mean(dim=[0, 2]) 
+                
+                # 2. クラス別の「閾値0.5未満」のフレームの割合
+                # (Classes)
+                ratio_below_threshold_per_class = (unlabeled_strong_preds < self.cmt_phi_frame).float().mean(dim=[0, 2])
+
+                # wandbやtensorboardにクラス別にログ出力
+                for i, class_name in enumerate(self.encoder.labels):
+                    self.log(f"verify/unlabeled_mean_pred/{class_name}", mean_strong_pred_per_class[i])
+                    self.log(f"verify/unlabeled_ratio_below_0.5/{class_name}", ratio_below_threshold_per_class[i])
 
         # print(f"[DEBUG] Student | strong: {strong_preds_teacher}, weak: {weak_preds_teacher}")
 
@@ -778,17 +805,24 @@ class SEDTask4(pl.LightningModule):
 
         tot_loss = tot_loss_supervised + tot_self_loss
 
+        # 教師あり学習の損失
         self.log("train/student/loss_strong", loss_strong)
         self.log("train/student/loss_weak", loss_weak)
-        self.log("train/step", self.scheduler["scheduler"].step_num, prog_bar=True)
-        self.log("train/student/tot_self_loss", tot_self_loss, prog_bar=True)
-        self.log("train/weight", weight)
-        self.log("train/student/tot_supervised", strong_self_sup_loss, prog_bar=True)
-        self.log("train/student/weak_self_sup_loss", weak_self_sup_loss)
+        self.log("train/student/tot_supervised", tot_loss_supervised, prog_bar=True)
+
+        # 半教師あり学習の損失
         self.log("train/student/strong_self_sup_loss", strong_self_sup_loss)
+        self.log("train/student/weak_self_sup_loss", weak_self_sup_loss)
+        self.log("train/student/tot_self_loss", tot_self_loss, prog_bar=True)
+
+        # 学習率など
+        self.log("train/weight", weight)
         self.log("train/lr", self.opt.param_groups[-1]["lr"], prog_bar=True)
 
-
+        # 各種step情報
+        self.log("train/step/scheduler_step_num", self.scheduler["scheduler"].step_num, prog_bar=True)
+        self.log("train/step/global_step", self.global_step)
+        self.log("train/step/current_epoch", self.current_epoch)
 
         # CMT specific logging
         if self.cmt_enabled:
