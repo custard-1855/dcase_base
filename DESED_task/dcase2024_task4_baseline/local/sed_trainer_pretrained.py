@@ -2214,6 +2214,7 @@ class SEDTask4(pl.LightningModule):
         # キャッシュしておく（後で呼び出し直すときのため）
         self._maestro_audio_durations = maestro_audio_durations_filtered
         self._maestro_ground_truth = maestro_ground_truth
+        self._maestro_ground_truth_clips = maestro_ground_truth_clips
 
         return maestro_audio_durations_filtered, maestro_ground_truth
 
