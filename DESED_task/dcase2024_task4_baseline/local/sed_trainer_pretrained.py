@@ -1399,7 +1399,7 @@ class SEDTask4(pl.LightningModule):
                     maestro_ground_truth = {
                         clip_id: events
                         for clip_id, events in maestro_ground_truth_all_clips.items()
-                        if clip_id in self.val_buffer_sed_scores_eval_student
+                        if clip_id in self.val_tune_sebbs_student
                     }
                     maestro_ground_truth = _merge_overlapping_events(maestro_ground_truth)
                     maestro_audio_durations = {
@@ -1413,12 +1413,12 @@ class SEDTask4(pl.LightningModule):
 
                     # maestro_ground_truth に存在する clip のスコアのみを抽出
                     maestro_val_scores = {
-                        clip_id: self.val_buffer_sed_scores_eval_student[clip_id][keys]
+                        clip_id: self.val_tune_sebbs_student[clip_id][keys]
                         for clip_id in maestro_ground_truth.keys()
                     }
 
                     # --- デバッグログ: マッチング状況を確認 ---
-                    total_val_clips = len(self.val_buffer_sed_scores_eval_student)
+                    total_val_clips = len(self.val_tune_sebbs_student)
                     total_gt_clips = len(maestro_ground_truth)
 
                     matched_clips = len(maestro_val_scores)
@@ -1429,7 +1429,7 @@ class SEDTask4(pl.LightningModule):
                     
                     if matched_clips == 0:
                         # マッチング失敗時の詳細情報をprintで表示
-                        sample_val_clips = list(self.val_buffer_sed_scores_eval_student.keys())[:3]
+                        sample_val_clips = list(self.val_tune_sebbs_student.keys())[:3]
                         sample_gt_clips = list(maestro_ground_truth.keys())[:3]
                         print(f"\n[DEBUG] MAESTRO Student matching failed!")
                         print(f"  Sample validation clip IDs: {sample_val_clips}")
@@ -1475,7 +1475,7 @@ class SEDTask4(pl.LightningModule):
                     maestro_ground_truth = {
                         clip_id: events
                         for clip_id, events in maestro_ground_truth_all_clips.items()
-                        if clip_id in self.val_buffer_sed_scores_eval_teacher
+                        if clip_id in self.val_tune_sebbs_teacher
                     }
                     maestro_ground_truth = _merge_overlapping_events(maestro_ground_truth)
                     maestro_audio_durations = {
@@ -1488,12 +1488,12 @@ class SEDTask4(pl.LightningModule):
                     
                     # maestro_ground_truth に存在する clip のスコアのみを抽出
                     maestro_val_scores_teacher = {
-                        clip_id: self.val_buffer_sed_scores_eval_teacher[clip_id][keys]
+                        clip_id: self.val_tune_sebbs_teacher[clip_id][keys]
                         for clip_id in maestro_ground_truth.keys()
                     }
                     
                     # --- デバッグログ: マッチング状況を確認 (Teacher) ---
-                    total_val_clips_teacher = len(self.val_buffer_sed_scores_eval_teacher)
+                    total_val_clips_teacher = len(self.val_tune_sebbs_teacher)
                     total_gt_clips_teacher = len(maestro_ground_truth)
                     matched_clips_teacher = len(maestro_val_scores_teacher)
                     
@@ -1503,7 +1503,7 @@ class SEDTask4(pl.LightningModule):
                     
                     if matched_clips_teacher == 0:
                         # マッチング失敗時の詳細情報をprintで表示
-                        sample_val_clips = list(self.val_buffer_sed_scores_eval_teacher.keys())[:3]
+                        sample_val_clips = list(self.val_tune_sebbs_teacher.keys())[:3]
                         sample_gt_clips = list(maestro_ground_truth.keys())[:3]
                         print(f"\n[DEBUG] MAESTRO Teacher matching failed!")
                         print(f"  Sample validation clip IDs: {sample_val_clips}")
