@@ -1904,7 +1904,7 @@ class SEDTask4(pl.LightningModule):
                 for clip_id in maestro_clip_ids
             }
             segment_length = 1.0
-            event_classes_maestro = sorted(classes_labels_maestro_real)
+            event_classes_maestro = sorted(classes_labels_maestro_real_eval) # 他の都合でevalに変更
             segment_scores_student = _get_segment_scores_and_overlap_add(
                 frame_scores=maestro_scores_student,
                 audio_durations=maestro_audio_durations,
