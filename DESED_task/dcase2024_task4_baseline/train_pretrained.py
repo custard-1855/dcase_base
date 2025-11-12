@@ -711,9 +711,9 @@ def prepare_run(argv=None):
     parser.add_argument(
         "--cmt", action="store_true", default=False
     )
-    parser.add_argument(
-        "--scale", action="store_true", default=False
-    )
+    # parser.add_argument(
+    #     "--scale", action="store_true", default=False
+    # )
     parser.add_argument(
         "--warmup_epochs", default=0
     )
