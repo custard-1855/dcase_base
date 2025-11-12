@@ -1400,6 +1400,23 @@ class SEDTask4(pl.LightningModule):
                                 # MAESTROクラスのスコアのみを抽出
                                 maestro_val_scores[clip_id] = self.val_buffer_sed_scores_eval_student[clip_id][keys]
 
+                    # --- デバッグログ: マッチング状況を確認 ---
+                    total_val_clips = len(self.val_buffer_sed_scores_eval_student)
+                    total_gt_files = len(maestro_ground_truth)
+                    matched_clips = len(maestro_val_scores)
+                    
+                    self.log("debug/maestro_student/total_validation_clips", total_val_clips)
+                    self.log("debug/maestro_student/total_ground_truth_files", total_gt_files)
+                    self.log("debug/maestro_student/matched_clips", matched_clips)
+                    
+                    if matched_clips == 0:
+                        # マッチング失敗時の詳細情報をprintで表示
+                        sample_val_clips = list(self.val_buffer_sed_scores_eval_student.keys())[:3]
+                        sample_gt_files = list(maestro_ground_truth.keys())[:3]
+                        print(f"\n[DEBUG] MAESTRO Student matching failed!")
+                        print(f"  Sample validation clip IDs: {sample_val_clips}")
+                        print(f"  Sample ground truth file IDs: {sample_gt_files}")
+
                     if maestro_val_scores:
                         # 十分なvalidationデータがある場合はチューニング実行
                         self.csebbs_predictor_maestro, _ = csebbs.tune(
@@ -1445,6 +1462,23 @@ class SEDTask4(pl.LightningModule):
                             file_id = clip_id.rsplit("-", maxsplit=2)[0]
                             if file_id in maestro_ground_truth:
                                 maestro_val_scores_teacher[clip_id] = self.val_buffer_sed_scores_eval_teacher[clip_id][keys]
+                    
+                    # --- デバッグログ: マッチング状況を確認 (Teacher) ---
+                    total_val_clips_teacher = len(self.val_buffer_sed_scores_eval_teacher)
+                    total_gt_files_teacher = len(maestro_ground_truth)
+                    matched_clips_teacher = len(maestro_val_scores_teacher)
+                    
+                    self.log("debug/maestro_teacher/total_validation_clips", total_val_clips_teacher)
+                    self.log("debug/maestro_teacher/total_ground_truth_files", total_gt_files_teacher)
+                    self.log("debug/maestro_teacher/matched_clips", matched_clips_teacher)
+                    
+                    if matched_clips_teacher == 0:
+                        # マッチング失敗時の詳細情報をprintで表示
+                        sample_val_clips = list(self.val_buffer_sed_scores_eval_teacher.keys())[:3]
+                        sample_gt_files = list(maestro_ground_truth.keys())[:3]
+                        print(f"\n[DEBUG] MAESTRO Teacher matching failed!")
+                        print(f"  Sample validation clip IDs: {sample_val_clips}")
+                        print(f"  Sample ground truth file IDs: {sample_gt_files}")
                     
                     if maestro_val_scores_teacher:
                         self.csebbs_predictor_maestro_teacher, _ = csebbs.tune(
@@ -2089,11 +2123,20 @@ class SEDTask4(pl.LightningModule):
 
     def load_maestro_audio_durations_and_gt(self):
         """
-        1回だけ呼んで maestro_audio_durations(dict) と maestro_ground_truth(dict) を返す。
+        MAESTROのaudio durationsとground truthを読み込む。
+        
+        注: validation時と同じデータソース(real_maestro_train_tsv)を使用することで、
+        cSEBBsチューニング時のスコアとground truthのマッチングを可能にする。
         """
-        # --- 1. durations の読み込み ---
-        durations_path = self.hparams["data"]["real_maestro_val_dur"]
-        gt_tsv_path = self.hparams["data"]["real_maestro_val_tsv"]
+        # --- 変更: trainデータを使用してvalidationスコアとマッチング ---
+        gt_tsv_path = self.hparams["data"]["real_maestro_train_tsv"]
+        
+        # durationsの読み込み（trainセット用のdurationsファイル）
+        # 設定ファイルにreal_maestro_train_durがあればそれを使用、なければフォールバック
+        durations_path = self.hparams["data"].get(
+            "real_maestro_train_dur",
+            self.hparams["data"]["real_maestro_val_dur"]  # フォールバック
+        )
 
         maestro_audio_durations = sed_scores_eval.io.read_audio_durations(durations_path)
 
