@@ -660,16 +660,16 @@ class SEDTask4(pl.LightningModule):
 
         indx_maestro, indx_synth, indx_strong, indx_weak, indx_unlabelled = np.cumsum(
             self.hparams["training"]["batch_size"]
-        )
+        ) # バッチ数の累積和を各要素で得る
 
         batch_num = features.shape[0]
         # deriving masks for each dataset
         strong_mask = torch.zeros(batch_num).to(features).bool()
         weak_mask = torch.zeros(batch_num).to(features).bool()
         mask_unlabeled = torch.zeros(batch_num).to(features).bool()
-        strong_mask[:indx_strong] = 1
-        weak_mask[indx_strong:indx_weak] = 1
-        mask_unlabeled[indx_maestro:] = 1
+        strong_mask[:indx_strong] = 1 # maestro,合成(synthは確か合成音),強ラベルデータ
+        weak_mask[indx_strong:indx_weak] = 1 # 弱ラベルデータ
+        mask_unlabeled[indx_maestro:] = 1 # maestro以外: 合成,強,弱,ラベルなしデータ
 
         # deriving weak labels
         mixup_type = self.hparams["training"].get("mixup")
@@ -726,23 +726,25 @@ class SEDTask4(pl.LightningModule):
                 embeddings=embeddings,
                 classes_mask=valid_class_mask,    
             )
-            unlabeled_strong_preds = strong_preds_teacher[mask_unlabeled] # (N_unlabel, Classes, Frames)
-            if unlabeled_strong_preds.numel() > 0:
-                # 1. クラス別のフレームレベル平均予測確率
-                # (Classes)
-                mean_strong_pred_per_class = unlabeled_strong_preds.mean(dim=[0, 2]) 
+            # 検証は後
+            # unlabeled_strong_preds = strong_preds_teacher[mask_unlabeled] # (N_unlabel, Classes, Frames)
+            # unlabeled_valid_class_mask = valid_class_mask[mask_unlabeled]  # ← 追加
+
+            # if unlabeled_strong_preds.numel() > 0:
+            #     # 1. クラス別のフレームレベル平均予測確率
+            #     # (Classes)
+            #     mean_strong_pred_per_class = unlabeled_strong_preds.mean(dim=[0, 2]) 
                 
-                # 2. クラス別の「閾値0.5未満」のフレームの割合
-                # (Classes)
-                ratio_below_threshold_per_class = (unlabeled_strong_preds < self.cmt_phi_frame).float().mean(dim=[0, 2])
+            #     # 2. クラス別の「閾値0.5未満」のフレームの割合
+            #     # (Classes)
+            #     ratio_below_threshold_per_class = (unlabeled_strong_preds < self.cmt_phi_frame).float().mean(dim=[0, 2])
+            #     active_classes_mask = unlabeled_valid_class_mask.any(dim=0)  # (Classes,)
 
-                # wandbやtensorboardにクラス別にログ出力
-                for i, class_name in enumerate(self.encoder.labels):
-                    self.log(f"verify/unlabeled_mean_pred/{class_name}", mean_strong_pred_per_class[i])
-                    self.log(f"verify/unlabeled_ratio_below_0.5/{class_name}", ratio_below_threshold_per_class[i])
-
-        # print(f"[DEBUG] Student | strong: {strong_preds_teacher}, weak: {weak_preds_teacher}")
-
+            #     # wandbやtensorboardにクラス別にログ出力
+            #     for i, class_name in enumerate(self.encoder.labels):
+            #         if active_classes_mask[i]:  # ← 有効なクラスのみ
+            #             self.log(f"verify/unlabeled_mean_pred/{class_name}", mean_strong_pred_per_class[i])
+            #             self.log(f"verify/unlabeled_ratio_below_0.5/{class_name}", ratio_below_threshold_per_class[i])
 
         weight = (
             self.hparams["training"]["const_max"]
@@ -826,9 +828,6 @@ class SEDTask4(pl.LightningModule):
 
         # CMT specific logging
         if self.cmt_enabled:
-            self.log("train/cmt/enabled", True)
-            self.log("train/cmt/active", cmt_active)  # ← 追加: 実際に適用されているか
-            self.log("train/cmt/warmup_epochs", self.cmt_warmup_epochs)  # ← 追加
             self.log("train/cmt/phi_clip", self.cmt_phi_clip)
             self.log("train/cmt/phi_frame", self.cmt_phi_frame)
             if cmt_active:
@@ -840,7 +839,6 @@ class SEDTask4(pl.LightningModule):
                 self.log("train/cmt/teacher_pred_s_mean", teacher_pred_s_mean)
                 self.log("train/cmt/nonzero_samples_w", (confidence_w > 0).float().mean())
                 self.log("train/cmt/nonzero_samples_s", (confidence_s > 0).float().mean())
-
 
         return tot_loss
 
@@ -1202,6 +1200,16 @@ class SEDTask4(pl.LightningModule):
         obj_metric = torch.tensor(
             weak_student_f1_macro.item() + synth_metric + maestro_metric
         )
+
+        # # クラス別の統計を計算
+        # for i, class_name in enumerate(self.encoder.labels):
+        #     precision = 
+        #     recall = 
+        #     f1 = 2 * precision * recall / (precision + recall)
+            
+        #     self.log(f"val/class/{class_name}/precision", precision)
+        #     self.log(f"val/class/{class_name}/recall", recall)
+        #     self.log(f"val/class/{class_name}/f1", f1)
 
         self.log("val/obj_metric", obj_metric, prog_bar=True)
         self.log(
@@ -2192,7 +2200,7 @@ def _get_segment_scores(scores_df, clip_length, segment_length=1.0):
         np.array(segment_scores), np.array(segment_timestamps), event_classes
     )
 
-def get_sebbs(self, scores_all_classes):
+def get_sebbs(self, scores_all_classes, model_type):
     """Apply cSEBBs post-processing to both DESED and MAESTRO classes.
 
     cSEBBs (change-point based Sound Event Bounding Boxes)は、
