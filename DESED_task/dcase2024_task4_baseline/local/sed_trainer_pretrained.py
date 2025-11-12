@@ -1359,6 +1359,21 @@ class SEDTask4(pl.LightningModule):
                 )
                 print(f"✓ DESED cSEBBs tuning completed")
 
+            # --- 1-2. DESEDクラス用のcSEBBsチューニング（教師モデル） ---
+            if not hasattr(self, "csebbs_predictor_desed_teacher"):
+                print("\n=== Tuning cSEBBs for DESED classes (Teacher) ===")
+                desed_scores_teacher = {
+                    clip_id: self.val_buffer_sed_scores_eval_teacher[clip_id][keys]
+                    for clip_id in desed_ground_truth.keys()
+                }
+                self.csebbs_predictor_desed_teacher, _ = csebbs.tune(
+                    scores=desed_scores_teacher,
+                    ground_truth=desed_ground_truth,
+                    audio_durations=desed_audio_durations,
+                    selection_fn=csebbs.select_best_psds
+                )
+                print(f"✓ DESED cSEBBs tuning completed (Teacher)")
+
             # --- 2. MAESTROクラス用のcSEBBsチューニング ---
             # MAESTROとDESEDでは音響特性が異なるため、別々にチューニング
             if not hasattr(self, "csebbs_predictor_maestro"):
@@ -1413,6 +1428,49 @@ class SEDTask4(pl.LightningModule):
                         merge_threshold_rel=2.0
                     )
 
+            # --- 2-2. MAESTROクラス用のcSEBBsチューニング（教師モデル） ---
+            if not hasattr(self, "csebbs_predictor_maestro_teacher"):
+                print("\n=== Tuning cSEBBs for MAESTRO classes (Teacher) ===")
+                
+                maestro_ground_truth = getattr(self, "_maestro_ground_truth", {})
+                maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
+                
+                if maestro_ground_truth and maestro_audio_durations:
+                    event_classes_maestro = sorted(classes_labels_maestro_real.keys())
+                    keys = ["onset", "offset"] + event_classes_maestro
+                    
+                    maestro_val_scores_teacher = {}
+                    for clip_id in self.val_buffer_sed_scores_eval_teacher.keys():
+                        if "-" in clip_id and len(clip_id.rsplit("-", maxsplit=2)) == 3:
+                            file_id = clip_id.rsplit("-", maxsplit=2)[0]
+                            if file_id in maestro_ground_truth:
+                                maestro_val_scores_teacher[clip_id] = self.val_buffer_sed_scores_eval_teacher[clip_id][keys]
+                    
+                    if maestro_val_scores_teacher:
+                        self.csebbs_predictor_maestro_teacher, _ = csebbs.tune(
+                            scores=maestro_val_scores_teacher,
+                            ground_truth=maestro_ground_truth,
+                            audio_durations=maestro_audio_durations,
+                            selection_fn=csebbs.select_best_psds
+                        )
+                        print(f"✓ MAESTRO cSEBBs tuning completed (Teacher) with {len(maestro_val_scores_teacher)} clips")
+                    else:
+                        print("⚠ Warning: No MAESTRO validation scores found (Teacher)")
+                        print("  Using default cSEBBs parameters for MAESTRO (Teacher)")
+                        self.csebbs_predictor_maestro_teacher = csebbs.CSEBBsPredictor(
+                            step_filter_length=0.48,
+                            merge_threshold_abs=0.2,
+                            merge_threshold_rel=2.0
+                        )
+                else:
+                    print("⚠ Warning: MAESTRO ground truth or durations not available (Teacher)")
+                    print("  Using default cSEBBs parameters for MAESTRO (Teacher)")
+                    self.csebbs_predictor_maestro_teacher = csebbs.CSEBBsPredictor(
+                        step_filter_length=0.48,
+                        merge_threshold_abs=0.2,
+                        merge_threshold_rel=2.0
+                    )
+
 
         # ========================================================================
         # Student modelのスコア生成とcSEBBs後処理
@@ -1443,7 +1501,9 @@ class SEDTask4(pl.LightningModule):
         # 出力: cSEBBsにより生成されたイベント候補のスコア
 
         if self.sebbs_enabled:
-            scores_postprocessed_student_strong = get_sebbs(self, scores_unprocessed_student_strong)
+            scores_postprocessed_student_strong = get_sebbs(
+                self, scores_unprocessed_student_strong, model_type='student'
+            )
 
         # 後処理前後のスコアを保存（比較・分析用）
         self.test_buffer_sed_scores_eval_unprocessed_student.update(
@@ -1473,7 +1533,9 @@ class SEDTask4(pl.LightningModule):
         )
 
         if self.sebbs_enabled:
-            scores_postprocessed_teacher_strong = get_sebbs(self, scores_unprocessed_teacher_strong)
+            scores_postprocessed_teacher_strong = get_sebbs(
+                self, scores_unprocessed_teacher_strong, model_type='teacher'
+            )
 
         self.test_buffer_sed_scores_eval_unprocessed_teacher.update(
             scores_unprocessed_teacher_strong
@@ -2200,7 +2262,7 @@ def _get_segment_scores(scores_df, clip_length, segment_length=1.0):
         np.array(segment_scores), np.array(segment_timestamps), event_classes
     )
 
-def get_sebbs(self, scores_all_classes, model_type):
+def get_sebbs(self, scores_all_classes, model_type='student'):
     """Apply cSEBBs post-processing to both DESED and MAESTRO classes.
 
     cSEBBs (change-point based Sound Event Bounding Boxes)は、
@@ -2219,6 +2281,7 @@ def get_sebbs(self, scores_all_classes, model_type):
         scores_all_classes: Dictionary of score DataFrames for all clips
                            各clipのDataFrameは全クラスのスコアを含む
                            形式: {clip_id: pd.DataFrame(onset, offset, class1, class2, ...)}
+        model_type: 'student' or 'teacher'. モデルタイプを指定して適切なpredictorを選択
 
     Returns:
         sed_scores_postprocessed: Dictionary of post-processed score DataFrames
@@ -2231,6 +2294,14 @@ def get_sebbs(self, scores_all_classes, model_type):
         3. 生成されたイベント候補を統合
         4. sed_scores_eval形式のDataFrameに変換
     """
+
+    # モデルタイプに応じたpredictorを選択
+    if model_type == 'teacher':
+        csebbs_predictor_desed = self.csebbs_predictor_desed_teacher
+        csebbs_predictor_maestro = self.csebbs_predictor_maestro_teacher
+    else:
+        csebbs_predictor_desed = self.csebbs_predictor_desed
+        csebbs_predictor_maestro = self.csebbs_predictor_maestro
 
     # ステップ1: DESEDクラスに対するcSEBBs適用
     # DESEDは家庭内音（食器、掃除機、猫など）の10クラス
@@ -2245,7 +2316,7 @@ def get_sebbs(self, scores_all_classes, model_type):
 
     # cSEBBsでDESEDデータセットのスコアを後処理
     # 戻り値: {clip_id: [(onset, offset, class_name, confidence), ...]}
-    csebbs_desed_events = self.csebbs_predictor_desed.predict(
+    csebbs_desed_events = csebbs_predictor_desed.predict(
         scores_desed_classes
     )
 
@@ -2263,7 +2334,7 @@ def get_sebbs(self, scores_all_classes, model_type):
     # cSEBBsでMAESTROデータセットのスコアを後処理
     # DESEDとは異なる音響特性に最適化されたパラメータを使用
     # 戻り値: {clip_id: [(onset, offset, class_name, confidence), ...]}
-    csebbs_maestro_events = self.csebbs_predictor_maestro.predict(
+    csebbs_maestro_events = csebbs_predictor_maestro.predict(
         scores_maestro_classes
     )
 
