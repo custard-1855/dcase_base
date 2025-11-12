@@ -740,8 +740,8 @@ def prepare_run(argv=None):
     # CMT
     if args.cmt is not None:
         configs["cmt"]["enabled"] = args.cmt
-    if args.cmt is not None:
-        configs["cmt"]["scale"] = args.scale
+    # if args.cmt is not None:
+    #     configs["cmt"]["scale"] = args.scale
     if args.cmt is not None:
         configs["cmt"]["warmup_epochs"] = args.warmup_epochs
     # other
