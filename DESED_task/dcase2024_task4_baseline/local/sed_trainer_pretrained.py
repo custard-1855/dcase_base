@@ -1408,7 +1408,7 @@ class SEDTask4(pl.LightningModule):
                     }
 
                     # MAESTROクラスのみを含むvalidationスコアを抽出
-                    event_classes_maestro = sorted(classes_labels_maestro_real.keys())
+                    event_classes_maestro = sorted(classes_labels_maestro_real_eval)
                     keys = ["onset", "offset"] + event_classes_maestro
 
                     # maestro_ground_truth に存在する clip のスコアのみを抽出
@@ -1483,7 +1483,7 @@ class SEDTask4(pl.LightningModule):
                         for clip_id, events in maestro_ground_truth.items()
                     }
                     
-                    event_classes_maestro = sorted(classes_labels_maestro_real.keys())
+                    event_classes_maestro = sorted(classes_labels_maestro_real_eval)
                     keys = ["onset", "offset"] + event_classes_maestro
                     
                     # maestro_ground_truth に存在する clip のスコアのみを抽出
