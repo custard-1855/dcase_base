@@ -230,6 +230,9 @@ class SEDTask4(pl.LightningModule):
         self.val_buffer_sed_scores_eval_student = {}
         self.val_buffer_sed_scores_eval_teacher = {}
 
+        self.val_tune_sebbs_student = {}
+        self.val_tune_sebbs_teacher = {}
+
         test_n_thresholds = self.hparams["training"]["n_test_thresholds"]
         test_thresholds = np.arange(
             1 / (test_n_thresholds * 2), 1, 1 / test_n_thresholds
@@ -967,6 +970,10 @@ class SEDTask4(pl.LightningModule):
                 scores_postprocessed_student_strong
             )
 
+            self.val_tune_sebbs_student.update(
+                scores_unprocessed_student_strong
+            )
+
             (
                 scores_unprocessed_teacher_strong,
                 scores_postprocessed_teacher_strong,
@@ -981,6 +988,10 @@ class SEDTask4(pl.LightningModule):
 
             self.val_buffer_sed_scores_eval_teacher.update(
                 scores_postprocessed_teacher_strong
+            )
+
+            self.val_tune_sebbs_teacher.update(
+                scores_unprocessed_teacher_strong
             )
 
         return
@@ -1332,7 +1343,7 @@ class SEDTask4(pl.LightningModule):
             }
             keys = ["onset", "offset"] + sorted(classes_labels_desed.keys())
             desed_scores = {
-                clip_id: self.val_buffer_sed_scores_eval_student[clip_id][keys]
+                clip_id: self.val_tune_sebbs_student[clip_id][keys]
                 for clip_id in desed_ground_truth.keys()
             }
 
@@ -1363,7 +1374,7 @@ class SEDTask4(pl.LightningModule):
             if not hasattr(self, "csebbs_predictor_desed_teacher"):
                 print("\n=== Tuning cSEBBs for DESED classes (Teacher) ===")
                 desed_scores_teacher = {
-                    clip_id: self.val_buffer_sed_scores_eval_teacher[clip_id][keys]
+                    clip_id: self.val_tune_sebbs_teacher[clip_id][keys]
                     for clip_id in desed_ground_truth.keys()
                 }
                 self.csebbs_predictor_desed_teacher, _ = csebbs.tune(
@@ -1391,17 +1402,17 @@ class SEDTask4(pl.LightningModule):
                     # MAESTROはclip単位で保存されているため、clip IDからfile IDを抽出
                     # clip ID形式: "file_id-{onset*100}-{offset*100}"
                     maestro_val_scores = {}
-                    for clip_id in self.val_buffer_sed_scores_eval_student.keys():
+                    for clip_id in self.val_tune_sebbs_student.keys():
                         # clip IDをパースしてfile IDを取得
                         if "-" in clip_id and len(clip_id.rsplit("-", maxsplit=2)) == 3:
                             file_id = clip_id.rsplit("-", maxsplit=2)[0]
                             # このfile IDがMAESTRO ground truthに含まれているか確認
                             if file_id in maestro_ground_truth:
                                 # MAESTROクラスのスコアのみを抽出
-                                maestro_val_scores[clip_id] = self.val_buffer_sed_scores_eval_student[clip_id][keys]
+                                maestro_val_scores[clip_id] = self.val_tune_sebbs_student[clip_id][keys]
 
                     # --- デバッグログ: マッチング状況を確認 ---
-                    total_val_clips = len(self.val_buffer_sed_scores_eval_student)
+                    total_val_clips = len(self.val_tune_sebbs_student)
                     total_gt_files = len(maestro_ground_truth)
                     matched_clips = len(maestro_val_scores)
                     
@@ -1411,7 +1422,7 @@ class SEDTask4(pl.LightningModule):
                     
                     if matched_clips == 0:
                         # マッチング失敗時の詳細情報をprintで表示
-                        sample_val_clips = list(self.val_buffer_sed_scores_eval_student.keys())[:3]
+                        sample_val_clips = list(self.val_tune_sebbs_student.keys())[:3]
                         sample_gt_files = list(maestro_ground_truth.keys())[:3]
                         print(f"\n[DEBUG] MAESTRO Student matching failed!")
                         print(f"  Sample validation clip IDs: {sample_val_clips}")
@@ -1457,14 +1468,14 @@ class SEDTask4(pl.LightningModule):
                     keys = ["onset", "offset"] + event_classes_maestro
                     
                     maestro_val_scores_teacher = {}
-                    for clip_id in self.val_buffer_sed_scores_eval_teacher.keys():
+                    for clip_id in self.val_tune_sebbs_teacher.keys():
                         if "-" in clip_id and len(clip_id.rsplit("-", maxsplit=2)) == 3:
                             file_id = clip_id.rsplit("-", maxsplit=2)[0]
                             if file_id in maestro_ground_truth:
-                                maestro_val_scores_teacher[clip_id] = self.val_buffer_sed_scores_eval_teacher[clip_id][keys]
+                                maestro_val_scores_teacher[clip_id] = self.val_tune_sebbs_teacher[clip_id][keys]
                     
                     # --- デバッグログ: マッチング状況を確認 (Teacher) ---
-                    total_val_clips_teacher = len(self.val_buffer_sed_scores_eval_teacher)
+                    total_val_clips_teacher = len(self.val_tune_sebbs_teacher)
                     total_gt_files_teacher = len(maestro_ground_truth)
                     matched_clips_teacher = len(maestro_val_scores_teacher)
                     
@@ -1474,7 +1485,7 @@ class SEDTask4(pl.LightningModule):
                     
                     if matched_clips_teacher == 0:
                         # マッチング失敗時の詳細情報をprintで表示
-                        sample_val_clips = list(self.val_buffer_sed_scores_eval_teacher.keys())[:3]
+                        sample_val_clips = list(self.val_tune_sebbs_teacher.keys())[:3]
                         sample_gt_files = list(maestro_ground_truth.keys())[:3]
                         print(f"\n[DEBUG] MAESTRO Teacher matching failed!")
                         print(f"  Sample validation clip IDs: {sample_val_clips}")
@@ -2045,8 +2056,8 @@ class SEDTask4(pl.LightningModule):
                 print("cSEBBs will use default parameters without validation-based tuning")
                 print("="*70)
                 # 空のバッファを初期化（test_stepでエラーが出ないように）
-                self.val_buffer_sed_scores_eval_student = {}
-                self.val_buffer_sed_scores_eval_teacher = {}
+                self.val_tune_sebbs_student = {}
+                self.val_tune_sebbs_teacher = {}
             else:
                 # Validationパスを実行. 理由は以下:
                 #   - cSEBBsのハイパーパラメータ（step_filter_length, merge_thresholds）を
@@ -2059,8 +2070,8 @@ class SEDTask4(pl.LightningModule):
                 print("="*70)
 
                 # バッファを初期化（以前のスコアをクリア）
-                self.val_buffer_sed_scores_eval_student = {}
-                self.val_buffer_sed_scores_eval_teacher = {}
+                self.val_tune_sebbs_student = {}
+                self.val_tune_sebbs_teacher = {}
 
                 # Validationデータローダーを取得
                 val_loader = self.val_dataloader()
@@ -2090,7 +2101,7 @@ class SEDTask4(pl.LightningModule):
                         self.validation_step(moved_batch, batch_idx)
 
                 print(f"\n✓ Validation pass complete")
-                print(f"  Collected scores for {len(self.val_buffer_sed_scores_eval_student)} clips")
+                print(f"  Collected scores for {len(self.val_tune_sebbs_student)} clips")
 
             # 重要: validation_epoch_end()は呼び出さない
             # 理由: validation_epoch_end()内でバッファがクリアされてしまい、
