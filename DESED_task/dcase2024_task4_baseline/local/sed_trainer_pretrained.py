@@ -2407,7 +2407,7 @@ def get_sebbs(self, scores_all_classes, model_type='student'):
 
     # ステップ2: MAESTROクラスに対するcSEBBs適用
     # MAESTROは都市音・屋内音（足音、会話、車など）の17クラス
-    maestro_classes = list(classes_labels_maestro_real.keys())
+    maestro_classes = sorted(classes_labels_maestro_real_eval)
     keys_maestro = ["onset", "offset"] + sorted(maestro_classes)
 
     # 全クラスのスコアからMAESTROクラスのみを抽出
