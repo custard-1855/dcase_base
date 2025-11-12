@@ -1343,7 +1343,7 @@ class SEDTask4(pl.LightningModule):
             # 適応的なセグメントマージによって最終的なイベント候補(bounding boxes)を生成する。
             # ここでは、validation setを用いてハイパーパラメータをチューニング
 
-            # --- 1. DESEDクラス用のcSEBBsチューニング ---
+            # # --- 1. DESEDクラス用のcSEBBsチューニング ---
             if not hasattr(self, "csebbs_predictor_desed"):
                 print("\n=== Tuning cSEBBs for DESED classes ===")
                 # ハイパーパラメータ:
@@ -1380,42 +1380,48 @@ class SEDTask4(pl.LightningModule):
                 print("\n=== Tuning cSEBBs for MAESTRO classes ===")
 
                 # on_test_start()で読み込んだMAESTROのメタデータを取得
-                maestro_ground_truth = getattr(self, "_maestro_ground_truth", {})
-                maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
+                # clip ベースの ground truth を使用（validation_epoch_end と同じパターン）
+                maestro_ground_truth_all_clips = getattr(self, "_maestro_ground_truth_clips", {})
 
-                if maestro_ground_truth and maestro_audio_durations:
+                if maestro_ground_truth_all_clips:
+                    # validation buffer に存在する clip のみを抽出
+                    maestro_ground_truth = {
+                        clip_id: events
+                        for clip_id, events in maestro_ground_truth_all_clips.items()
+                        if clip_id in self.val_buffer_sed_scores_eval_student
+                    }
+                    maestro_ground_truth = _merge_overlapping_events(maestro_ground_truth)
+                    maestro_audio_durations = {
+                        clip_id: sorted(events, key=lambda x: x[1])[-1][1]
+                        for clip_id, events in maestro_ground_truth.items()
+                    }
+
                     # MAESTROクラスのみを含むvalidationスコアを抽出
                     event_classes_maestro = sorted(classes_labels_maestro_real.keys())
                     keys = ["onset", "offset"] + event_classes_maestro
 
-                    # MAESTROはclip単位で保存されているため、clip IDからfile IDを抽出
-                    # clip ID形式: "file_id-{onset*100}-{offset*100}"
-                    maestro_val_scores = {}
-                    for clip_id in self.val_buffer_sed_scores_eval_student.keys():
-                        # clip IDをパースしてfile IDを取得
-                        if "-" in clip_id and len(clip_id.rsplit("-", maxsplit=2)) == 3:
-                            file_id = clip_id.rsplit("-", maxsplit=2)[0]
-                            # このfile IDがMAESTRO ground truthに含まれているか確認
-                            if file_id in maestro_ground_truth:
-                                # MAESTROクラスのスコアのみを抽出
-                                maestro_val_scores[clip_id] = self.val_buffer_sed_scores_eval_student[clip_id][keys]
+                    # maestro_ground_truth に存在する clip のスコアのみを抽出
+                    maestro_val_scores = {
+                        clip_id: self.val_buffer_sed_scores_eval_student[clip_id][keys]
+                        for clip_id in maestro_ground_truth.keys()
+                    }
 
                     # --- デバッグログ: マッチング状況を確認 ---
                     total_val_clips = len(self.val_buffer_sed_scores_eval_student)
-                    total_gt_files = len(maestro_ground_truth)
+                    total_gt_clips = len(maestro_ground_truth)
                     matched_clips = len(maestro_val_scores)
                     
                     self.log("debug/maestro_student/total_validation_clips", total_val_clips)
-                    self.log("debug/maestro_student/total_ground_truth_files", total_gt_files)
+                    self.log("debug/maestro_student/total_ground_truth_clips", total_gt_clips)
                     self.log("debug/maestro_student/matched_clips", matched_clips)
                     
                     if matched_clips == 0:
                         # マッチング失敗時の詳細情報をprintで表示
                         sample_val_clips = list(self.val_buffer_sed_scores_eval_student.keys())[:3]
-                        sample_gt_files = list(maestro_ground_truth.keys())[:3]
+                        sample_gt_clips = list(maestro_ground_truth.keys())[:3]
                         print(f"\n[DEBUG] MAESTRO Student matching failed!")
                         print(f"  Sample validation clip IDs: {sample_val_clips}")
-                        print(f"  Sample ground truth file IDs: {sample_gt_files}")
+                        print(f"  Sample ground truth clip IDs: {sample_gt_clips}")
 
                     if maestro_val_scores:
                         # 十分なvalidationデータがある場合はチューニング実行
@@ -1449,36 +1455,47 @@ class SEDTask4(pl.LightningModule):
             if not hasattr(self, "csebbs_predictor_maestro_teacher"):
                 print("\n=== Tuning cSEBBs for MAESTRO classes (Teacher) ===")
                 
-                maestro_ground_truth = getattr(self, "_maestro_ground_truth", {})
-                maestro_audio_durations = getattr(self, "_maestro_audio_durations", {})
+                # clip ベースの ground truth を使用（validation_epoch_end と同じパターン）
+                maestro_ground_truth_all_clips = getattr(self, "_maestro_ground_truth_clips", {})
                 
-                if maestro_ground_truth and maestro_audio_durations:
+                if maestro_ground_truth_all_clips:
+                    # validation buffer に存在する clip のみを抽出
+                    maestro_ground_truth = {
+                        clip_id: events
+                        for clip_id, events in maestro_ground_truth_all_clips.items()
+                        if clip_id in self.val_buffer_sed_scores_eval_teacher
+                    }
+                    maestro_ground_truth = _merge_overlapping_events(maestro_ground_truth)
+                    maestro_audio_durations = {
+                        clip_id: sorted(events, key=lambda x: x[1])[-1][1]
+                        for clip_id, events in maestro_ground_truth.items()
+                    }
+                    
                     event_classes_maestro = sorted(classes_labels_maestro_real.keys())
                     keys = ["onset", "offset"] + event_classes_maestro
                     
-                    maestro_val_scores_teacher = {}
-                    for clip_id in self.val_buffer_sed_scores_eval_teacher.keys():
-                        if "-" in clip_id and len(clip_id.rsplit("-", maxsplit=2)) == 3:
-                            file_id = clip_id.rsplit("-", maxsplit=2)[0]
-                            if file_id in maestro_ground_truth:
-                                maestro_val_scores_teacher[clip_id] = self.val_buffer_sed_scores_eval_teacher[clip_id][keys]
+                    # maestro_ground_truth に存在する clip のスコアのみを抽出
+                    maestro_val_scores_teacher = {
+                        clip_id: self.val_buffer_sed_scores_eval_teacher[clip_id][keys]
+                        for clip_id in maestro_ground_truth.keys()
+                    }
                     
                     # --- デバッグログ: マッチング状況を確認 (Teacher) ---
                     total_val_clips_teacher = len(self.val_buffer_sed_scores_eval_teacher)
-                    total_gt_files_teacher = len(maestro_ground_truth)
+                    total_gt_clips_teacher = len(maestro_ground_truth)
                     matched_clips_teacher = len(maestro_val_scores_teacher)
                     
                     self.log("debug/maestro_teacher/total_validation_clips", total_val_clips_teacher)
-                    self.log("debug/maestro_teacher/total_ground_truth_files", total_gt_files_teacher)
+                    self.log("debug/maestro_teacher/total_ground_truth_clips", total_gt_clips_teacher)
                     self.log("debug/maestro_teacher/matched_clips", matched_clips_teacher)
                     
                     if matched_clips_teacher == 0:
                         # マッチング失敗時の詳細情報をprintで表示
                         sample_val_clips = list(self.val_buffer_sed_scores_eval_teacher.keys())[:3]
-                        sample_gt_files = list(maestro_ground_truth.keys())[:3]
+                        sample_gt_clips = list(maestro_ground_truth.keys())[:3]
                         print(f"\n[DEBUG] MAESTRO Teacher matching failed!")
                         print(f"  Sample validation clip IDs: {sample_val_clips}")
-                        print(f"  Sample ground truth file IDs: {sample_gt_files}")
+                        print(f"  Sample ground truth clip IDs: {sample_gt_clips}")
                     
                     if maestro_val_scores_teacher:
                         self.csebbs_predictor_maestro_teacher, _ = csebbs.tune(
@@ -1852,13 +1869,19 @@ class SEDTask4(pl.LightningModule):
                 maestro_ground_truth_clips
             )
 
+            # clip ベースの ground truth を保存（validation_epoch_end と同じパターン）
+            self._maestro_ground_truth_clips = maestro_ground_truth_clips
+
+            # file ベースに変換したものも保存（test 全体の評価用）
             maestro_ground_truth = _merge_maestro_ground_truth(
                 maestro_ground_truth_clips
             )
+            self._maestro_ground_truth = maestro_ground_truth
             maestro_audio_durations = {
                 file_id: maestro_audio_durations[file_id]
                 for file_id in maestro_ground_truth.keys()
             }
+            self._maestro_audio_durations = maestro_audio_durations
 
             maestro_scores_student = {
                 clip_id: self.test_buffer_sed_scores_eval_student[clip_id]
@@ -2164,6 +2187,12 @@ class SEDTask4(pl.LightningModule):
             for file_id in maestro_ground_truth.keys()
             if file_id in maestro_audio_durations
         }
+
+        # maestro_audio_durations_filtered = {
+        #     clip_id: sorted(events, key=lambda x: x[1])[-1][1]
+        #     for clip_id, events in maestro_ground_truth.items()
+        # }
+
 
         missing = set(maestro_ground_truth.keys()) - set(maestro_audio_durations_filtered.keys())
         if missing:
