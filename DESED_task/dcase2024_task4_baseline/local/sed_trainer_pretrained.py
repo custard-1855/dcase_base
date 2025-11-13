@@ -977,8 +977,15 @@ class SEDTask4(pl.LightningModule):
                                 mu_a_k = gmm.means_[idx_active][0] # mp (Eq 8)
                                 
                                 # 閾値 (Eq 9) - ユーザーメモに基づき、activeクラスタの平均 (mp) を閾値として採用
-                                threshold_k = min(active_preds_k >mu_a_k)
+                                threshold_k = mu_a_k 
+                                # threshold_k = active_preds_k[active_preds_k >mu_a_k].min()
 
+                                # values_above_mp = active_preds_k[active_preds_k> mu_a_k]
+                                # if values_above_mp.numel() > 0:
+                                #     threshold_k = values_above_mp.min()
+                                # else:
+                                #     # mu_a_kより大きい値がない場合のフォールバック
+                                #     threshold_k = mu_a_k  # または adaptive_clip_thresholds[k]
                                 adaptive_frame_thresholds_k[k] = threshold_k
                             else:
                                 # サンプルが少ない場合、クリップの閾値を流用
