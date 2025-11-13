@@ -718,6 +718,11 @@ def prepare_run(argv=None):
         "--warmup_epochs", default=0
     )
 
+    # sat
+    parser.add_argument(
+        "--sat", action="store_true", default=False
+    )
+
 
     parser.add_argument(
         "--sebbs", action="store_true", default=False
@@ -744,6 +749,9 @@ def prepare_run(argv=None):
     #     configs["cmt"]["scale"] = args.scale
     if args.cmt is not None:
         configs["cmt"]["warmup_epochs"] = args.warmup_epochs
+    # sat
+    if args.sat is not None:
+        configs["sat"]["enabled"] = args.sat
     # other
     if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs

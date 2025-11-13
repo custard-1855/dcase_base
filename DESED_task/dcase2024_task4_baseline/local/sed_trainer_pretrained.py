@@ -162,9 +162,9 @@ class SEDTask4(pl.LightningModule):
         
         if self.sat_enabled:
             # 継続的な警告を避けるため、一度だけ警告
-            if not self.hparams["training"]["self_sup_loss"] == "bce":
-                 warnings.warn(f"SAT-SED is enabled, but self_sup_loss is '{self.hparams['training']['self_sup_loss']}'. "
-                               f"SAT-SED pseudo-labeling is designed to work with BCE loss (self.selfsup_loss).")
+            # if not self.hparams["training"]["self_sup_loss"] == "bce":
+            #      warnings.warn(f"SAT-SED is enabled, but self_sup_loss is '{self.hparams['training']['self_sup_loss']}'. "
+            #                    f"SAT-SED pseudo-labeling is designed to work with BCE loss (self.selfsup_loss).")
             
             self.K = len(self.encoder.labels)  # クラス数 (K)
             # EMA係数 (lambda)
@@ -172,7 +172,7 @@ class SEDTask4(pl.LightningModule):
             # 疑似ラベル損失の重み (w_u)
             self.sat_w_u = self.hparams.get("sat", {}).get("w_u", 0.5) 
             # ウォームアップエポック
-            self.sat_warmup_epochs = self.hparams.get("sat", {}).get("warmup_epochs", 0)
+            # self.sat_warmup_epochs = self.hparams.get("sat", {}).get("warmup_epochs", 0)
 
             # SACT (Clip) 用バッファ
             # register_buffer は、モデルの state_dict に含まれるが、optimizerの対象にならない
