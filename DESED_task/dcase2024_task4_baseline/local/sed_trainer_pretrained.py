@@ -17,7 +17,7 @@ from sed_scores_eval.base_modules.scores import (create_score_dataframe,
                                                  validate_score_dataframe)
 from torchaudio.transforms import AmplitudeToDB, MelSpectrogram, MFCC
 
-from desed_task.data_augm import mixup
+from desed_task.data_augm import mixup, cutmix
 from desed_task.utils.postprocess import ClassWiseMedianFilter
 from desed_task.evaluation.evaluation_measures import (
     compute_per_intersection_macro_f1, compute_psds_from_operating_points,
