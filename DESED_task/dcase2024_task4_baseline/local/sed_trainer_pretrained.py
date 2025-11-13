@@ -2266,7 +2266,7 @@ def select_best_auroc(
         )
 
         # AUROC計算
-        auroc_values = sed_scores_eval.segment_based.auroc(
+        auroc_values, _ = sed_scores_eval.segment_based.auroc(
             scores=scores,
             ground_truth=ground_truth,
             audio_durations=audio_durations,
