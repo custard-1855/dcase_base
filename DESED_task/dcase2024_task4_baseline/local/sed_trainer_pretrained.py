@@ -1016,13 +1016,14 @@ class SEDTask4(pl.LightningModule):
                 # self.selfsup_loss (BCE) を使用
                 
                 # クリップ疑似ラベル損失 (B_u, K)
-                loss_pseudo_clip = self.selfsup_loss(
+                criterion = torch.nn.BCELoss()
+                loss_pseudo_clip = criterion(
                     s_c,
                     L_Clip_c
                 )
                 
                 # フレーム疑似ラベル損失 (B_u, K, T)
-                loss_pseudo_frame = self.selfsup_loss(
+                loss_pseudo_frame = criterion(
                     s_f,
                     L_Frame_f
                 )
