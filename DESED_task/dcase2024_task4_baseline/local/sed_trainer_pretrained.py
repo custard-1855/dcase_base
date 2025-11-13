@@ -878,7 +878,7 @@ class SEDTask4(pl.LightningModule):
             # --- 必要な変数を取得 ---
             # 教師モデルによるWA予測 (疑似ラベル生成用)
             q_c = weak_preds_teacher.detach()[mask_unlabeled]   # クリップ予測 (B_u, K)
-            q_f = strong_preds_teacher.detach()[mask_unlabeled] # フレーム予測 (B_u, T, K)
+            q_f = strong_preds_teacher.detach()[mask_unlabeled] # フレーム予測 (B_u, K, T)
             
             # --- [!! 本来の実装 !!] ---
             # データローダーがWA/SAを返すよう修正した場合:
@@ -902,6 +902,7 @@ class SEDTask4(pl.LightningModule):
             # --- [!! /現在のコードでの代替 !!] ---
 
             # B, K, T: バッチ,クラス,フレーム
+
             # バッチサイズとクラス数を取得
             if q_c.dim() == 0 or q_f.dim() == 0:
                  # バッチにラベルなしデータが1つもなかった場合
@@ -955,13 +956,13 @@ class SEDTask4(pl.LightningModule):
                 if self.gmm_imported:
                     try:
                         # ステップ 11.1: フレーム予測のフィルタリング (Eq 6)
-                        # L_Clip_c を (B_u, 1, K) に拡張してブロードキャスト
-                        filtered_q_f = q_f * L_Clip_c.unsqueeze(1) # (B_u, T, K)
+                        # L_Clip_c を (B, K, 1) に拡張してブロードキャスト
+                        filtered_q_f = q_f * L_Clip_c.unsqueeze(2) # (B, K, T)
                         
                         # ステップ 11.2-4: GMMによる閾値計算 (Eq 7-9)
                         for k in range(K):
                             # クラス k の、フィルタリング後の0より大きい予測値を取得
-                            class_k_preds = filtered_q_f[:, :, k]
+                            class_k_preds = filtered_q_f[:, k, :]
                             active_preds_k = class_k_preds[class_k_preds > 1e-8] # ゼロに近い値を除外
                             
                             # GMMをフィッティングするのに十分なサンプルがあるか確認
@@ -976,7 +977,8 @@ class SEDTask4(pl.LightningModule):
                                 mu_a_k = gmm.means_[idx_active][0] # mp (Eq 8)
                                 
                                 # 閾値 (Eq 9) - ユーザーメモに基づき、activeクラスタの平均 (mp) を閾値として採用
-                                threshold_k = mu_a_k
+                                threshold_k = min(active_preds_k >mu_a_k)
+
                                 adaptive_frame_thresholds_k[k] = threshold_k
                             else:
                                 # サンプルが少ない場合、クリップの閾値を流用
@@ -993,10 +995,10 @@ class SEDTask4(pl.LightningModule):
 
                 # ステップ 11.5 & 12: フレーム疑似ラベル L_Frame_f の生成 (Eq 10)
                 # 閾値 (形状 [K]) を (1, 1, K) に拡張してブロードキャスト
-                L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, 1, K)).float() # (B_u, T, K)
+                L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, K, 1)).float() # (B_u, T, K)
                 
                 # (B_u, T, K) -> (B_u, K, T) に転置 (BCE損失のため)
-                L_Frame_f = L_Frame_f.transpose(1, 2) # (B_u, K, T)
+                # L_Frame_f = L_Frame_f.transpose(1, 2) # (B_u, K, T)
 
 
                 # ===========================================================
