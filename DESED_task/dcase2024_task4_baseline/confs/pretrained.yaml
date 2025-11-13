@@ -15,6 +15,9 @@ sat:
   enabled: False
   lambda: 0.999
   w_u: 0.5
+  # CutMix strong augmentation for SAT
+  cutmix_alpha: 1.0       # Beta distribution parameter for CutMix
+  cutmix_prob: 1.0        # Probability of applying CutMix (1.0 = always apply)
 
 
 
