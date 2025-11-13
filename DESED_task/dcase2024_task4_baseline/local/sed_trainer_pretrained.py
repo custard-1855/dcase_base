@@ -1435,13 +1435,15 @@ class SEDTask4(pl.LightningModule):
                         print(f"  Sample validation clip IDs: {sample_val_clips}")
                         print(f"  Sample ground truth clip IDs: {sample_gt_clips}")
 
+                    segment_length = 1.0
                     if maestro_val_scores:
                         # 十分なvalidationデータがある場合はチューニング実行
                         self.csebbs_predictor_maestro, _ = csebbs.tune(
                             scores=maestro_val_scores,
                             ground_truth=maestro_ground_truth,
                             audio_durations=maestro_audio_durations,
-                            selection_fn=sed_scores_eval.segment_based.auroc  # PSDS1を最大化
+                            selection_fn=sed_scores_eval.segment_based.auroc,  # PSDS1を最大化
+                            selection_kwargs=segment_length
                         )
                         print(f"✓ MAESTRO cSEBBs tuning completed with {len(maestro_val_scores)} clips")
                     else:
