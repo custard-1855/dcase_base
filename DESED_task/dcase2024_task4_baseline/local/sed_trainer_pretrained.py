@@ -40,6 +40,12 @@ from sebbs.scripts.utils  import get_segment_scores
 from torch.utils.data.dataloader import DataLoader, default_collate
 import wandb
 
+
+try:
+    from sklearn.mixture import GaussianMixture
+except ImportError:
+    print("Warning: sklearn.mixture.GaussianMixture not found. SAFT (GMM) may be disabled.")
+
 PROJECT_NAME = "SED-pl-noise"
 
 
@@ -147,6 +153,46 @@ class SEDTask4(pl.LightningModule):
         self.encoder = encoder
         self.sed_student = sed_student
         self.median_filter = ClassWiseMedianFilter(self.hparams["net"]["median_filter"])
+
+
+        # ===========================================================
+        # SAT-SED (Self-Adaptive Thresholding) Parameters
+        # ===========================================================
+        self.sat_enabled = self.hparams.get("sat", {}).get("enabled", False)
+        
+        if self.sat_enabled:
+            # 継続的な警告を避けるため、一度だけ警告
+            if not self.hparams["training"]["self_sup_loss"] == "bce":
+                 warnings.warn(f"SAT-SED is enabled, but self_sup_loss is '{self.hparams['training']['self_sup_loss']}'. "
+                               f"SAT-SED pseudo-labeling is designed to work with BCE loss (self.selfsup_loss).")
+            
+            self.K = len(self.encoder.labels)  # クラス数 (K)
+            # EMA係数 (lambda)
+            self.sat_lambda = self.hparams.get("sat", {}).get("lambda", 0.999) 
+            # 疑似ラベル損失の重み (w_u)
+            self.sat_w_u = self.hparams.get("sat", {}).get("w_u", 0.5) 
+            # ウォームアップエポック
+            self.sat_warmup_epochs = self.hparams.get("sat", {}).get("warmup_epochs", 0)
+
+            # SACT (Clip) 用バッファ
+            # register_buffer は、モデルの state_dict に含まれるが、optimizerの対象にならない
+            # tau_s (Eq 2)
+            self.register_buffer("global_clip_threshold", torch.tensor(1.0 / self.K)) 
+            # p_tilde_s (Eq 3)
+            self.register_buffer("local_clip_probabilities", torch.full((self.K,), 1.0 / self.K)) 
+            
+            # SAFT (Frame) GMMパラメータ (Eq 7)
+            # GMMをsklearnで使うためのimportチェック
+            try:
+                # __init__時点で GMM がインポート可能か確認
+                from sklearn.mixture import GaussianMixture
+                self.gmm_imported = True
+            except ImportError:
+                self.gmm_imported = False
+                # 学習開始時に一度だけ警告
+                warnings.warn("sklearn.mixture.GaussianMixture not found. SAFT (GMM fitting) will be disabled.")
+        # ===========================================================
+
 
 
         # CMT parameters
@@ -723,31 +769,14 @@ class SEDTask4(pl.LightningModule):
         tot_loss_supervised = loss_strong + loss_weak
 
         with torch.no_grad():
+            # no_grad? studentのEMAだからOK?
             strong_preds_teacher, weak_preds_teacher = self.detect(
                 features,
                 self.sed_teacher,
                 embeddings=embeddings,
                 classes_mask=valid_class_mask,    
             )
-            # 検証は後
-            # unlabeled_strong_preds = strong_preds_teacher[mask_unlabeled] # (N_unlabel, Classes, Frames)
-            # unlabeled_valid_class_mask = valid_class_mask[mask_unlabeled]  # ← 追加
 
-            # if unlabeled_strong_preds.numel() > 0:
-            #     # 1. クラス別のフレームレベル平均予測確率
-            #     # (Classes)
-            #     mean_strong_pred_per_class = unlabeled_strong_preds.mean(dim=[0, 2]) 
-                
-            #     # 2. クラス別の「閾値0.5未満」のフレームの割合
-            #     # (Classes)
-            #     ratio_below_threshold_per_class = (unlabeled_strong_preds < self.cmt_phi_frame).float().mean(dim=[0, 2])
-            #     active_classes_mask = unlabeled_valid_class_mask.any(dim=0)  # (Classes,)
-
-            #     # wandbやtensorboardにクラス別にログ出力
-            #     for i, class_name in enumerate(self.encoder.labels):
-            #         if active_classes_mask[i]:  # ← 有効なクラスのみ
-            #             self.log(f"verify/unlabeled_mean_pred/{class_name}", mean_strong_pred_per_class[i])
-            #             self.log(f"verify/unlabeled_ratio_below_0.5/{class_name}", ratio_below_threshold_per_class[i])
 
         weight = (
             self.hparams["training"]["const_max"]
@@ -756,59 +785,257 @@ class SEDTask4(pl.LightningModule):
         # should we apply the valid mask for classes also here ?
 
 
-        cmt_active = self.cmt_enabled and (self.current_epoch >= self.cmt_warmup_epochs)
+        # cmt_active = self.cmt_enabled and (self.current_epoch >= self.cmt_warmup_epochs)
 
-        # CMT
-        if cmt_active:
-            # Apply CMT processing
-            with torch.no_grad():
-                # Apply CMT postprocessing to teacher predictions
-                teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
-                    weak_preds_teacher[mask_unlabeled], 
-                    strong_preds_teacher[mask_unlabeled],
-                    phi_clip=self.cmt_phi_clip,
-                    phi_frame=self.cmt_phi_frame,
-                )
+        # # CMT
+        # if cmt_active:
+        #     # Apply CMT processing
+        #     with torch.no_grad():
+        #         # Apply CMT postprocessing to teacher predictions
+        #         teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
+        #             weak_preds_teacher[mask_unlabeled], 
+        #             strong_preds_teacher[mask_unlabeled],
+        #             phi_clip=self.cmt_phi_clip,
+        #             phi_frame=self.cmt_phi_frame,
+        #         )
                 
-                # Compute confidence weights
-                confidence_w, confidence_s = self.compute_cmt_confidence_weights(
-                    weak_preds_teacher[mask_unlabeled],
-                    strong_preds_teacher[mask_unlabeled],
-                    teacher_pseudo_w,
-                    teacher_pseudo_s
-                )
+        #         # Compute confidence weights
+        #         confidence_w, confidence_s = self.compute_cmt_confidence_weights(
+        #             weak_preds_teacher[mask_unlabeled],
+        #             strong_preds_teacher[mask_unlabeled],
+        #             teacher_pseudo_w,
+        #             teacher_pseudo_s
+        #         )
 
-                # Debug statistics
-                pseudo_label_ratio_w = teacher_pseudo_w.mean()
-                pseudo_label_ratio_s = teacher_pseudo_s.mean()
-                confidence_w_mean = confidence_w.mean()
-                confidence_s_mean = confidence_s.mean()
-                teacher_pred_w_mean = weak_preds_teacher[mask_unlabeled].mean()
-                teacher_pred_s_mean = strong_preds_teacher[mask_unlabeled].mean()
+        #         # Debug statistics
+        #         pseudo_label_ratio_w = teacher_pseudo_w.mean()
+        #         pseudo_label_ratio_s = teacher_pseudo_s.mean()
+        #         confidence_w_mean = confidence_w.mean()
+        #         confidence_s_mean = confidence_s.mean()
+        #         teacher_pred_w_mean = weak_preds_teacher[mask_unlabeled].mean()
+        #         teacher_pred_s_mean = strong_preds_teacher[mask_unlabeled].mean()
             
-            # Compute CMT consistency loss with confidence weighting
-            weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
-                weak_preds_student[mask_unlabeled],
-                strong_preds_student[mask_unlabeled],
-                teacher_pseudo_w,
-                teacher_pseudo_s,
-                confidence_w,
-                confidence_s
-            )
-        else:
-            # Original Mean Teacher consistency loss
-            strong_self_sup_loss = self.selfsup_loss(
-                strong_preds_student[mask_unlabeled],
-                strong_preds_teacher.detach()[mask_unlabeled],
-            )
-            weak_self_sup_loss = self.selfsup_loss(
-                weak_preds_student[mask_unlabeled],
-                weak_preds_teacher.detach()[mask_unlabeled],
-            )
+        #     # Compute CMT consistency loss with confidence weighting
+        #     weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
+        #         weak_preds_student[mask_unlabeled],
+        #         strong_preds_student[mask_unlabeled],
+        #         teacher_pseudo_w,
+        #         teacher_pseudo_s,
+        #         confidence_w,
+        #         confidence_s
+        #     )
+        # else:
+        #     # Original Mean Teacher consistency loss
+        #     strong_self_sup_loss = self.selfsup_loss(
+        #         strong_preds_student[mask_unlabeled],
+        #         strong_preds_teacher.detach()[mask_unlabeled],
+        #     )
+        #     weak_self_sup_loss = self.selfsup_loss(
+        #         weak_preds_student[mask_unlabeled],
+        #         weak_preds_teacher.detach()[mask_unlabeled],
+        #     )
+
+
+        # Original Mean Teacher consistency loss
+        # BCE > MSEに変更 CMTをやめるため
+        strong_self_sup_loss = self.selfsup_loss(
+            strong_preds_student[mask_unlabeled],
+            strong_preds_teacher.detach()[mask_unlabeled],
+        )
+        weak_self_sup_loss = self.selfsup_loss(
+            weak_preds_student[mask_unlabeled],
+            weak_preds_teacher.detach()[mask_unlabeled],
+        )
 
         tot_self_loss = (strong_self_sup_loss + weak_self_sup_loss) * weight
 
-        tot_loss = tot_loss_supervised + tot_self_loss
+
+        # 一貫性損失を出した後,疑似ラベルと強拡張の損失を出す
+        # ひとまず強拡張をやらず,疑似ラベルとの損失だけ出す
+
+
+        # 生徒モデルに強拡張したデータを入力
+        # strong_preds_student, weak_preds_student = self.detect(
+        #     features,
+        #     self.sed_student,
+        #     embeddings=embeddings,
+        #     classes_mask=valid_class_mask,
+        # )
+
+
+        # 適応的閾値を実装
+        # 実装が必要な定数や変数
+            # self.sat_warmup_epochs
+            # self.sat_lambda
+
+        loss_pseudo = torch.tensor(0.0).to(self.device)
+        
+        # SATが有効化されており、ウォームアップが終了しているか確認
+        sat_active = self.sat_enabled and (self.current_epoch >= self.sat_warmup_epochs)
+
+        # ラベルなしデータが存在する場合のみ実行
+        if sat_active:
+            # --- 必要な変数を取得 ---
+            # 教師モデルによるWA予測 (疑似ラベル生成用)
+            q_c = weak_preds_teacher.detach()[mask_unlabeled]   # クリップ予測 (B_u, K)
+            q_f = strong_preds_teacher.detach()[mask_unlabeled] # フレーム予測 (B_u, T, K)
+            
+            # --- [!! 本来の実装 !!] ---
+            # データローダーがWA/SAを返すよう修正した場合:
+            # 1. training_step冒頭で features_SA を取得
+            # 2. 強拡張(SA)データで生徒モデルをフォワード
+            # strong_preds_student_SA, weak_preds_student_SA = self.detect(
+            #     features_SA, # 強拡張メル
+            #     self.sed_student,
+            #     embeddings=embeddings[mask_unlabeled], # 強拡張に対応したembeddings (もしあれば)
+            #     classes_mask=valid_class_mask[mask_unlabeled],
+            # )
+            # s_c = weak_preds_student_SA
+            # s_f = strong_preds_student_SA
+            # --- [!! /本来の実装 !!] ---
+
+            # --- [!! 現在のコードでの代替 !!] ---
+            # (注意: このままではSAT-SEDの効果は限定的です)
+            # WAデータに対する生徒モデルの予測を仮に使用
+            s_c = weak_preds_student[mask_unlabeled]
+            s_f = strong_preds_student[mask_unlabeled]
+            # --- [!! /現在のコードでの代替 !!] ---
+
+            # B, K, T: バッチ,クラス,フレーム
+            # バッチサイズとクラス数を取得
+            if q_c.dim() == 0 or q_f.dim() == 0:
+                 # バッチにラベルなしデータが1つもなかった場合
+                 pass # loss_pseudo は 0.0 のまま
+            else:
+                B_u, K = q_c.shape
+                _, T, _ = q_f.shape # q_fは (B_u, T, K)
+            
+                # ===========================================================
+                # 1. SACT (Clip-level Adaptive Thresholding) (ステップ 6, 7)
+                # ===========================================================
+                
+                # ステップ 6.1: バッチの基礎閾値 v_b の計算 (Eq 1)
+                
+                # 期待個数 (形状 [B_u])
+                expected_counts = torch.ceil(torch.sum(q_c, dim=1))
+                # 降順ソート (形状 [B_u, K])
+                sorted_preds, _ = torch.sort(q_c, dim=1, descending=True)
+                # インデックスの準備 (0-based index)
+                indices = (expected_counts - 1).long().clamp(0, K - 1)
+                    # 何これ
+                # 基礎閾値 v_b を取得 (形状 [B_u])
+                v_b = sorted_preds.gather(1, indices.unsqueeze(1)).squeeze(1)
+
+                # ステップ 6.2: グローバル閾値 tau_s のEMA更新 (Eq 2)
+                batch_mean_v_b = torch.mean(v_b)
+                self.global_clip_threshold = self.sat_lambda * self.global_clip_threshold.data + (1 - self.sat_lambda) * batch_mean_v_b
+                tau_s = self.global_clip_threshold
+
+                # ステップ 6.3: ローカル確率 p_tilde_s(k) のEMA更新 (Eq 3)
+                batch_mean_q_c = torch.mean(q_c, dim=0) # (形状 [K])
+                self.local_clip_probabilities = self.sat_lambda * self.local_clip_probabilities.data + (1 - self.sat_lambda) * batch_mean_q_c
+                p_tilde_s = self.local_clip_probabilities
+
+                # ステップ 6.4: 適応的閾値 tau_s^c(k) の計算 (Eq 4)
+                # (p_tilde_sの最大値で正規化)
+                adaptive_clip_thresholds = (p_tilde_s / torch.max(p_tilde_s)) * tau_s # (形状 [K])
+
+                # ステップ 7: クリップ疑似ラベル L_Clip_c の生成
+                L_Clip_c = (q_c > adaptive_clip_thresholds).float() # (形状 [B_u, K])
+                
+                
+                # ===========================================================
+                # 2. SAFT (Frame-level Adaptive Thresholding) (ステップ 11, 12)
+                # ===========================================================
+                
+                # (形状 [K])
+                adaptive_frame_thresholds_k = torch.zeros(K, device=self.device)
+                
+                # GMMがインポートされているか、計算コスト高騰を許容する場合
+                if self.gmm_imported:
+                    try:
+                        # ステップ 11.1: フレーム予測のフィルタリング (Eq 6)
+                        # L_Clip_c を (B_u, 1, K) に拡張してブロードキャスト
+                        filtered_q_f = q_f * L_Clip_c.unsqueeze(1) # (B_u, T, K)
+                        
+                        # ステップ 11.2-4: GMMによる閾値計算 (Eq 7-9)
+                        for k in range(K):
+                            # クラス k の、フィルタリング後の0より大きい予測値を取得
+                            class_k_preds = filtered_q_f[:, :, k]
+                            active_preds_k = class_k_preds[class_k_preds > 1e-8] # ゼロに近い値を除外
+                            
+                            # GMMをフィッティングするのに十分なサンプルがあるか確認
+                            if active_preds_k.numel() > 20: # 最小サンプル数 (要調整)
+                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=1, covariance_type='full')
+                                
+                                # sklearnはCPUテンソル(numpy)が必要
+                                gmm.fit(active_preds_k.cpu().numpy().reshape(-1, 1))
+                                
+                                # active (平均値が高い方) のクラスタを見つける
+                                idx_active = np.argmax(gmm.means_)
+                                mu_a_k = gmm.means_[idx_active][0] # mp (Eq 8)
+                                
+                                # 閾値 (Eq 9) - ユーザーメモに基づき、activeクラスタの平均 (mp) を閾値として採用
+                                threshold_k = mu_a_k
+                                adaptive_frame_thresholds_k[k] = threshold_k
+                            else:
+                                # サンプルが少ない場合、クリップの閾値を流用
+                                adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] 
+                                
+                    except Exception as e:
+                        # GMMフィッティング失敗時 (e.g. 分散が0)
+                        # print(f"Warning: SAFT GMM fitting failed: {e}")
+                        # GMMが失敗した場合、クリップの閾値を流用
+                        adaptive_frame_thresholds_k = adaptive_clip_thresholds.data.clone()
+                else:
+                    # GMMがインポートできなかった場合、SACTの閾値を流用
+                    adaptive_frame_thresholds_k = adaptive_clip_thresholds.data.clone()
+
+                # ステップ 11.5 & 12: フレーム疑似ラベル L_Frame_f の生成 (Eq 10)
+                # 閾値 (形状 [K]) を (1, 1, K) に拡張してブロードキャスト
+                L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, 1, K)).float() # (B_u, T, K)
+                
+                # (B_u, T, K) -> (B_u, K, T) に転置 (BCE損失のため)
+                L_Frame_f = L_Frame_f.transpose(1, 2) # (B_u, K, T)
+
+
+                # ===========================================================
+                # 3. 疑似ラベル損失 (L^u) の計算 (ステップ 16)
+                # ===========================================================
+                
+                # self.selfsup_loss (BCE) を使用
+                
+                # クリップ疑似ラベル損失 (B_u, K)
+                loss_pseudo_clip = self.selfsup_loss(
+                    s_c,
+                    L_Clip_c
+                )
+                
+                # フレーム疑似ラベル損失 (B_u, K, T)
+                loss_pseudo_frame = self.selfsup_loss(
+                    s_f,
+                    L_Frame_f
+                )
+                
+                loss_pseudo = self.sat_w_u * (loss_pseudo_clip + loss_pseudo_frame)
+
+                # ロギング
+                self.log("train/sat/loss_pseudo_clip", loss_pseudo_clip)
+                self.log("train/sat/loss_pseudo_frame", loss_pseudo_frame)
+                self.log("train/sat/loss_pseudo_total", loss_pseudo, prog_bar=True)
+                self.log("train/sat/global_clip_threshold", tau_s)
+                # 疑似ラベルの密度（どのくらいの割合が1になったか）
+                self.log("train/sat/L_Clip_c_ratio", L_Clip_c.mean())
+                self.log("train/sat/L_Frame_f_ratio", L_Frame_f.mean())
+
+        # ========================================================================
+        # 最終損失の計算
+        # ========================================================================
+        
+        # 既存の損失に、計算した疑似ラベル損失を加える
+        tot_loss = tot_loss_supervised + tot_self_loss + loss_pseudo
+
+        # tot_loss = tot_loss_supervised + tot_self_loss
 
         # 教師あり学習の損失
         self.log("train/student/loss_strong", loss_strong)
@@ -829,19 +1056,19 @@ class SEDTask4(pl.LightningModule):
         self.log("train/step/global_step", self.global_step)
         self.log("train/step/current_epoch", self.current_epoch)
 
-        # CMT specific logging
-        if self.cmt_enabled:
-            self.log("train/cmt/phi_clip", self.cmt_phi_clip)
-            self.log("train/cmt/phi_frame", self.cmt_phi_frame)
-            if cmt_active:
-                self.log("train/cmt/pseudo_label_ratio_w", pseudo_label_ratio_w)
-                self.log("train/cmt/pseudo_label_ratio_s", pseudo_label_ratio_s)
-                self.log("train/cmt/confidence_w_mean", confidence_w_mean)
-                self.log("train/cmt/confidence_s_mean", confidence_s_mean)
-                self.log("train/cmt/teacher_pred_w_mean", teacher_pred_w_mean)
-                self.log("train/cmt/teacher_pred_s_mean", teacher_pred_s_mean)
-                self.log("train/cmt/nonzero_samples_w", (confidence_w > 0).float().mean())
-                self.log("train/cmt/nonzero_samples_s", (confidence_s > 0).float().mean())
+        # # CMT specific logging
+        # if self.cmt_enabled:
+        #     self.log("train/cmt/phi_clip", self.cmt_phi_clip)
+        #     self.log("train/cmt/phi_frame", self.cmt_phi_frame)
+        #     if cmt_active:
+        #         self.log("train/cmt/pseudo_label_ratio_w", pseudo_label_ratio_w)
+        #         self.log("train/cmt/pseudo_label_ratio_s", pseudo_label_ratio_s)
+        #         self.log("train/cmt/confidence_w_mean", confidence_w_mean)
+        #         self.log("train/cmt/confidence_s_mean", confidence_s_mean)
+        #         self.log("train/cmt/teacher_pred_w_mean", teacher_pred_w_mean)
+        #         self.log("train/cmt/teacher_pred_s_mean", teacher_pred_s_mean)
+        #         self.log("train/cmt/nonzero_samples_w", (confidence_w > 0).float().mean())
+        #         self.log("train/cmt/nonzero_samples_s", (confidence_s > 0).float().mean())
 
         return tot_loss
 

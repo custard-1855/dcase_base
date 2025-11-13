@@ -23,7 +23,7 @@ training:
   
   # Mean Teacher設定
   ema_factor: 0.999
-  self_sup_loss: bce
+  self_sup_loss: mse #bce
   
   # 損失重み調整
   const_max: 2                 # 自己教師学習最大重み
