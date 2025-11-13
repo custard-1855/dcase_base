@@ -1443,7 +1443,7 @@ class SEDTask4(pl.LightningModule):
                             ground_truth=maestro_ground_truth,
                             audio_durations=maestro_audio_durations,
                             selection_fn=sed_scores_eval.segment_based.auroc,  # PSDS1を最大化
-                            selection_kwargs=segment_length
+                            segment_length=segment_length
                         )
                         print(f"✓ MAESTRO cSEBBs tuning completed with {len(maestro_val_scores)} clips")
                     else:
