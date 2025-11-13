@@ -11,6 +11,13 @@ cmt:
   scale: False
   warmup_epochs: 50
 
+sat:
+  enabled: False
+  lambda: 0.999
+  w_u: 0.5
+
+
+
 
 sebbs:
   enabled: false
