@@ -1442,7 +1442,7 @@ class SEDTask4(pl.LightningModule):
                             scores=maestro_val_scores,
                             ground_truth=maestro_ground_truth,
                             audio_durations=maestro_audio_durations,
-                            selection_fn=sed_scores_eval.segment_based.auroc,  # PSDS1を最大化
+                            selection_fn=select_best_auroc,  # AUROCを最大化
                             segment_length=segment_length
                         )
                         print(f"✓ MAESTRO cSEBBs tuning completed with {len(maestro_val_scores)} clips")
@@ -2220,6 +2220,69 @@ class SEDTask4(pl.LightningModule):
 
         return maestro_audio_durations_filtered, maestro_ground_truth
 
+
+def select_best_auroc(
+    csebbs: list,
+    ground_truth: dict,
+    audio_durations: dict,
+    audio_ids=None,
+    segment_length=1.0,
+    **kwargs
+):
+    """
+    cSEBBsのハイパーパラメータチューニングでAUROCを最大化する選択関数
+
+    csebbs.tune()からのインターフェースに適合し、
+    内部でsed_scores_eval.segment_based.aurocを使用する
+
+    Args:
+        csebbs: [(CSEBBsPredictor, sebbs_dict), ...]のリスト
+        ground_truth: {audio_id: [(onset, offset, label), ...]}
+        audio_durations: {audio_id: duration}
+        audio_ids: 評価対象のaudio_idリスト（オプション）
+        segment_length: セグメント長（秒）
+        **kwargs: aurocに渡す追加引数
+
+    Returns:
+        (best_predictor, best_scores): 最良のpredictor、および各クラスのAUROC値
+    """
+    if audio_ids is not None:
+        ground_truth = {aid: ground_truth[aid] for aid in audio_ids}
+        audio_durations = {aid: audio_durations[aid] for aid in audio_ids}
+
+    best_auroc = -1
+    best_predictor = None
+    best_auroc_values = None
+
+    for predictor, sebbs_dict in csebbs:
+        # SEBBsをsed_scores_eval形式に変換
+        if audio_ids is not None:
+            sebbs_dict = {aid: sebbs_dict[aid] for aid in audio_ids}
+
+        scores = sed_scores_from_sebbs(
+            sebbs_dict,
+            sound_classes=predictor.sound_classes,
+            audio_duration=audio_durations
+        )
+
+        # AUROC計算
+        auroc_values = sed_scores_eval.segment_based.auroc(
+            scores=scores,
+            ground_truth=ground_truth,
+            audio_durations=audio_durations,
+            segment_length=segment_length,
+            **kwargs
+        )
+
+        # 平均AUROCで評価
+        mean_auroc = np.mean(list(auroc_values.values()))
+
+        if mean_auroc > best_auroc:
+            best_auroc = mean_auroc
+            best_predictor = predictor
+            best_auroc_values = auroc_values
+
+    return best_predictor, best_auroc_values
 
 
 def _merge_maestro_ground_truth(clip_ground_truth):
