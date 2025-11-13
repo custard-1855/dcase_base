@@ -871,8 +871,9 @@ class SEDTask4(pl.LightningModule):
         loss_pseudo = torch.tensor(0.0).to(self.device)
         
         # SATが有効化されており、ウォームアップが終了しているか確認
-        sat_active = self.sat_enabled and (self.current_epoch >= self.sat_warmup_epochs)
+        # sat_active = self.sat_enabled and (self.current_epoch >= self.sat_warmup_epochs)
 
+        sat_active = True
         # ラベルなしデータが存在する場合のみ実行
         if sat_active:
             # --- 必要な変数を取得 ---
