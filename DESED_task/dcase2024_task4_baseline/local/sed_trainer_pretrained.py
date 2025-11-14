@@ -794,68 +794,69 @@ class SEDTask4(pl.LightningModule):
         # should we apply the valid mask for classes also here ?
 
 
-        # cmt_active = self.cmt_enabled and (self.current_epoch >= self.cmt_warmup_epochs)
+        cmt_active = self.cmt_enabled and (self.current_epoch >= self.cmt_warmup_epochs)
 
         # # CMT
-        # if cmt_active:
-        #     # Apply CMT processing
-        #     with torch.no_grad():
-        #         # Apply CMT postprocessing to teacher predictions
-        #         teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
-        #             weak_preds_teacher[mask_unlabeled], 
-        #             strong_preds_teacher[mask_unlabeled],
-        #             phi_clip=self.cmt_phi_clip,
-        #             phi_frame=self.cmt_phi_frame,
-        #         )
+        if cmt_active:
+            # Apply CMT processing
+            with torch.no_grad():
+                # Apply CMT postprocessing to teacher predictions
+                # full_mask_unlabeledに修正
+                teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
+                    weak_preds_teacher[full_mask_unlabeled], 
+                    strong_preds_teacher[full_mask_unlabeled],
+                    phi_clip=self.cmt_phi_clip,
+                    phi_frame=self.cmt_phi_frame,
+                )
                 
-        #         # Compute confidence weights
-        #         confidence_w, confidence_s = self.compute_cmt_confidence_weights(
-        #             weak_preds_teacher[mask_unlabeled],
-        #             strong_preds_teacher[mask_unlabeled],
-        #             teacher_pseudo_w,
-        #             teacher_pseudo_s
-        #         )
+                # Compute confidence weights
+                confidence_w, confidence_s = self.compute_cmt_confidence_weights(
+                    weak_preds_teacher[full_mask_unlabeled],
+                    strong_preds_teacher[full_mask_unlabeled],
+                    teacher_pseudo_w,
+                    teacher_pseudo_s
+                )
 
-        #         # Debug statistics
-        #         pseudo_label_ratio_w = teacher_pseudo_w.mean()
-        #         pseudo_label_ratio_s = teacher_pseudo_s.mean()
-        #         confidence_w_mean = confidence_w.mean()
-        #         confidence_s_mean = confidence_s.mean()
-        #         teacher_pred_w_mean = weak_preds_teacher[mask_unlabeled].mean()
-        #         teacher_pred_s_mean = strong_preds_teacher[mask_unlabeled].mean()
+                # # Debug statistics
+                # pseudo_label_ratio_w = teacher_pseudo_w.mean()
+                # pseudo_label_ratio_s = teacher_pseudo_s.mean()
+                # confidence_w_mean = confidence_w.mean()
+                # confidence_s_mean = confidence_s.mean()
+                # teacher_pred_w_mean = weak_preds_teacher[mask_unlabeled].mean()
+                # teacher_pred_s_mean = strong_preds_teacher[mask_unlabeled].mean()
             
-        #     # Compute CMT consistency loss with confidence weighting
-        #     weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
-        #         weak_preds_student[mask_unlabeled],
-        #         strong_preds_student[mask_unlabeled],
-        #         teacher_pseudo_w,
-        #         teacher_pseudo_s,
-        #         confidence_w,
-        #         confidence_s
-        #     )
-        # else:
-        #     # Original Mean Teacher consistency loss
-        #     strong_self_sup_loss = self.selfsup_loss(
-        #         strong_preds_student[mask_unlabeled],
-        #         strong_preds_teacher.detach()[mask_unlabeled],
-        #     )
-        #     weak_self_sup_loss = self.selfsup_loss(
-        #         weak_preds_student[mask_unlabeled],
-        #         weak_preds_teacher.detach()[mask_unlabeled],
-        #     )
+            # Compute CMT consistency loss with confidence weighting
+            weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
+                weak_preds_student[mask_unlabeled],
+                strong_preds_student[mask_unlabeled],
+                teacher_pseudo_w,
+                teacher_pseudo_s,
+                confidence_w,
+                confidence_s
+            )
+        else:
+            # Original Mean Teacher consistency loss
+            strong_self_sup_loss = self.selfsup_loss(
+                strong_preds_student[mask_unlabeled],
+                strong_preds_teacher.detach()[mask_unlabeled],
+            )
+            weak_self_sup_loss = self.selfsup_loss(
+                weak_preds_student[mask_unlabeled],
+                weak_preds_teacher.detach()[mask_unlabeled],
+            )
 
 
         # Original Mean Teacher consistency loss
         # BCE > MSEに変更 CMTをやめるため
         # 一貫性損失用にラベルなしデータも含む
-        strong_self_sup_loss = self.selfsup_loss(
-            strong_preds_student[mask_unlabeled],
-            strong_preds_teacher.detach()[mask_unlabeled],
-        )
-        weak_self_sup_loss = self.selfsup_loss(
-            weak_preds_student[mask_unlabeled],
-            weak_preds_teacher.detach()[mask_unlabeled],
-        )
+        # strong_self_sup_loss = self.selfsup_loss(
+        #     strong_preds_student[mask_unlabeled],
+        #     strong_preds_teacher.detach()[mask_unlabeled],
+        # )
+        # weak_self_sup_loss = self.selfsup_loss(
+        #     weak_preds_student[mask_unlabeled],
+        #     weak_preds_teacher.detach()[mask_unlabeled],
+        # )
 
         tot_self_loss = (strong_self_sup_loss + weak_self_sup_loss) * weight
 
