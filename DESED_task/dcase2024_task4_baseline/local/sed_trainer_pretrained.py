@@ -721,7 +721,7 @@ class SEDTask4(pl.LightningModule):
         strong_mask[:indx_strong] = 1 # maestro,合成(synthは確か合成音),強ラベルデータ
         weak_mask[indx_strong:indx_weak] = 1 # 弱ラベルデータ
         mask_unlabeled[indx_maestro:] = 1 # maestro以外: 合成,強,弱,ラベルなしデータ
-        full_mask_unlabeled[:indx_unlabelled] = 1 # 本当にunlabeledしか含まれていない
+        full_mask_unlabeled[indx_weak:] = 1 # 本当にunlabeledしか含まれていない
 
         # deriving weak labels
         mixup_type = self.hparams["training"].get("mixup")
