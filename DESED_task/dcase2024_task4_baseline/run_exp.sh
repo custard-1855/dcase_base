@@ -20,6 +20,22 @@ echo "=========================================="
 echo ""
 
 ################################################################################
+# 実験4: sat + MixStyle + cSEBBs
+################################################################################
+echo "[4/4] Running: sat + MixStyle + cSEBBs"
+uv run train_pretrained.py \
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
+    --sebbs \
+    --sat \
+    --wandb_dir ${BASE_WANDB_DIR}/sat_MixStyle_csebbs \
+    2>&1 | tee ${LOG_DIR}/sat_mixstyle_csebbs_${TIMESTAMP}.log
+
+echo ""
+
+
+################################################################################
 # 実験1: sat
 ################################################################################
 echo "[1/4] Running: sat"
@@ -56,19 +72,4 @@ uv run train_pretrained.py \
 
 echo ""
 
-
-################################################################################
-# 実験3: sat + MixStyle + cSEBBs
-################################################################################
-echo "[4/4] Running: sat + MixStyle + cSEBBs"
-uv run train_pretrained.py \
-    --attn_type ${ATTN_TYPE} \
-    --attn_deepen ${ATTN_DEEPEN} \
-    --mixstyle_type ${MIXSTYLE_TYPE} \
-    --sebbs \
-    --sat \
-    --wandb_dir ${BASE_WANDB_DIR}/sat_MixStyle_csebbs \
-    2>&1 | tee ${LOG_DIR}/sat_mixstyle_csebbs_${TIMESTAMP}.log
-
-echo ""
 
