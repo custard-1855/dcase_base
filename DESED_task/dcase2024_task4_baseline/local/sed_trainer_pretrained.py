@@ -715,10 +715,13 @@ class SEDTask4(pl.LightningModule):
         # deriving masks for each dataset
         strong_mask = torch.zeros(batch_num).to(features).bool()
         weak_mask = torch.zeros(batch_num).to(features).bool()
-        mask_unlabeled = torch.zeros(batch_num).to(features).bool()
+        mask_unlabeled = torch.zeros(batch_num).to(features).bool() # 一貫性損失用
+        full_mask_unlabeled = torch.zeros(batch_num).to(features).bool() # SAT用
+
         strong_mask[:indx_strong] = 1 # maestro,合成(synthは確か合成音),強ラベルデータ
         weak_mask[indx_strong:indx_weak] = 1 # 弱ラベルデータ
         mask_unlabeled[indx_maestro:] = 1 # maestro以外: 合成,強,弱,ラベルなしデータ
+        full_mask_unlabeled[:indx_unlabelled] = 1 # 本当にunlabeledしか含まれていない
 
         # deriving weak labels
         mixup_type = self.hparams["training"].get("mixup")
@@ -736,6 +739,11 @@ class SEDTask4(pl.LightningModule):
             features, embeddings, labels = self.apply_mixup(
                 features, embeddings, labels, 0, indx_maestro
             )
+            # ラベルなしデータを拡張
+            features, embeddings, labels = self.apply_mixup(
+                features, embeddings, labels, indx_weak, indx_unlabelled
+            )
+
 
         # mask labels for invalid datasets classes after mixup.
         labels_weak = (torch.sum(labels[weak_mask], -1) > 0).float()
@@ -898,8 +906,10 @@ class SEDTask4(pl.LightningModule):
             # --- [!! 現在のコードでの代替 !!] ---
             # (注意: このままではSAT-SEDの効果は限定的です)
             # WAデータに対する生徒モデルの予測を仮に使用
-            s_c = weak_preds_student[mask_unlabeled]
-            s_f = strong_preds_student[mask_unlabeled]
+            # 本来は強拡張したラベルなしデータに対する予測を得る
+            # ここでは弱拡張したラベルなしデータに対する予測を得る
+            s_c = weak_preds_student[full_mask_unlabeled]
+            s_f = strong_preds_student[full_mask_unlabeled]
             # --- [!! /現在のコードでの代替 !!] ---
 
             # B, K, T: バッチ,クラス,フレーム
