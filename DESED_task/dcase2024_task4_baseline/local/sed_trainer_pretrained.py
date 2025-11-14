@@ -886,8 +886,8 @@ class SEDTask4(pl.LightningModule):
         if sat_active:
             # --- 必要な変数を取得 ---
             # 教師モデルによるWA予測 (疑似ラベル生成用)
-            q_c = weak_preds_teacher.detach()[mask_unlabeled]   # クリップ予測 (B_u, K)
-            q_f = strong_preds_teacher.detach()[mask_unlabeled] # フレーム予測 (B_u, K, T)
+            q_c = weak_preds_teacher.detach()[full_mask_unlabeled]   # クリップ予測 (B_u, K)
+            q_f = strong_preds_teacher.detach()[full_mask_unlabeled] # フレーム予測 (B_u, K, T)
             
             # --- [!! 本来の実装 !!] ---
             # データローダーがWA/SAを返すよう修正した場合:
