@@ -759,6 +759,7 @@ class SEDTask4(pl.LightningModule):
             embeddings=embeddings,
             classes_mask=valid_class_mask,
         )
+        # 生徒モデルにラベルなしデータも入れるが,lossに使う際にmaskする
 
         # print(f"[DEBUG] Student | strong: {strong_preds_student}, weak: {weak_preds_student}")
 
@@ -846,6 +847,7 @@ class SEDTask4(pl.LightningModule):
 
         # Original Mean Teacher consistency loss
         # BCE > MSEに変更 CMTをやめるため
+        # 一貫性損失用にラベルなしデータも含む
         strong_self_sup_loss = self.selfsup_loss(
             strong_preds_student[mask_unlabeled],
             strong_preds_teacher.detach()[mask_unlabeled],
@@ -859,38 +861,20 @@ class SEDTask4(pl.LightningModule):
 
 
         # 一貫性損失を出した後,疑似ラベルと強拡張の損失を出す
-        # ひとまず強拡張をやらず,疑似ラベルとの損失だけ出す
-
-
-        # 生徒モデルに強拡張したデータを入力
-        # strong_preds_student, weak_preds_student = self.detect(
-        #     features,
-        #     self.sed_student,
-        #     embeddings=embeddings,
-        #     classes_mask=valid_class_mask,
-        # )
-
-
         # 適応的閾値を実装
-        # 実装が必要な定数や変数
-            # self.sat_warmup_epochs
-            # self.sat_lambda
-
         loss_pseudo = torch.tensor(0.0).to(self.device)
         
         # SATが有効化されており、ウォームアップが終了しているか確認
         # sat_active = self.sat_enabled and (self.current_epoch >= self.sat_warmup_epochs)
 
-        sat_active = True
-        # ラベルなしデータが存在する場合のみ実行
-        if sat_active:
+        if self.sat_enabled:
             # --- 必要な変数を取得 ---
             # 教師モデルによるWA予測 (疑似ラベル生成用)
+                # ラベルなしデータに対する教師モデルの予測を得て,疑似ラベルを作る
             q_c = weak_preds_teacher.detach()[full_mask_unlabeled]   # クリップ予測 (B_u, K)
             q_f = strong_preds_teacher.detach()[full_mask_unlabeled] # フレーム予測 (B_u, K, T)
             
             # --- [!! 本来の実装 !!] ---
-            # データローダーがWA/SAを返すよう修正した場合:
             # 1. training_step冒頭で features_SA を取得
             # 2. 強拡張(SA)データで生徒モデルをフォワード
             # strong_preds_student_SA, weak_preds_student_SA = self.detect(
@@ -904,9 +888,8 @@ class SEDTask4(pl.LightningModule):
             # --- [!! /本来の実装 !!] ---
 
             # --- [!! 現在のコードでの代替 !!] ---
-            # (注意: このままではSAT-SEDの効果は限定的です)
             # WAデータに対する生徒モデルの予測を仮に使用
-            # 本来は強拡張したラベルなしデータに対する予測を得る
+            # 本来は強拡張したラベルなしデータに対する生徒モデルの予測を得る
             # ここでは弱拡張したラベルなしデータに対する予測を得る
             s_c = weak_preds_student[full_mask_unlabeled]
             s_f = strong_preds_student[full_mask_unlabeled]
