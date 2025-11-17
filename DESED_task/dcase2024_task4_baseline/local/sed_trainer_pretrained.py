@@ -1005,6 +1005,14 @@ class SEDTask4(pl.LightningModule):
                 # ステップ 11.5 & 12: フレーム疑似ラベル L_Frame_f の生成 (Eq 10)
                 # 閾値 (形状 [K]) を (1, K, 1) に拡張してブロードキャスト
                 L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, K, 1)).float() # (B_u, K, T)
+                
+                # クラスごとの閾値を出力
+                class_thresholds = {
+                    self.encoder.labels[k]: adaptive_frame_thresholds_k[k].item()
+                    for k in range(K)
+                }
+                print(f"Class Thresholds: {class_thresholds}")
+
 
                 # ===========================================================
                 # 3. 疑似ラベル損失 (L^u) の計算 (ステップ 16)
