@@ -39,6 +39,7 @@ from sebbs.scripts.utils  import get_segment_scores
 # データ不足の対策
 from torch.utils.data.dataloader import DataLoader, default_collate
 import wandb
+import torch.nn.functional as F
 
 
 try:
@@ -462,8 +463,15 @@ class SEDTask4(pl.LightningModule):
         """
         # Use the true average until the exponential average is more correct
         alpha = min(1 - 1 / (global_step + 1), alpha)
+        
+        # Calculate Euclidean distance between student and teacher weights
+        euclidean_dist = 0.0
         for ema_params, params in zip(ema_model.parameters(), model.parameters()):
+            euclidean_dist += torch.sum((ema_params.data - params.data) ** 2).item()
             ema_params.data.mul_(alpha).add_(params.data, alpha=1 - alpha)
+        
+        euclidean_dist = euclidean_dist ** 0.5
+        return euclidean_dist
 
     def _init_scaler(self):
         """Scaler inizialization
@@ -1057,6 +1065,12 @@ class SEDTask4(pl.LightningModule):
         self.log("train/step/global_step", self.global_step)
         self.log("train/step/current_epoch", self.current_epoch)
 
+        # モデルの状態を見る
+        self.log("debug/student_self_strong_mean", strong_preds_student[mask_unlabeled].mean().item())
+        self.log("debug/student_self_strong_mean", strong_preds_student[mask_unlabeled].max().item())
+        self.log("debug/teacher_self_strong_mean", strong_preds_teacher[mask_unlabeled].mean().item())
+        # 生のMSEはstrong_self_sup_loss
+
         # # CMT specific logging
         # if self.cmt_enabled:
         #     self.log("train/cmt/phi_clip", self.cmt_phi_clip)
@@ -1075,12 +1089,16 @@ class SEDTask4(pl.LightningModule):
 
     def on_before_zero_grad(self, *args, **kwargs):
         # update EMA teacher
-        self.update_ema(
+        euclidean_dist = self.update_ema(
             self.hparams["training"]["ema_factor"],
             self.scheduler["scheduler"].step_num,
             self.sed_student,
             self.sed_teacher,
         )
+        
+        # Log the Euclidean distance between student and teacher weights
+        if self.global_step % 50 == 0:  # Log every 100 steps to avoid overhead
+            self.log("debug/ema_weight_distance", euclidean_dist, prog_bar=False)
 
     def validation_step(self, batch, batch_indx):
         """Apply validation to a batch (step). Used during trainer.fit
