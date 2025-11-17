@@ -1067,7 +1067,7 @@ class SEDTask4(pl.LightningModule):
 
         # モデルの状態を見る
         self.log("debug/student_self_strong_mean", strong_preds_student[mask_unlabeled].mean().item())
-        self.log("debug/student_self_strong_mean", strong_preds_student[mask_unlabeled].max().item())
+        self.log("debug/student_self_strong_max", strong_preds_student[mask_unlabeled].max().item())
         self.log("debug/teacher_self_strong_mean", strong_preds_teacher[mask_unlabeled].mean().item())
         # 生のMSEはstrong_self_sup_loss
 
@@ -1097,7 +1097,7 @@ class SEDTask4(pl.LightningModule):
         )
         
         # Log the Euclidean distance between student and teacher weights
-        if self.global_step % 50 == 0:  # Log every 100 steps to avoid overhead
+        if self.global_step % 100 == 0:  # Log every 100 steps to avoid overhead
             self.log("debug/ema_weight_distance", euclidean_dist, prog_bar=False)
 
     def validation_step(self, batch, batch_indx):
