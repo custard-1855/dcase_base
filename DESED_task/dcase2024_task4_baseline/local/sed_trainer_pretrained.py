@@ -894,7 +894,7 @@ class SEDTask4(pl.LightningModule):
 
             # 疑似ラベル損失計算用の予測値
             s_c = weak_preds_student_SA  # クリップレベル予測 (B_u, K)
-            s_f = strong_preds_student_SA  # フレームレベル予測 (B_u, T, K)
+            s_f = strong_preds_student_SA  # フレームレベル予測 (B_u, K, T)
 
             # B, K, T: バッチ,クラス,フレーム
 
@@ -904,7 +904,7 @@ class SEDTask4(pl.LightningModule):
                  pass # loss_pseudo は 0.0 のまま
             else:
                 B_u, K = q_c.shape
-                _, T, _ = q_f.shape # q_fは (B_u, T, K)
+                _, _, T = q_f.shape # q_fは (B_u, K, T)
             
                 # ===========================================================
                 # 1. SACT (Clip-level Adaptive Thresholding) (ステップ 6, 7)
@@ -913,31 +913,30 @@ class SEDTask4(pl.LightningModule):
                 # ステップ 6.1: バッチの基礎閾値 v_b の計算 (Eq 1)
                 
                 # 期待個数 (形状 [B_u])
-                expected_counts = torch.ceil(torch.sum(q_c, dim=1))
+                expected_counts = torch.ceil(torch.sum(q_c, dim=1)) # ok
                 # 降順ソート (形状 [B_u, K])
-                sorted_preds, _ = torch.sort(q_c, dim=1, descending=True)
+                sorted_preds, _ = torch.sort(q_c, dim=1, descending=True) # ok
                 # インデックスの準備 (0-based index)
-                indices = (expected_counts - 1).long().clamp(0, K - 1)
-                    # 何これ
+                indices = (expected_counts - 1).long().clamp(0, K - 1) # ok
                 # 基礎閾値 v_b を取得 (形状 [B_u])
-                v_b = sorted_preds.gather(1, indices.unsqueeze(1)).squeeze(1)
+                v_b = sorted_preds.gather(1, indices.unsqueeze(1)).squeeze(1) # 後で確認
 
                 # ステップ 6.2: グローバル閾値 tau_s のEMA更新 (Eq 2)
                 batch_mean_v_b = torch.mean(v_b)
-                self.global_clip_threshold = self.sat_lambda * self.global_clip_threshold.data + (1 - self.sat_lambda) * batch_mean_v_b
+                self.global_clip_threshold = self.sat_lambda * self.global_clip_threshold.data + (1 - self.sat_lambda) * batch_mean_v_b # ok
                 tau_s = self.global_clip_threshold
 
                 # ステップ 6.3: ローカル確率 p_tilde_s(k) のEMA更新 (Eq 3)
                 batch_mean_q_c = torch.mean(q_c, dim=0) # (形状 [K])
-                self.local_clip_probabilities = self.sat_lambda * self.local_clip_probabilities.data + (1 - self.sat_lambda) * batch_mean_q_c
+                self.local_clip_probabilities = self.sat_lambda * self.local_clip_probabilities.data + (1 - self.sat_lambda) * batch_mean_q_c # ok
                 p_tilde_s = self.local_clip_probabilities
 
                 # ステップ 6.4: 適応的閾値 tau_s^c(k) の計算 (Eq 4)
                 # (p_tilde_sの最大値で正規化)
-                adaptive_clip_thresholds = (p_tilde_s / torch.max(p_tilde_s)) * tau_s # (形状 [K])
+                adaptive_clip_thresholds = (p_tilde_s / torch.max(p_tilde_s)) * tau_s # (形状 [K]) # ok
 
                 # ステップ 7: クリップ疑似ラベル L_Clip_c の生成
-                L_Clip_c = (q_c > adaptive_clip_thresholds).float() # (形状 [B_u, K])
+                L_Clip_c = (q_c > adaptive_clip_thresholds).float() # (形状 [B_u, K]) # ok?
                 
                 
                 # ===========================================================
@@ -952,7 +951,7 @@ class SEDTask4(pl.LightningModule):
                     try:
                         # ステップ 11.1: フレーム予測のフィルタリング (Eq 6)
                         # L_Clip_c を (B, K, 1) に拡張してブロードキャスト
-                        filtered_q_f = q_f * L_Clip_c.unsqueeze(2) # (B, K, T)
+                        filtered_q_f = q_f * L_Clip_c.unsqueeze(2) # (B, K, T) #ok?
                         
                         # ステップ 11.2-4: GMMによる閾値計算 (Eq 7-9)
                         for k in range(K):
@@ -996,18 +995,12 @@ class SEDTask4(pl.LightningModule):
                     adaptive_frame_thresholds_k = adaptive_clip_thresholds.data.clone()
 
                 # ステップ 11.5 & 12: フレーム疑似ラベル L_Frame_f の生成 (Eq 10)
-                # 閾値 (形状 [K]) を (1, 1, K) に拡張してブロードキャスト
-                L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, K, 1)).float() # (B_u, T, K)
-                
-                # (B_u, T, K) -> (B_u, K, T) に転置 (BCE損失のため)
-                # L_Frame_f = L_Frame_f.transpose(1, 2) # (B_u, K, T)
-
+                # 閾値 (形状 [K]) を (1, K, 1) に拡張してブロードキャスト
+                L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, K, 1)).float() # (B_u, K, T)
 
                 # ===========================================================
                 # 3. 疑似ラベル損失 (L^u) の計算 (ステップ 16)
                 # ===========================================================
-                
-                # self.selfsup_loss (BCE) を使用
                 
                 # クリップ疑似ラベル損失 (B_u, K)
                 criterion = torch.nn.BCELoss()
@@ -1051,6 +1044,9 @@ class SEDTask4(pl.LightningModule):
         self.log("train/student/strong_self_sup_loss", strong_self_sup_loss)
         self.log("train/student/weak_self_sup_loss", weak_self_sup_loss)
         self.log("train/student/tot_self_loss", tot_self_loss, prog_bar=True)
+
+        # 総合的なloss
+        self.log("train/student/tot_loss", tot_loss)
 
         # 学習率など
         self.log("train/weight", weight)
