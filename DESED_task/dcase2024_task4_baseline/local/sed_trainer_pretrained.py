@@ -802,16 +802,16 @@ class SEDTask4(pl.LightningModule):
                 # Apply CMT postprocessing to teacher predictions
                 # full_mask_unlabeledに修正
                 teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
-                    weak_preds_teacher[full_mask_unlabeled], 
-                    strong_preds_teacher[full_mask_unlabeled],
+                    weak_preds_teacher[mask_unlabeled], 
+                    strong_preds_teacher[mask_unlabeled],
                     phi_clip=self.cmt_phi_clip,
                     phi_frame=self.cmt_phi_frame,
                 )
                 
                 # Compute confidence weights
                 confidence_w, confidence_s = self.compute_cmt_confidence_weights(
-                    weak_preds_teacher[full_mask_unlabeled],
-                    strong_preds_teacher[full_mask_unlabeled],
+                    weak_preds_teacher[mask_unlabeled],
+                    strong_preds_teacher[mask_unlabeled],
                     teacher_pseudo_w,
                     teacher_pseudo_s
                 )
@@ -826,8 +826,8 @@ class SEDTask4(pl.LightningModule):
             
             # Compute CMT consistency loss with confidence weighting
             weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
-                weak_preds_student[full_mask_unlabeled],
-                strong_preds_student[full_mask_unlabeled],
+                weak_preds_student[mask_unlabeled],
+                strong_preds_student[mask_unlabeled],
                 teacher_pseudo_w,
                 teacher_pseudo_s,
                 confidence_w,
