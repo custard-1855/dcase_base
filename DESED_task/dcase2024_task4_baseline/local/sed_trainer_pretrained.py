@@ -777,8 +777,7 @@ class SEDTask4(pl.LightningModule):
         # total supervised loss
         tot_loss_supervised = loss_strong + loss_weak
 
-        with torch.no_grad():
-            # no_grad? studentのEMAだからOK?
+        with torch.no_grad(): 
             strong_preds_teacher, weak_preds_teacher = self.detect(
                 features,
                 self.sed_teacher,
@@ -838,63 +837,64 @@ class SEDTask4(pl.LightningModule):
             # Original Mean Teacher consistency loss
             strong_self_sup_loss = self.selfsup_loss(
                 strong_preds_student[mask_unlabeled],
-                strong_preds_teacher.detach()[mask_unlabeled],
+                strong_preds_teacher[mask_unlabeled],
             )
             weak_self_sup_loss = self.selfsup_loss(
                 weak_preds_student[mask_unlabeled],
-                weak_preds_teacher.detach()[mask_unlabeled],
+                weak_preds_teacher[mask_unlabeled],
             )
-
-
-        # Original Mean Teacher consistency loss
-        # BCE > MSEに変更 CMTをやめるため
-        # 一貫性損失用にラベルなしデータも含む
-        # strong_self_sup_loss = self.selfsup_loss(
-        #     strong_preds_student[mask_unlabeled],
-        #     strong_preds_teacher.detach()[mask_unlabeled],
-        # )
-        # weak_self_sup_loss = self.selfsup_loss(
-        #     weak_preds_student[mask_unlabeled],
-        #     weak_preds_teacher.detach()[mask_unlabeled],
-        # )
 
         tot_self_loss = (strong_self_sup_loss + weak_self_sup_loss) * weight
 
 
-        # 一貫性損失を出した後,疑似ラベルと強拡張の損失を出す
-        # 適応的閾値を実装
+        # ===========================================================
+        # SAT
+        # ===========================================================
         loss_pseudo = torch.tensor(0.0).to(self.device)
-        
-        # SATが有効化されており、ウォームアップが終了しているか確認
-        # sat_active = self.sat_enabled and (self.current_epoch >= self.sat_warmup_epochs)
 
         if self.sat_enabled:
             # --- 必要な変数を取得 ---
-            # 教師モデルによるWA予測 (疑似ラベル生成用)
-                # ラベルなしデータに対する教師モデルの予測を得て,疑似ラベルを作る
-            q_c = weak_preds_teacher.detach()[full_mask_unlabeled]   # クリップ予測 (B_u, K)
-            q_f = strong_preds_teacher.detach()[full_mask_unlabeled] # フレーム予測 (B_u, K, T)
+            # 教師モデルによる予測. 疑似ラベル用
+            # 弱拡張ラベルなしデータで予測を得て,疑似ラベルを作成
+            q_c = weak_preds_teacher[full_mask_unlabeled]   # クリップ予測 (B_u, K)
+            q_f = strong_preds_teacher[full_mask_unlabeled] # フレーム予測 (B_u, K, T)
             
-            # --- [!! 本来の実装 !!] ---
-            # 1. training_step冒頭で features_SA を取得
-            # 2. 強拡張(SA)データで生徒モデルをフォワード
-            # strong_preds_student_SA, weak_preds_student_SA = self.detect(
-            #     features_SA, # 強拡張メル
-            #     self.sed_student,
-            #     embeddings=embeddings[mask_unlabeled], # 強拡張に対応したembeddings (もしあれば)
-            #     classes_mask=valid_class_mask[mask_unlabeled],
-            # )
-            # s_c = weak_preds_student_SA
-            # s_f = strong_preds_student_SA
-            # --- [!! /本来の実装 !!] ---
+            # ===========================================================
+            # 強拡張 (CutMix) の適用
+            # ===========================================================
 
-            # --- [!! 現在のコードでの代替 !!] ---
-            # WAデータに対する生徒モデルの予測を仮に使用
-            # 本来は強拡張したラベルなしデータに対する生徒モデルの予測を得る
-            # ここでは弱拡張したラベルなしデータに対する予測を得る
-            s_c = weak_preds_student[full_mask_unlabeled]
-            s_f = strong_preds_student[full_mask_unlabeled]
-            # --- [!! /現在のコードでの代替 !!] ---
+            # ラベルなしデータの特徴量を取得
+            features_unlabeled = features[full_mask_unlabeled]
+            embeddings_unlabeled = embeddings[full_mask_unlabeled]
+            classes_mask_unlabeled = valid_class_mask[full_mask_unlabeled]
+
+            # CutMix強拡張を適用
+            cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
+            cutmix_alpha = self.hparams.get("sat", {}).get("cutmix_alpha", 1.0)
+
+            if random.random() < cutmix_prob:
+                # CutMixを適用（ラベルは不要なのでNone）
+                features_SA = cutmix(
+                    features_unlabeled,
+                    target=None,
+                    alpha=cutmix_alpha
+                )
+            else:
+                # CutMixを適用しない場合は元のデータをそのまま使用
+                features_SA = features_unlabeled
+
+            # 強拡張データで生徒モデルをフォワード
+            # 注: 疑似ラベル損失で生徒モデルを訓練するため、勾配計算が必要
+            strong_preds_student_SA, weak_preds_student_SA = self.detect(
+                features_SA,
+                self.sed_student,
+                embeddings=embeddings_unlabeled,  # embeddingsは元のものを使用
+                classes_mask=classes_mask_unlabeled,
+            )
+
+            # 疑似ラベル損失計算用の予測値
+            s_c = weak_preds_student_SA  # クリップレベル予測 (B_u, K)
+            s_f = strong_preds_student_SA  # フレームレベル予測 (B_u, T, K)
 
             # B, K, T: バッチ,クラス,フレーム
 

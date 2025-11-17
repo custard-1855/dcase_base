@@ -69,52 +69,54 @@ def cutmix(data, target=None, alpha=1.0):
     Returns:
         torch.Tensor of mixed data and labels if target is given.
     """
-    with torch.no_grad():
-        batch_size = data.size(0)
-        n_mels = data.size(1)
-        time_frames = data.size(2)
+    batch_size = data.size(0)
+    n_mels = data.size(1)
+    time_frames = data.size(2)
 
-        # Sample lambda from Beta distribution
-        lam = np.random.beta(alpha, alpha)
+    # Sample lambda from Beta distribution
+    # ベータ分布を取得
+    lam = np.random.beta(alpha, alpha)
 
-        # Random permutation for mixing
-        perm = torch.randperm(batch_size)
+    # Random permutation for mixing
+    # バッチをランダムに並べる
+    perm = torch.randperm(batch_size)
 
-        # Determine cut region along time axis
-        cut_width = int(time_frames * (1 - lam))
+    # Determine cut region along time axis
+    # データの時間長とlambdaから,切る幅を決定
+    cut_width = int(time_frames * (1 - lam))
 
-        # Random start position
-        if cut_width > 0 and cut_width < time_frames:
-            start_t = np.random.randint(0, time_frames - cut_width + 1)
-            end_t = start_t + cut_width
-        else:
-            # If cut_width is 0 or >= time_frames, no mixing
-            if target is not None:
-                return data, target
-            else:
-                return data
-
-        # Apply CutMix on time axis (frequency axis unchanged)
-        mixed_data = data.clone()
-        mixed_data[:, :, start_t:end_t] = data[perm, :, start_t:end_t]
-
+    # Random start position
+    if cut_width > 0 and cut_width < time_frames:
+        start_t = np.random.randint(0, time_frames - cut_width + 1)
+        end_t = start_t + cut_width
+    else:
+        # If cut_width is 0 or >= time_frames, no mixing
         if target is not None:
-            mixed_target = target.clone()
-
-            # Handle both frame-level [B, K, T] and clip-level [B, K] targets
-            if target.dim() == 3:  # Frame-level target [B, K, T]
-                mixed_target[:, :, start_t:end_t] = target[perm, :, start_t:end_t]
-            elif target.dim() == 2:  # Clip-level target [B, K]
-                # For clip-level, mix targets based on time proportion
-                lam_actual = 1 - (cut_width / time_frames)
-                mixed_target = torch.clamp(
-                    lam_actual * target + (1 - lam_actual) * target[perm, :],
-                    min=0, max=1
-                )
-
-            return mixed_data, mixed_target
+            return data, target
         else:
-            return mixed_data
+            return data
+
+    # Apply CutMix on time axis (frequency axis unchanged)
+    mixed_data = data.clone()
+    mixed_data[:, :, start_t:end_t] = data[perm, :, start_t:end_t]
+
+    if target is not None:
+        mixed_target = target.clone()
+
+        # Handle both frame-level [B, K, T] and clip-level [B, K] targets
+        if target.dim() == 3:  # Frame-level target [B, K, T]
+            mixed_target[:, :, start_t:end_t] = target[perm, :, start_t:end_t]
+        elif target.dim() == 2:  # Clip-level target [B, K]
+            # For clip-level, mix targets based on time proportion
+            lam_actual = 1 - (cut_width / time_frames)
+            mixed_target = torch.clamp(
+                lam_actual * target + (1 - lam_actual) * target[perm, :],
+                min=0, max=1
+            )
+
+        return mixed_data, mixed_target
+    else:
+        return mixed_data
 
 
 def add_noise(mels, snrs=(6, 30), dims=(1, 2)):
