@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 実験設定
-BASE_WANDB_DIR="cmt/unlabeled/"
+BASE_WANDB_DIR="cmt/labeled/300"
 
 # ログディレクトリの作成
 LOG_DIR="logs/cmt"
