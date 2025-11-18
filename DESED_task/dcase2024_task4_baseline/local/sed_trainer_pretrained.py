@@ -1039,10 +1039,12 @@ class SEDTask4(pl.LightningModule):
                                     if values_above_mean.numel() > 0:
                                         # mpより大きい値の中で最小値を採用
                                         threshold_k = values_above_mean.min().item()
+                                        print("[DEBUG]: enable min value")
                                     else:
                                         # まれなケース: すべての値が平均以下（分布の偏り等）
                                         # この場合は平均値そのものを閾値とするか、フォールバック
                                         threshold_k = mu_a_k
+                                        print("[DEBUG]: disnable min value")
                                         
                                     adaptive_frame_thresholds_k[k] = threshold_k
                             else:
