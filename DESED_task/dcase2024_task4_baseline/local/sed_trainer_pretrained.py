@@ -896,7 +896,7 @@ class SEDTask4(pl.LightningModule):
         if self.sat_enabled:
             # --- 必要な変数を取得 ---
             # 教師モデルによる予測. 疑似ラベル用
-            # 弱拡張ラベルなしデータで予測を得て,疑似ラベルを作成
+            # 弱拡張ラベルなしデータで予測を得て,疑似ラベル作成に使用
             q_c = weak_preds_teacher[full_mask_unlabeled]   # クリップ予測 (B_u, K)
             q_f = strong_preds_teacher[full_mask_unlabeled] # フレーム予測 (B_u, K, T)
             
@@ -909,33 +909,34 @@ class SEDTask4(pl.LightningModule):
             embeddings_unlabeled = embeddings[full_mask_unlabeled]
             classes_mask_unlabeled = valid_class_mask[full_mask_unlabeled]
 
-            # CutMix強拡張を適用
-            cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
-            cutmix_alpha = self.hparams.get("sat", {}).get("cutmix_alpha", 1.0)
+            # # CutMix強拡張を適用
+            # cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
+            # cutmix_alpha = self.hparams.get("sat", {}).get("cutmix_alpha", 1.0)
 
-            if random.random() < cutmix_prob:
-                # CutMixを適用（ラベルは不要なのでNone）
-                features_SA = cutmix(
-                    features_unlabeled,
-                    target=None,
-                    alpha=cutmix_alpha
-                )
-            else:
-                # CutMixを適用しない場合は元のデータをそのまま使用
-                features_SA = features_unlabeled
+            # if random.random() < cutmix_prob:
+            #     # CutMixを適用（ラベルは不要なのでNone）
+            #     features_SA, q_f_mixed, q_c_mixed = cutmix(
+            #         features_unlabeled,
+            #         target_f=q_f,
+            #         target_c =q_c,
+            #         alpha=cutmix_alpha
+            #     )
+            # else:
+            #     # CutMixを適用しない場合は元のデータをそのまま使用
+            #     features_SA = features_unlabeled
 
-            # 強拡張データで生徒モデルをフォワード
-            # 注: 疑似ラベル損失で生徒モデルを訓練するため、勾配計算が必要
-            strong_preds_student_SA, weak_preds_student_SA = self.detect(
-                features_SA,
-                self.sed_student,
-                embeddings=embeddings_unlabeled,  # embeddingsは元のものを使用
-                classes_mask=classes_mask_unlabeled,
-            )
+            # # 強拡張データで生徒モデルをフォワード
+            # # 注: 疑似ラベル損失で生徒モデルを訓練するため、勾配計算が必要
+            # strong_preds_student_SA, weak_preds_student_SA = self.detect(
+            #     features_SA,
+            #     self.sed_student,
+            #     embeddings=embeddings_unlabeled,  # embeddingsは元のものを使用
+            #     classes_mask=classes_mask_unlabeled,
+            # )
 
-            # 疑似ラベル損失計算用の予測値
-            s_c = weak_preds_student_SA  # クリップレベル予測 (B_u, K)
-            s_f = strong_preds_student_SA  # フレームレベル予測 (B_u, K, T)
+            # # 疑似ラベル損失計算用の予測値
+            # s_c = weak_preds_student_SA  # クリップレベル予測 (B_u, K)
+            # s_f = strong_preds_student_SA  # フレームレベル予測 (B_u, K, T)
 
             # B, K, T: バッチ,クラス,フレーム
 
@@ -1063,7 +1064,38 @@ class SEDTask4(pl.LightningModule):
                 # ===========================================================
                 # 3. 疑似ラベル損失 (L^u) の計算 (ステップ 16)
                 # ===========================================================
-                
+
+                # CutMix強拡張を適用
+                cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
+                cutmix_alpha = self.hparams.get("sat", {}).get("cutmix_alpha", 1.0)
+
+                if random.random() < cutmix_prob:
+                    # CutMixを適用（ラベルは不要なのでNone）
+                    features_SA, c_mixed, f_mixed = cutmix(
+                        features_unlabeled,
+                        target_c =L_Clip_c,
+                        target_f=L_Frame_f,
+                        alpha=cutmix_alpha
+                    )
+                    L_Clip_c = c_mixed
+                    L_Frame_f = f_mixed
+                else:
+                    # CutMixを適用しない場合は元のデータをそのまま使用
+                    features_SA = features_unlabeled
+
+                # 強拡張データで生徒モデルをフォワード
+                # 注: 疑似ラベル損失で生徒モデルを訓練するため、勾配計算が必要
+                strong_preds_student_SA, weak_preds_student_SA = self.detect(
+                    features_SA,
+                    self.sed_student,
+                    embeddings=embeddings_unlabeled,  # embeddingsは元のものを使用
+                    classes_mask=classes_mask_unlabeled,
+                )
+
+                # 疑似ラベル損失計算用の予測値
+                s_c = weak_preds_student_SA  # クリップレベル予測 (B_u, K)
+                s_f = strong_preds_student_SA  # フレームレベル予測 (B_u, K, T)
+
                 # クリップ疑似ラベル損失 (B_u, K)
                 criterion = torch.nn.BCELoss()
                 loss_pseudo_clip = criterion(
