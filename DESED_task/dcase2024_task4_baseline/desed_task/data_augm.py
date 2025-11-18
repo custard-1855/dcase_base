@@ -53,7 +53,7 @@ def mixup(data, target=None, alpha=0.2, beta=0.2, mixup_label_type="soft"):
             return mixed_data
 
 
-def cutmix(data, target=None, alpha=1.0):
+def cutmix(data, target_c=None, target_f=None, alpha=1.0):
     """CutMix data augmentation for time axis only.
 
     Applies CutMix augmentation by cutting and pasting a rectangular region
@@ -91,8 +91,8 @@ def cutmix(data, target=None, alpha=1.0):
         end_t = start_t + cut_width
     else:
         # If cut_width is 0 or >= time_frames, no mixing
-        if target is not None:
-            return data, target
+        if target_f is not None and target_c is not None:
+            return data, target_c, target_f
         else:
             return data
 
@@ -100,21 +100,24 @@ def cutmix(data, target=None, alpha=1.0):
     mixed_data = data.clone()
     mixed_data[:, :, start_t:end_t] = data[perm, :, start_t:end_t]
 
-    if target is not None:
-        mixed_target = target.clone()
+    if target_f is not None and target_c is not None:
+        mixed_target_f = target_f.clone()
+        mixed_target_c = target_c.clone()
 
         # Handle both frame-level [B, K, T] and clip-level [B, K] targets
-        if target.dim() == 3:  # Frame-level target [B, K, T]
-            mixed_target[:, :, start_t:end_t] = target[perm, :, start_t:end_t]
-        elif target.dim() == 2:  # Clip-level target [B, K]
-            # For clip-level, mix targets based on time proportion
-            lam_actual = 1 - (cut_width / time_frames)
-            mixed_target = torch.clamp(
-                lam_actual * target + (1 - lam_actual) * target[perm, :],
-                min=0, max=1
-            )
+        # Frame-level target [B, K, T]
+        mixed_target_f[:, :, start_t:end_t] = target_f[perm, :, start_t:end_t]
+        
+        # Clip-level target [B, K]
+        # For clip-level, mix targets based on time proportion
+        mixed_target_c = (mixed_target_f.max(dim=2)[0] > 0).float()
+        # lam_actual = 1 - (cut_width / time_frames)
+        # mixed_target_c = torch.clamp(
+        #     lam_actual * target_c + (1 - lam_actual) * target_c[perm, :],
+        #     min=0, max=1
+        # )
 
-        return mixed_data, mixed_target
+        return mixed_data, mixed_target_c, mixed_target_f
     else:
         return mixed_data
 
