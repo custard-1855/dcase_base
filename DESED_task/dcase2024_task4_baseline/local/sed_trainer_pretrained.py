@@ -463,48 +463,56 @@ class SEDTask4(pl.LightningModule):
         """
         # Use the true average until the exponential average is more correct
         alpha = min(1 - 1 / (global_step + 1), alpha)
+        for ema_params, params in zip(ema_model.parameters(), model.parameters()):
+            ema_params.data.mul_(alpha).add_(params.data, alpha=1 - alpha)
 
-        with torch.no_grad():
-            # 累積用の変数を初期化 (すべてGPU上の0次元Tensorとして扱うと効率的ですが、ここではわかりやすさ優先でスカラ計算します)
-            diff_sq_sum = 0.0   # ユークリッド距離用: sum((S - T)^2)
-            dot_prod_sum = 0.0  # コサイン類似度分子: sum(S * T)
-            norm_s_sq = 0.0     # コサイン類似度分母: sum(S^2)
-            norm_t_sq = 0.0     # コサイン類似度分母: sum(T^2)
 
-            for ema_param, param in zip(ema_model.parameters(), model.parameters()):
-                
-                # --- 1. 計算パート ---
-                
-                # ユークリッド距離用: 差の二乗
-                # (Mean Teacherでは差が非常に小さいので、展開式 a^2+b^2-2ab ではなく、直接差を取るほうが精度が良いです)
-                diff_sq_sum += torch.sum((ema_param - param) ** 2)
-                
-                # コサイン類似度用: 内積とそれぞれのノルム二乗
-                dot_prod_sum += torch.sum(ema_param * param)
-                norm_s_sq += torch.sum(param ** 2)
-                norm_t_sq += torch.sum(ema_param ** 2)
+        #--- ユークリッド距離とコサイン類似度 ---#
+            # あまり参考にならなかったのでコメントアウト
+        # # Use the true average until the exponential average is more correct
+        # alpha = min(1 - 1 / (global_step + 1), alpha)
 
-                # --- 2. 更新パート (EMA) ---
-                
-                # 教師モデル(ema_param)を更新
-                ema_param.mul_(alpha).add_(param, alpha=1 - alpha)
+        # with torch.no_grad():
+        #     # 累積用の変数を初期化 (すべてGPU上の0次元Tensorとして扱うと効率的ですが、ここではわかりやすさ優先でスカラ計算します)
+        #     diff_sq_sum = 0.0   # ユークリッド距離用: sum((S - T)^2)
+        #     dot_prod_sum = 0.0  # コサイン類似度分子: sum(S * T)
+        #     norm_s_sq = 0.0     # コサイン類似度分母: sum(S^2)
+        #     norm_t_sq = 0.0     # コサイン類似度分母: sum(T^2)
 
-            # --- 3. 最終計算パート (CPUへ転送) ---
+        #     for ema_param, param in zip(ema_model.parameters(), model.parameters()):
+                
+        #         # --- 1. 計算パート ---
+                
+        #         # ユークリッド距離用: 差の二乗
+        #         # (Mean Teacherでは差が非常に小さいので、展開式 a^2+b^2-2ab ではなく、直接差を取るほうが精度が良いです)
+        #         diff_sq_sum += torch.sum((ema_param - param) ** 2)
+                
+        #         # コサイン類似度用: 内積とそれぞれのノルム二乗
+        #         dot_prod_sum += torch.sum(ema_param * param)
+        #         norm_s_sq += torch.sum(param ** 2)
+        #         norm_t_sq += torch.sum(ema_param ** 2)
+
+        #         # --- 2. 更新パート (EMA) ---
+                
+        #         # 教師モデル(ema_param)を更新
+        #         ema_param.mul_(alpha).add_(param, alpha=1 - alpha)
+
+        #     # --- 3. 最終計算パート (CPUへ転送) ---
             
-            # GPU上のTensorから値を取り出す (.item())
-            diff_sq_sum = diff_sq_sum.item() if torch.is_tensor(diff_sq_sum) else diff_sq_sum
-            dot_prod_sum = dot_prod_sum.item() if torch.is_tensor(dot_prod_sum) else dot_prod_sum
-            norm_s_sq = norm_s_sq.item() if torch.is_tensor(norm_s_sq) else norm_s_sq
-            norm_t_sq = norm_t_sq.item() if torch.is_tensor(norm_t_sq) else norm_t_sq
+        #     # GPU上のTensorから値を取り出す (.item())
+        #     diff_sq_sum = diff_sq_sum.item() if torch.is_tensor(diff_sq_sum) else diff_sq_sum
+        #     dot_prod_sum = dot_prod_sum.item() if torch.is_tensor(dot_prod_sum) else dot_prod_sum
+        #     norm_s_sq = norm_s_sq.item() if torch.is_tensor(norm_s_sq) else norm_s_sq
+        #     norm_t_sq = norm_t_sq.item() if torch.is_tensor(norm_t_sq) else norm_t_sq
 
-            # ユークリッド距離
-            euclidean_dist = diff_sq_sum ** 0.5
+        #     # ユークリッド距離
+        #     euclidean_dist = diff_sq_sum ** 0.5
             
-            # コサイン類似度 (分母が0にならないよう微小値を足すのが一般的ですが、学習済みモデルならまず0にはなりません)
-            denominator = (norm_s_sq ** 0.5) * (norm_t_sq ** 0.5)
-            cosine_sim = dot_prod_sum / denominator if denominator > 0 else 0.0
+        #     # コサイン類似度 (分母が0にならないよう微小値を足すのが一般的ですが、学習済みモデルならまず0にはなりません)
+        #     denominator = (norm_s_sq ** 0.5) * (norm_t_sq ** 0.5)
+        #     cosine_sim = dot_prod_sum / denominator if denominator > 0 else 0.0
 
-        return euclidean_dist, cosine_sim
+        # return euclidean_dist, cosine_sim
 
     def _init_scaler(self):
         """Scaler inizialization
@@ -1052,13 +1060,14 @@ class SEDTask4(pl.LightningModule):
                 # 閾値 (形状 [K]) を (1, K, 1) に拡張してブロードキャスト
                 L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, K, 1)).float() # (B_u, K, T)
                 
-                # クラスごとの閾値を出力
-                if self.global_step % 100 == 0:  # Log every 100 steps to avoid overhead
-                    class_thresholds = {
-                        self.encoder.labels[k]: adaptive_frame_thresholds_k[k].item()
-                        for k in range(K)
-                    }
-                    print(f"Class Thresholds: {class_thresholds}")
+                # あまり参考にならなかったので一旦コメントアウト
+                # # クラスごとの閾値を出力
+                # if self.global_step % 100 == 0:  # Log every 100 steps to avoid overhead
+                #     class_thresholds = {
+                #         self.encoder.labels[k]: adaptive_frame_thresholds_k[k].item()
+                #         for k in range(K)
+                #     }
+                #     print(f"Class Thresholds: {class_thresholds}")
 
 
                 # ===========================================================
@@ -1175,7 +1184,7 @@ class SEDTask4(pl.LightningModule):
 
     def on_before_zero_grad(self, *args, **kwargs):
         # update EMA teacher
-        euclidean_dist, cosine_sim = self.update_ema(
+        self.update_ema(
             self.hparams["training"]["ema_factor"],
             self.scheduler["scheduler"].step_num,
             self.sed_student,
@@ -1183,8 +1192,8 @@ class SEDTask4(pl.LightningModule):
         )
         
 
-        self.log("debug/ema_weight_distance", euclidean_dist)
-        self.log("debug/ema_cosine_sim", cosine_sim)
+        # self.log("debug/ema_weight_distance", euclidean_dist)
+        # self.log("debug/ema_cosine_sim", cosine_sim)
 
     def validation_step(self, batch, batch_indx):
         """Apply validation to a batch (step). Used during trainer.fit
