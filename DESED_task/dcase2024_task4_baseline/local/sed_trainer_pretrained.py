@@ -1000,38 +1000,49 @@ class SEDTask4(pl.LightningModule):
                             class_k_preds = filtered_q_f[:, k, :]
                             active_preds_k = class_k_preds[class_k_preds > 1e-8] # ゼロに近い値を除外
                             
-                            # GMMをフィッティングするのに十分なサンプルがあるか確認
-                            if active_preds_k.numel() > 20: # 最小サンプル数 (要調整)
-                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=1, covariance_type='full')
+                            if active_preds_k.numel() >= 20: # 20は最小限の目安（sklearnのデフォルト等考慮）
+                                # sklearn入力用にnumpy変換 (N, 1)
+                                X = active_preds_k.detach().cpu().numpy().reshape(-1, 1)
                                 
-                                # sklearnはCPUテンソル(numpy)が必要
-                                gmm.fit(active_preds_k.cpu().numpy().reshape(-1, 1))
+                                # GMMフィッティング
+                                # n_init=1だと初期値依存で失敗しやすいため、計算コスト許容なら5程度推奨
+                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=5, covariance_type='full', random_state=42)
+                                gmm.fit(X)
                                 
-                                # active (平均値が高い方) のクラスタを見つける
-                                idx_active = np.argmax(gmm.means_)
-                                mu_a_k = gmm.means_[idx_active][0] # mp (Eq 8)
-                                
-                                # 閾値 (Eq 9) - ユーザーメモに基づき、activeクラスタの平均 (mp) を閾値として採用
-                                threshold_k = mu_a_k 
-                                # threshold_k = active_preds_k[active_preds_k >mu_a_k].min()
+                                if not gmm.converged_:
+                                    # 収束しなかった場合はFallback（クリップ閾値などを使用）
+                                    adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
+                                else:
+                                    # active (平均値が高い方) のクラスタを見つける
+                                    idx_active = np.argmax(gmm.means_)
+                                    
+                                    # Eq 8: "maximum probability in active mode"
+                                    # ガウス分布の頂点である平均値を採用（論文の意図に即した解釈）
+                                    mu_a_k = gmm.means_[idx_active][0] 
+                                    
+                                    # Eq 9: 閾値計算
+                                    # "min(q > mp)" を計算。mpより確実に高いスコアのみをActiveとする
+                                    # torch.gt でマスクを作成
+                                    mask_above = active_preds_k > mu_a_k
+                                    values_above_mean = active_preds_k[mask_above]
+                                    
+                                    if values_above_mean.numel() > 0:
+                                        # mpより大きい値の中で最小値を採用
+                                        threshold_k = values_above_mean.min().item()
+                                    else:
+                                        # まれなケース: すべての値が平均以下（分布の偏り等）
+                                        # この場合は平均値そのものを閾値とするか、フォールバック
+                                        threshold_k = mu_a_k
+                                        
+                                    adaptive_frame_thresholds_k[k] = threshold_k
 
-                                # 最小値を取る
-                                values_above_mp = active_preds_k[active_preds_k > (mu_a_k - 0.1)] # 少しマージンをとる
-                                if values_above_mp.numel() > 0:
-                                    threshold_k = values_above_mp.min()
-                                adaptive_frame_thresholds_k[k] = threshold_k
-                            else:
-                                # サンプルが少ない場合、クリップの閾値を流用
-                                adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] 
-                                
                     except Exception as e:
-                        # GMMフィッティング失敗時 (e.g. 分散が0)
-                        # print(f"Warning: SAFT GMM fitting failed: {e}")
-                        # GMMが失敗した場合、クリップの閾値を流用
-                        adaptive_frame_thresholds_k = adaptive_clip_thresholds.data.clone()
+                        # GMMフィット失敗時（特異行列エラーなど）の安全策
+                        # print(f"GMM fit failed for class {k}: {e}")
+                        adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
                 else:
-                    # GMMがインポートできなかった場合、SACTの閾値を流用
-                    adaptive_frame_thresholds_k = adaptive_clip_thresholds.data.clone()
+                    # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
+                    adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
 
                 # ステップ 11.5 & 12: フレーム疑似ラベル L_Frame_f の生成 (Eq 10)
                 # 閾値 (形状 [K]) を (1, K, 1) に拡張してブロードキャスト
