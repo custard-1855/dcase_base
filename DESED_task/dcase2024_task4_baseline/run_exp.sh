@@ -2,12 +2,12 @@
 
 # 実験設定
 MIXSTYLE_TYPE="resMix"
-BASE_WANDB_DIR="sat/150epoch"
+BASE_WANDB_DIR="sat_fix_1119/150epoch"
 ATTN_TYPE="default"  # 基本的なattentionタイプを使用
 ATTN_DEEPEN=2        # デフォルトの深さ
 
 # ログディレクトリの作成
-LOG_DIR="logs/sat/150epoch"
+LOG_DIR="logs/sat_fix_1119/150epoch"
 mkdir -p ${LOG_DIR}
 
 # タイムスタンプ
@@ -42,7 +42,7 @@ echo "[1/4] Running: sat"
 uv run train_pretrained.py \
     --wandb_dir ${BASE_WANDB_DIR}/sat \
     --sat \
-    2>&1 | tee ${LOG_DIR}/normal${TIMESTAMP}.log
+    2>&1 | tee ${LOG_DIR}/only_sat${TIMESTAMP}.log
 
 echo ""
 
