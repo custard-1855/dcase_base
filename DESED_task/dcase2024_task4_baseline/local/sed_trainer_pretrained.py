@@ -174,6 +174,7 @@ class SEDTask4(pl.LightningModule):
             self.sat_w_u = self.hparams.get("sat", {}).get("w_u", 0.5) 
             # ウォームアップエポック
             # self.sat_warmup_epochs = self.hparams.get("sat", {}).get("warmup_epochs", 0)
+            self.gmm_fixed = self.hparams.get("sat", {}).get("gmm_fixed", False)
 
             # SACT (Clip) 用バッファ
             # register_buffer は、モデルの state_dict に含まれるが、optimizerの対象にならない
@@ -1031,22 +1032,24 @@ class SEDTask4(pl.LightningModule):
                                     mu_a_k = gmm.means_[idx_active][0] 
                                     
 
-                                    threshold_k  = mu_a_k # 検証のため以前の実装に戻す
-                                    # Eq 9: 閾値計算
-                                    # "min(q > mp)" を計算。mpより確実に高いスコアのみをActiveとする
-                                    # torch.gt でマスクを作成
-                                    # mask_above = active_preds_k > mu_a_k
-                                    # values_above_mean = active_preds_k[mask_above]
-                                    
-                                    # if values_above_mean.numel() > 0:
-                                    #     # mpより大きい値の中で最小値を採用
-                                    #     threshold_k = values_above_mean.min().item()
-                                    # else:
-                                    #     # まれなケース: すべての値が平均以下（分布の偏り等）
-                                    #     # この場合は平均値そのものを閾値とするか、フォールバック
-                                    #     threshold_k = mu_a_k
-                                    #     # print("[DEBUG]: disnable min value")
+                                    if self.gmm_fixed:
+                                        # Eq 9: 閾値計算
+                                        # "min(q > mp)" を計算。mpより確実に高いスコアのみをActiveとする
+                                        # torch.gt でマスクを作成
+                                        mask_above = active_preds_k > mu_a_k
+                                        values_above_mean = active_preds_k[mask_above]
                                         
+                                        if values_above_mean.numel() > 0:
+                                            # mpより大きい値の中で最小値を採用
+                                            threshold_k = values_above_mean.min().item()
+                                        else:
+                                            # まれなケース: すべての値が平均以下（分布の偏り等）
+                                            # この場合は平均値そのものを閾値とするか、フォールバック
+                                            threshold_k = mu_a_k
+                                            # print("[DEBUG]: disnable min value")
+                                    else:
+                                        threshold_k  = mu_a_k # 検証のため以前の実装に戻す
+
                                     adaptive_frame_thresholds_k[k] = threshold_k
                             else:
                                 # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）

@@ -73,3 +73,62 @@ uv run train_pretrained.py \
 echo ""
 
 
+# GMMも検証
+################################################################################
+# 実験4: sat + MixStyle + cSEBBs
+################################################################################
+echo "[4/4] Running: sat + MixStyle + cSEBBs"
+uv run train_pretrained.py \
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
+    --sebbs \
+    --sat \
+    --gmm \
+    --wandb_dir ${BASE_WANDB_DIR}/sat_MixStyle_csebbs/gmm \
+    2>&1 | tee ${LOG_DIR}/sat_mixstyle_csebbs_${TIMESTAMP}.log
+
+echo ""
+
+
+################################################################################
+# 実験1: sat + GMM
+################################################################################
+echo "[1/4] Running: sat + GMM"
+uv run train_pretrained.py \
+    --wandb_dir ${BASE_WANDB_DIR}/sat/gmm \
+    --sat \
+    --gmm \
+    2>&1 | tee ${LOG_DIR}/only_sat_gmm_${TIMESTAMP}.log
+
+echo ""
+
+################################################################################
+# 実験3: sat + MixStyle + GMM
+################################################################################
+echo "[2/4] Running: sat + MixStyle + GMM"
+uv run train_pretrained.py \
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
+    --sat \
+    --gmm \
+    --wandb_dir ${BASE_WANDB_DIR}/MixStyle_sat/gmm \
+    2>&1 | tee ${LOG_DIR}/mixstyle_sat_gmm_${TIMESTAMP}.log
+
+echo ""
+
+################################################################################
+# 実験2: sat + cSEBBs + GMM
+################################################################################
+echo "[3/4] Running: sat + cSEBBs + GMM"
+uv run train_pretrained.py \
+    --sebbs \
+    --sat \
+    --gmm \
+    --wandb_dir ${BASE_WANDB_DIR}/sat_csebbs/gmm \
+    2>&1 | tee ${LOG_DIR}/sat_csebbs_gmm_${TIMESTAMP}.log
+
+echo ""
+
+
