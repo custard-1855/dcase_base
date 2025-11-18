@@ -1019,12 +1019,6 @@ class SEDTask4(pl.LightningModule):
                                 values_above_mp = active_preds_k[active_preds_k > (mu_a_k - 0.1)] # 少しマージンをとる
                                 if values_above_mp.numel() > 0:
                                     threshold_k = values_above_mp.min()
-                                # values_above_mp = active_preds_k[active_preds_k> mu_a_k]
-                                # if values_above_mp.numel() > 0:
-                                #     threshold_k = values_above_mp.min()
-                                # else:
-                                #     # mu_a_kより大きい値がない場合のフォールバック
-                                #     threshold_k = mu_a_k  # または adaptive_clip_thresholds[k]
                                 adaptive_frame_thresholds_k[k] = threshold_k
                             else:
                                 # サンプルが少ない場合、クリップの閾値を流用
