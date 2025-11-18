@@ -2,7 +2,7 @@
 
 # 実験設定
 MIXSTYLE_TYPE="resMix"
-BASE_WANDB_DIR="sat_fix_1119/150epoch"
+BASE_WANDB_DIR="sat_fix_1119/cutmix_fix/150epoch"
 ATTN_TYPE="default"  # 基本的なattentionタイプを使用
 ATTN_DEEPEN=2        # デフォルトの深さ
 
