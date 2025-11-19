@@ -1063,6 +1063,14 @@ class SEDTask4(pl.LightningModule):
                                     print("[DEBUG] lack sample: ", active_preds_k.numel())
                                 else:
                                     pass
+                            
+                            # クリップの閾値
+                            self.log(f"debug/adaptive_clip_thresholds_{k}", adaptive_clip_thresholds[k])
+                            # フレームの閾値
+                            self.log(f"debug/adaptive_frame_thresholds_{k}", adaptive_frame_thresholds_k[k])
+                            # クラスごとに予測値の最大
+                            self.log(f"debug/active_preds_{k}_max", active_preds_k.max())
+
                     except Exception as e:
                         # GMMフィット失敗時（特異行列エラーなど）の安全策
                         print(f"GMM fit failed for class {k}: {e}")
@@ -1077,16 +1085,6 @@ class SEDTask4(pl.LightningModule):
                 # 閾値 (形状 [K]) を (1, K, 1) に拡張してブロードキャスト
                 L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, K, 1)).float() # (B_u, K, T)
                 
-                # あまり参考にならなかったので一旦コメントアウト
-                # # クラスごとの閾値を出力
-                # if self.global_step % 100 == 0:  # Log every 100 steps to avoid overhead
-                #     class_thresholds = {
-                #         self.encoder.labels[k]: adaptive_frame_thresholds_k[k].item()
-                #         for k in range(K)
-                #     }
-                #     print(f"Class Thresholds: {class_thresholds}")
-
-
                 # ===========================================================
                 # 3. 疑似ラベル損失 (L^u) の計算 (ステップ 16)
                 # ===========================================================
