@@ -357,6 +357,9 @@ class SEDTask4(pl.LightningModule):
             return
 
         def _to_native(x):
+            if isinstance(x, (wandb.Histogram, wandb.Image, wandb.Audio)):
+                return x
+
             # torch tensors
             try:
                 import numbers
@@ -1013,7 +1016,27 @@ class SEDTask4(pl.LightningModule):
                             class_k_preds = filtered_q_f[:, k, :]
                             active_preds_k = class_k_preds[class_k_preds > 1e-8] # ゼロに近い値を除外
                             
-                            if active_preds_k.numel() >= 20: # 20は最小限の目安（sklearnのデフォルト等考慮）
+                            self.log(
+                                f"debug/sample_count_class_{k}", 
+                                float(active_preds_k.numel()), 
+                                on_step=False, 
+                                on_epoch=True)
+
+                            if (self.current_epoch % 5 == 0) and (batch_indx == 0):
+                                if active_preds_k.numel() > 0:
+                                    # Tensor -> Numpy
+                                    data_for_hist = active_preds_k.detach().cpu().numpy()
+                                    
+                                    # wandb.Histogramオブジェクトを作成
+                                    hist = wandb.Histogram(data_for_hist)
+                                    
+                                    # 【重要】Lightningのlogを経由せず、直接自作のメソッドを呼ぶ
+                                    # これにより step数(_debug/global_step) が自動付与され、かつLightningのエラーを回避できる
+                                    self._maybe_wandb_log({
+                                        f"distribution/pred_hist_class_{k}": hist
+                                    })
+
+                            if active_preds_k.numel() >= 20: # 20は最小限の目安（sklearnのデフォルト等考慮） 
                                 # sklearn入力用にnumpy変換 (N, 1)
                                 X = active_preds_k.detach().cpu().numpy().reshape(-1, 1)
                                 
