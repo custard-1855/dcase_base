@@ -1042,7 +1042,7 @@ class SEDTask4(pl.LightningModule):
                                 
                                 # GMMフィッティング
                                 # n_init=1だと初期値依存で失敗しやすいため、計算コスト許容なら5程度推奨
-                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=4, covariance_type='full', random_state=42)
+                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=3, covariance_type='full', random_state=42)
                                 gmm.fit(X)
                                 
                                 if not gmm.converged_:
