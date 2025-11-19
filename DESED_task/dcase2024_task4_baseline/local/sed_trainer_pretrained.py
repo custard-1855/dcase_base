@@ -1039,9 +1039,9 @@ class SEDTask4(pl.LightningModule):
                                 print("[DEBUG] lack sample????")
                     except Exception as e:
                         # GMMフィット失敗時（特異行列エラーなど）の安全策
-                        # print(f"GMM fit failed for class {k}: {e}")
+                        print(f"GMM fit failed for class {k}: {e}")
                         adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
-                        print("[DEBUG] fit failed")
+                        # print("[DEBUG] fit failed")
                 else:
                     # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
                     adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
