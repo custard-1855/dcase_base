@@ -1016,13 +1016,13 @@ class SEDTask4(pl.LightningModule):
                             class_k_preds = filtered_q_f[:, k, :]
                             active_preds_k = class_k_preds[class_k_preds > 1e-8] # ゼロに近い値を除外
                             
-                            self.log(
-                                f"debug/sample_count_class_{k}", 
-                                float(active_preds_k.numel()), 
-                                on_step=False, 
-                                on_epoch=True)
+                            # self.log(
+                            #     f"debug/sample_count_class_{k}", 
+                            #     float(active_preds_k.numel()), 
+                            #     on_step=False, 
+                            #     on_epoch=True)
 
-                            if (self.current_epoch % 5 == 0) and (batch_indx == 0):
+                            if (self.current_epoch % 10 == 0) and (batch_indx == 0):
                                 if active_preds_k.numel() > 0:
                                     # Tensor -> Numpy
                                     data_for_hist = active_preds_k.detach().cpu().numpy()
@@ -1171,14 +1171,14 @@ class SEDTask4(pl.LightningModule):
         self.log("train/lr", self.opt.param_groups[-1]["lr"], prog_bar=True)
 
         # 各種step情報
-        self.log("train/step/scheduler_step_num", self.scheduler["scheduler"].step_num, prog_bar=True)
+        # self.log("train/step/scheduler_step_num", self.scheduler["scheduler"].step_num, prog_bar=True)
         self.log("train/step/global_step", self.global_step)
         self.log("train/step/current_epoch", self.current_epoch)
 
         # モデルの状態を見る
-        self.log("debug/student_self_strong_mean", strong_preds_student[mask_unlabeled].mean().item())
-        self.log("debug/student_self_strong_max", strong_preds_student[mask_unlabeled].max().item())
-        self.log("debug/teacher_self_strong_mean", strong_preds_teacher[mask_unlabeled].mean().item())
+        # self.log("debug/student_self_strong_mean", strong_preds_student[mask_unlabeled].mean().item())
+        # self.log("debug/student_self_strong_max", strong_preds_student[mask_unlabeled].max().item())
+        # self.log("debug/teacher_self_strong_mean", strong_preds_teacher[mask_unlabeled].mean().item())
         # 生のMSEはstrong_self_sup_loss
 
         # # CMT specific logging
