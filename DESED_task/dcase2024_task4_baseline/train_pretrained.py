@@ -726,7 +726,7 @@ def prepare_run(argv=None):
     #     "--gmm", action="store_true", default=False
     # )
     parser.add_argument(
-        "--cutmix_beta", default=1.0
+        "--cutmix_alpha", default=1.0
     )
 
 
@@ -761,7 +761,7 @@ def prepare_run(argv=None):
     # if args.sat is not None:
     #     configs["sat"]["gmm_fixed"] = args.gmm
     if args.sat is not None:
-        configs["sat"]["cutmix_beta"] = args.cutmix_beta
+        configs["sat"]["cutmix_alpha"] = args.cutmix_alpha
     # other
     if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs
