@@ -1036,7 +1036,10 @@ class SEDTask4(pl.LightningModule):
                             else:
                                 # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
                                 adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
-                                print("[DEBUG] lack sample: ", active_preds_k.numel())
+                                if self.current_epoch > 30:
+                                    print("[DEBUG] lack sample: ", active_preds_k.numel())
+                                else:
+                                    pass
                     except Exception as e:
                         # GMMフィット失敗時（特異行列エラーなど）の安全策
                         print(f"GMM fit failed for class {k}: {e}")
