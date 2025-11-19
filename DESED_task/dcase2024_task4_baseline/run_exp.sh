@@ -2,12 +2,12 @@
 
 # 実験設定
 MIXSTYLE_TYPE="resMix"
-BASE_WANDB_DIR="sat/150epoch"
+BASE_WANDB_DIR="sat_fix_1119/cutmix_fix/150epoch"
 ATTN_TYPE="default"  # 基本的なattentionタイプを使用
 ATTN_DEEPEN=2        # デフォルトの深さ
 
 # ログディレクトリの作成
-LOG_DIR="logs/sat/150epoch"
+LOG_DIR="logs/sat_fix_1119/150epoch"
 mkdir -p ${LOG_DIR}
 
 # タイムスタンプ
@@ -42,7 +42,7 @@ echo "[1/4] Running: sat"
 uv run train_pretrained.py \
     --wandb_dir ${BASE_WANDB_DIR}/sat \
     --sat \
-    2>&1 | tee ${LOG_DIR}/normal${TIMESTAMP}.log
+    2>&1 | tee ${LOG_DIR}/only_sat${TIMESTAMP}.log
 
 echo ""
 
@@ -69,6 +69,65 @@ uv run train_pretrained.py \
     --sat \
     --wandb_dir ${BASE_WANDB_DIR}/sat_csebbs \
     2>&1 | tee ${LOG_DIR}/sat_csebbs_${TIMESTAMP}.log
+
+echo ""
+
+
+# GMMも検証
+################################################################################
+# 実験4: sat + MixStyle + cSEBBs
+################################################################################
+echo "[4/4] Running: sat + MixStyle + cSEBBs"
+uv run train_pretrained.py \
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
+    --sebbs \
+    --sat \
+    --gmm \
+    --wandb_dir ${BASE_WANDB_DIR}/sat_MixStyle_csebbs/gmm \
+    2>&1 | tee ${LOG_DIR}/sat_mixstyle_csebbs_${TIMESTAMP}.log
+
+echo ""
+
+
+################################################################################
+# 実験1: sat + GMM
+################################################################################
+echo "[1/4] Running: sat + GMM"
+uv run train_pretrained.py \
+    --wandb_dir ${BASE_WANDB_DIR}/sat/gmm \
+    --sat \
+    --gmm \
+    2>&1 | tee ${LOG_DIR}/only_sat_gmm_${TIMESTAMP}.log
+
+echo ""
+
+################################################################################
+# 実験3: sat + MixStyle + GMM
+################################################################################
+echo "[2/4] Running: sat + MixStyle + GMM"
+uv run train_pretrained.py \
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
+    --sat \
+    --gmm \
+    --wandb_dir ${BASE_WANDB_DIR}/MixStyle_sat/gmm \
+    2>&1 | tee ${LOG_DIR}/mixstyle_sat_gmm_${TIMESTAMP}.log
+
+echo ""
+
+################################################################################
+# 実験2: sat + cSEBBs + GMM
+################################################################################
+echo "[3/4] Running: sat + cSEBBs + GMM"
+uv run train_pretrained.py \
+    --sebbs \
+    --sat \
+    --gmm \
+    --wandb_dir ${BASE_WANDB_DIR}/sat_csebbs/gmm \
+    2>&1 | tee ${LOG_DIR}/sat_csebbs_gmm_${TIMESTAMP}.log
 
 echo ""
 
