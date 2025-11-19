@@ -174,7 +174,7 @@ class SEDTask4(pl.LightningModule):
             self.sat_w_u = self.hparams.get("sat", {}).get("w_u", 0.5) 
             # ウォームアップエポック
             # self.sat_warmup_epochs = self.hparams.get("sat", {}).get("warmup_epochs", 0)
-            self.gmm_fixed = self.hparams.get("sat", {}).get("gmm_fixed", False)
+            # self.gmm_fixed = self.hparams.get("sat", {}).get("gmm_fixed", False)
 
             # SACT (Clip) 用バッファ
             # register_buffer は、モデルの state_dict に含まれるが、optimizerの対象にならない
