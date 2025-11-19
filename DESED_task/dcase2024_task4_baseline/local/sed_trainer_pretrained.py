@@ -1078,7 +1078,7 @@ class SEDTask4(pl.LightningModule):
                                 # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
                                 adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
                                 if self.current_epoch > 30:
-                                    # print("[DEBUG] lack sample: ", active_preds_k.numel())
+                                    print("[DEBUG] lack sample: ", active_preds_k.numel())
                                 else:
                                     pass
                             
