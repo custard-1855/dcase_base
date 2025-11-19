@@ -19,6 +19,7 @@ sat:
   cutmix_alpha: 1.0       # Beta distribution parameter for CutMix
   cutmix_prob: 0.5        # Probability of applying CutMix (1.0 = always apply)
   # gmm_fixed: False
+  cutmix_beta: 1.0
 
 sebbs:
   enabled: false
