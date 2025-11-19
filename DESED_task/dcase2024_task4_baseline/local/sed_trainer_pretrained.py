@@ -1031,7 +1031,7 @@ class SEDTask4(pl.LightningModule):
                                     
                                     # Eq 8: "maximum probability in active mode"
                                     # ガウス分布の頂点である平均値を採用（論文の意図に即した解釈）
-                                    mu_a_k = gmm.means_[idx_active][0]                                    
+                                    mu_a_k = float(gmm.means_[idx_active][0])  # numpy.float32をPython floatに変換
                                     adaptive_frame_thresholds_k[k] = mu_a_k
                             else:
                                 # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
