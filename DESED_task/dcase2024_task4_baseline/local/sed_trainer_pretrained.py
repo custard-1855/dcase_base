@@ -1005,7 +1005,7 @@ class SEDTask4(pl.LightningModule):
                 # ステップ 6.4: 適応的閾値 tau_s^c(k) の計算 (Eq 4)
                 # (p_tilde_sの最大値で正規化)
                 adaptive_clip_thresholds = (p_tilde_s / torch.max(p_tilde_s)) * tau_s # (形状 [K]) # ok
-                print(f"[DEBUG] adaptive_clip_thresholds: {adaptive_clip_thresholds}")
+                # print(f"[DEBUG] adaptive_clip_thresholds: {adaptive_clip_thresholds}")
 
                 # ステップ 7: クリップ疑似ラベル L_Clip_c の生成
                 L_Clip_c = (q_c > adaptive_clip_thresholds).float() # (形状 [B_u, K]) # ok?
