@@ -109,13 +109,36 @@ def cutmix(data, target_c=None, target_f=None, alpha=1.0):
         mixed_target_f[:, :, start_t:end_t] = target_f[perm, :, start_t:end_t]
         
         # Clip-level target [B, K]
-        # For clip-level, mix targets based on time proportion
-        # mixed_target_c = (mixed_target_f.max(dim=2)[0] > 0).float()
-        lam_actual = 1 - (cut_width / time_frames)
-        mixed_target_c = torch.clamp(
-            lam_actual * target_c + (1 - lam_actual) * target_c[perm, :],
-            min=0, max=1
-        )
+        # --- (A) オリジナルのエネルギー（確率の総和）を計算 ---
+        # ゼロ除算を防ぐための微小値
+        epsilon = 1e-6
+        energy_orig = target_f.sum(dim=2) + epsilon
+        energy_perm = target_f[perm].sum(dim=2) + epsilon
+
+        # --- (B) CutMix後に残ったエネルギーを分離して計算 ---
+        
+        # Source 1 (背景画像側):
+        #   CutMix範囲(start_t:end_t)以外のエネルギーが残存量となる
+        #   計算: 全体 - カットされた部分
+        cut_energy_bg = target_f[:, :, start_t:end_t].sum(dim=2)
+        rem_energy_bg = energy_orig - epsilon - cut_energy_bg
+        
+        # Source 2 (パッチ画像側):
+        #   CutMix範囲(start_t:end_t)に入っているエネルギーが残存量となる
+        rem_energy_patch = target_f[perm, :, start_t:end_t].sum(dim=2)
+
+        # --- (C) 残存率 (Intersection over Self) の計算 ---
+        #   値域を [0, 1] に収める
+        ratio_bg = torch.clamp(rem_energy_bg / energy_orig, min=0.0, max=1.0)
+        ratio_patch = torch.clamp(rem_energy_patch / energy_perm, min=0.0, max=1.0)
+
+        # --- (D) Clipラベルへの適用と統合 ---
+        #   target_c (通常1.0) に残存率を掛ける
+        mixed_target_c_bg = target_c * ratio_bg
+        mixed_target_c_patch = target_c[perm] * ratio_patch
+        
+        #   両方の成分を統合 (Multi-labelなのでMax Poolingが適当)
+        mixed_target_c = torch.max(mixed_target_c_bg, mixed_target_c_patch)
 
         return mixed_data, mixed_target_c, mixed_target_f
     else:

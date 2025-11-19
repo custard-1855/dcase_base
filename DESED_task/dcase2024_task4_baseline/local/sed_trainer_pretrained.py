@@ -176,7 +176,7 @@ class SEDTask4(pl.LightningModule):
             # self.sat_warmup_epochs = self.hparams.get("sat", {}).get("warmup_epochs", 0)
             # self.gmm_fixed = self.hparams.get("sat", {}).get("gmm_fixed", False)
 
-            self.cutmix_beta = self.hparams.get("sat", {}).get("cutmix_beta", 1.0)
+            self.cutmix_alpha = self.hparams.get("sat", {}).get("cutmix_alpha", 1.0)
 
             # SACT (Clip) 用バッファ
             # register_buffer は、モデルの state_dict に含まれるが、optimizerの対象にならない
@@ -1067,18 +1067,17 @@ class SEDTask4(pl.LightningModule):
 
                 # CutMix強拡張を適用
                 cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
-                cutmix_alpha = self.hparams.get("sat", {}).get("cutmix_alpha", 1.0)
 
                 if random.random() < cutmix_prob:
                     # CutMixを適用（ラベルは不要なのでNone）
                     features_SA, c_mixed, f_mixed = cutmix(
                         features_unlabeled,
-                        target_c =L_Clip_c,
                         target_f=L_Frame_f,
-                        alpha=cutmix_alpha
+                        target_c=L_Clip_c,
+                        alpha=self.cutmix_alpha
                     )
-                    L_Clip_c = c_mixed
                     L_Frame_f = f_mixed
+                    L_Clip_c = c_mixed
                 else:
                     # CutMixを適用しない場合は元のデータをそのまま使用
                     features_SA = features_unlabeled
