@@ -1070,9 +1070,21 @@ class SEDTask4(pl.LightningModule):
                                     idx_active = np.argmax(gmm.means_)
                                     
                                     # Eq 8: "maximum probability in active mode"
-                                    # ガウス分布の頂点である平均値を採用（論文の意図に即した解釈）
-                                    mu_a_k = float(gmm.means_[idx_active][0])  # numpy.float32をPython floatに変換
-                                    adaptive_frame_thresholds_k[k] = mu_a_k
+                                    # ガウス分布の頂点である平均値を採用
+                                    # mu_a_k = float(gmm.means_[idx_active][0])  # numpy.float32をPython floatに変換
+                                    # adaptive_frame_thresholds_k[k] = mu_a_k
+
+                                    # 仮修正
+                                    mp = float(gmm.means_[idx_active][0]) # active modeの平均
+                                    # mpより大きい予測値のみ抽出
+                                    candidates = active_preds_k[active_preds_k > mp]
+
+                                    if candidates.numel() > 0:
+                                        adaptive_frame_thresholds_k[k] = candidates.min() # その中の最小値を閾値に
+                                    else:
+                                        # mpを超えるものがなければmp自体、またはクリップ閾値を採用
+                                        adaptive_frame_thresholds_k[k] = mp
+
                                     # print("[DEBUG] success")
                             else:
                                 # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
@@ -1130,7 +1142,7 @@ class SEDTask4(pl.LightningModule):
                 strong_preds_student_SA, weak_preds_student_SA = self.detect(
                     features_SA,
                     self.sed_student,
-                    embeddings=embeddings_unlabeled,  # embeddingsは元のものを使用
+                    embeddings=None,  # embeddingは使わない
                     classes_mask=classes_mask_unlabeled,
                 )
 
