@@ -1068,8 +1068,9 @@ class SEDTask4(pl.LightningModule):
                             self.log(f"debug/adaptive_clip_thresholds_{k}", adaptive_clip_thresholds[k])
                             # フレームの閾値
                             self.log(f"debug/adaptive_frame_thresholds_{k}", adaptive_frame_thresholds_k[k])
-                            # クラスごとに予測値の最大
-                            self.log(f"debug/active_preds_{k}_max", active_preds_k.max())
+                            # クラスごとに予測値の最大（空でない場合のみ）
+                            if active_preds_k.numel() > 0:
+                                self.log(f"debug/active_preds_{k}_max", active_preds_k.max())
 
                     except Exception as e:
                         # GMMフィット失敗時（特異行列エラーなど）の安全策
