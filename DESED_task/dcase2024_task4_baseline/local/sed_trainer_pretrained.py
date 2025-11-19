@@ -1042,7 +1042,7 @@ class SEDTask4(pl.LightningModule):
                                 
                                 # GMMフィッティング
                                 # n_init=1だと初期値依存で失敗しやすいため、計算コスト許容なら5程度推奨
-                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=5, covariance_type='full', random_state=42)
+                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=4, covariance_type='full', random_state=42)
                                 gmm.fit(X)
                                 
                                 if not gmm.converged_:
@@ -1056,6 +1056,7 @@ class SEDTask4(pl.LightningModule):
                                     # ガウス分布の頂点である平均値を採用（論文の意図に即した解釈）
                                     mu_a_k = float(gmm.means_[idx_active][0])  # numpy.float32をPython floatに変換
                                     adaptive_frame_thresholds_k[k] = mu_a_k
+                                    print("[DEBUG] success")
                             else:
                                 # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
                                 adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
