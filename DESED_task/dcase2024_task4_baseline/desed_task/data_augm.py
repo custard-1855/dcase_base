@@ -110,12 +110,12 @@ def cutmix(data, target_c=None, target_f=None, alpha=1.0):
         
         # Clip-level target [B, K]
         # For clip-level, mix targets based on time proportion
-        mixed_target_c = (mixed_target_f.max(dim=2)[0] > 0).float()
-        # lam_actual = 1 - (cut_width / time_frames)
-        # mixed_target_c = torch.clamp(
-        #     lam_actual * target_c + (1 - lam_actual) * target_c[perm, :],
-        #     min=0, max=1
-        # )
+        # mixed_target_c = (mixed_target_f.max(dim=2)[0] > 0).float()
+        lam_actual = 1 - (cut_width / time_frames)
+        mixed_target_c = torch.clamp(
+            lam_actual * target_c + (1 - lam_actual) * target_c[perm, :],
+            min=0, max=1
+        )
 
         return mixed_data, mixed_target_c, mixed_target_f
     else:
