@@ -40,15 +40,15 @@ training:
   
   # 訓練制御
   num_workers: 6
-  n_epochs: 150
-  early_stop_patience: 150
+  n_epochs: 40
+  early_stop_patience: 40
   accumulate_batches: 1
   gradient_clip: 5.0
   
   # 検証設定
   val_thresholds: [0.5]
   n_test_thresholds: 50
-  validation_interval: 10
+  validation_interval: 100
   
   # データ分割
   weak_split: 0.9
