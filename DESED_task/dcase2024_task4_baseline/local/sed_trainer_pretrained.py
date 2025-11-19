@@ -1028,23 +1028,8 @@ class SEDTask4(pl.LightningModule):
                                     
                                     # Eq 8: "maximum probability in active mode"
                                     # ガウス分布の頂点である平均値を採用（論文の意図に即した解釈）
-                                    mu_a_k = gmm.means_[idx_active][0] 
-                                    
-                                    # Eq 9: 閾値計算
-                                    # "min(q > mp)" を計算。mpより確実に高いスコアのみをActiveとする
-                                    # torch.gt でマスクを作成
-                                    mask_above = active_preds_k > mu_a_k
-                                    values_above_mean = active_preds_k[mask_above]
-                                    
-                                    if values_above_mean.numel() > 0:
-                                        # mpより大きい値の中で最小値を採用
-                                        threshold_k = values_above_mean.min().item()
-                                    else:
-                                        # まれなケース: すべての値が平均以下（分布の偏り等）
-                                        # この場合は平均値そのものを閾値とするか、フォールバック
-                                        threshold_k = mu_a_k
-                                        
-                                    adaptive_frame_thresholds_k[k] = threshold_k
+                                    mu_a_k = gmm.means_[idx_active][0]                                    
+                                    adaptive_frame_thresholds_k[k] = mu_a_k
                             else:
                                 # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
                                 adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
