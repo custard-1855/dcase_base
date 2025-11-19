@@ -924,8 +924,15 @@ class SEDTask4(pl.LightningModule):
             # 弱拡張ラベルなしデータで予測を得て,疑似ラベル作成に使用
             # desedの10クラスのみ使用
             q_c = weak_preds_teacher[full_mask_unlabeled][:, :self.K]   # クリップ予測 (B_u, K)
-            print(f"[DEBUG] q_c: {q_c}")
+            class_means = q_c.mean(dim=0)  # (K,) - 各クラスのバッチ平均
+            for k in range(self.K):
+                self.log(f"debug_clip/q_c_mean_class_{k}", class_means[k])
+    
             q_f = strong_preds_teacher[full_mask_unlabeled][:, :self.K, :] # フレーム予測 (B_u, K, T)
+            class_means = q_f.mean(dim=(0, 2))  # (K,) - 各クラスのバッチ平均
+            for k in range(self.K):
+                self.log(f"debug_clip/q_f_mean_class_{k}", class_means[k])
+
             
             # ===========================================================
             # 強拡張 (CutMix) の適用
@@ -1000,16 +1007,18 @@ class SEDTask4(pl.LightningModule):
                 batch_mean_q_c = torch.mean(q_c, dim=0) # (形状 [K])
                 self.local_clip_probabilities = self.sat_lambda * self.local_clip_probabilities.data + (1 - self.sat_lambda) * batch_mean_q_c # ok
                 p_tilde_s = self.local_clip_probabilities
-                print(f"[DEBUG] p_tilde_s: {p_tilde_s}")
+                for k in range(self.K):
+                    self.log(f"debug_clip/p_tilde_s{k}", p_tilde_s[k])
 
                 # ステップ 6.4: 適応的閾値 tau_s^c(k) の計算 (Eq 4)
                 # (p_tilde_sの最大値で正規化)
                 adaptive_clip_thresholds = (p_tilde_s / torch.max(p_tilde_s)) * tau_s # (形状 [K]) # ok
-                # print(f"[DEBUG] adaptive_clip_thresholds: {adaptive_clip_thresholds}")
+                for k in range(self.K):
+                    self.log(f"debug_clip/adaptive_clip_thresholds{k}", adaptive_clip_thresholds[k])
 
                 # ステップ 7: クリップ疑似ラベル L_Clip_c の生成
                 L_Clip_c = (q_c > adaptive_clip_thresholds).float() # (形状 [B_u, K]) # ok?
-                print(f"[DEBUG] L_Clip_c: {L_Clip_c}")
+                # print(f"[DEBUG] L_Clip_c: {L_Clip_c}")
                 
                 # ===========================================================
                 # 2. SAFT (Frame-level Adaptive Thresholding) (ステップ 11, 12)
