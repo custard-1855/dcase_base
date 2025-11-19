@@ -167,7 +167,8 @@ class SEDTask4(pl.LightningModule):
             #      warnings.warn(f"SAT-SED is enabled, but self_sup_loss is '{self.hparams['training']['self_sup_loss']}'. "
             #                    f"SAT-SED pseudo-labeling is designed to work with BCE loss (self.selfsup_loss).")
             
-            self.K = len(self.encoder.labels)  # クラス数 (K)
+            # desedのクラス数
+            self.K = len(classes_labels_desed)
             # EMA係数 (lambda)
             self.sat_lambda = self.hparams.get("sat", {}).get("lambda", 0.999) 
             # 疑似ラベル損失の重み (w_u)
@@ -911,8 +912,8 @@ class SEDTask4(pl.LightningModule):
             # --- 必要な変数を取得 ---
             # 教師モデルによる予測. 疑似ラベル用
             # 弱拡張ラベルなしデータで予測を得て,疑似ラベル作成に使用
-            q_c = weak_preds_teacher[full_mask_unlabeled]   # クリップ予測 (B_u, K)
-            q_f = strong_preds_teacher[full_mask_unlabeled] # フレーム予測 (B_u, K, T)
+            q_c = weak_preds_teacher[full_mask_unlabeled][:, :self.K]   # クリップ予測 (B_u, K)
+            q_f = strong_preds_teacher[full_mask_unlabeled][:, :self.K, :] # フレーム予測 (B_u, K, T)
             
             # ===========================================================
             # 強拡張 (CutMix) の適用
@@ -961,6 +962,7 @@ class SEDTask4(pl.LightningModule):
             else:
                 B_u, K = q_c.shape
                 _, _, T = q_f.shape # q_fは (B_u, K, T)
+                assert K == self.K, f"Expected {self.K_desed} classes, got {K}"
             
                 # ===========================================================
                 # 1. SACT (Clip-level Adaptive Thresholding) (ステップ 6, 7)
@@ -1011,7 +1013,7 @@ class SEDTask4(pl.LightningModule):
                         # filtered_q_f = q_f * L_Clip_c.unsqueeze(2) # (B, K, T) #ok?
                         
                         # ステップ 11.2-4: GMMによる閾値計算 (Eq 7-9)
-                        for k in range(10):
+                        for k in range(self.K):
                             # クラス k の、フィルタリング後の0より大きい予測値を取得
                             class_k_preds = filtered_q_f[:, k, :]
                             active_preds_k = class_k_preds[class_k_preds > 1e-8] # ゼロに近い値を除外
@@ -1118,8 +1120,8 @@ class SEDTask4(pl.LightningModule):
                 )
 
                 # 疑似ラベル損失計算用の予測値
-                s_c = weak_preds_student_SA  # クリップレベル予測 (B_u, K)
-                s_f = strong_preds_student_SA  # フレームレベル予測 (B_u, K, T)
+                s_c = weak_preds_student_SA[:, :self.K]  # クリップレベル予測 (B_u, K)
+                s_f = strong_preds_student_SA[:, :self.K, :]  # フレームレベル予測 (B_u, K, T)
 
                 # クリップ疑似ラベル損失 (B_u, K)
                 criterion = torch.nn.BCELoss()
