@@ -924,6 +924,7 @@ class SEDTask4(pl.LightningModule):
             # 弱拡張ラベルなしデータで予測を得て,疑似ラベル作成に使用
             # desedの10クラスのみ使用
             q_c = weak_preds_teacher[full_mask_unlabeled][:, :self.K]   # クリップ予測 (B_u, K)
+            print(f"[DEBUG] q_c: {q_c}")
             q_f = strong_preds_teacher[full_mask_unlabeled][:, :self.K, :] # フレーム予測 (B_u, K, T)
             
             # ===========================================================
@@ -1004,6 +1005,7 @@ class SEDTask4(pl.LightningModule):
                 # ステップ 6.4: 適応的閾値 tau_s^c(k) の計算 (Eq 4)
                 # (p_tilde_sの最大値で正規化)
                 adaptive_clip_thresholds = (p_tilde_s / torch.max(p_tilde_s)) * tau_s # (形状 [K]) # ok
+                print(f"[DEBUG] adaptive_clip_thresholds: {adaptive_clip_thresholds}")
 
                 # ステップ 7: クリップ疑似ラベル L_Clip_c の生成
                 L_Clip_c = (q_c > adaptive_clip_thresholds).float() # (形状 [B_u, K]) # ok?
@@ -1071,12 +1073,12 @@ class SEDTask4(pl.LightningModule):
                                     # ガウス分布の頂点である平均値を採用（論文の意図に即した解釈）
                                     mu_a_k = float(gmm.means_[idx_active][0])  # numpy.float32をPython floatに変換
                                     adaptive_frame_thresholds_k[k] = mu_a_k
-                                    print("[DEBUG] success")
+                                    # print("[DEBUG] success")
                             else:
                                 # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
                                 adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
                                 if self.current_epoch > 30:
-                                    print("[DEBUG] lack sample: ", active_preds_k.numel())
+                                    # print("[DEBUG] lack sample: ", active_preds_k.numel())
                                 else:
                                     pass
                             
@@ -1096,12 +1098,11 @@ class SEDTask4(pl.LightningModule):
                 else:
                     # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
                     adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
-                    print("[DEBUG] lack sample for GMM")
+                    # print("[DEBUG] lack sample for GMM")
 
                 # ステップ 11.5 & 12: フレーム疑似ラベル L_Frame_f の生成 (Eq 10)
                 # 閾値 (形状 [K]) を (1, K, 1) に拡張してブロードキャスト
                 L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, K, 1)).float() # (B_u, K, T)
-                print(f"[DEBUG] L_Frame_f: {L_Frame_f}")
 
                 # ===========================================================
                 # 3. 疑似ラベル損失 (L^u) の計算 (ステップ 16)
