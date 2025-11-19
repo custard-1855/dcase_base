@@ -32,7 +32,7 @@ echo "[2/2] Running: sat"
 uv run train_pretrained.py \
     --wandb_dir ${BASE_WANDB_DIR}/cutmix_beta_param \
     --sat \
-    --cutmix_beta 0.5 \
+    --cutmix_alpha 0.5 \
     2>&1 | tee ${LOG_DIR}/normal${TIMESTAMP}.log
 
 echo ""
