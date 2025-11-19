@@ -1011,7 +1011,7 @@ class SEDTask4(pl.LightningModule):
                         # filtered_q_f = q_f * L_Clip_c.unsqueeze(2) # (B, K, T) #ok?
                         
                         # ステップ 11.2-4: GMMによる閾値計算 (Eq 7-9)
-                        for k in range(K):
+                        for k in range(10):
                             # クラス k の、フィルタリング後の0より大きい予測値を取得
                             class_k_preds = filtered_q_f[:, k, :]
                             active_preds_k = class_k_preds[class_k_preds > 1e-8] # ゼロに近い値を除外
