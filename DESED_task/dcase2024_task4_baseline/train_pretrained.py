@@ -722,6 +722,9 @@ def prepare_run(argv=None):
     parser.add_argument(
         "--sat", action="store_true", default=False
     )
+    # parser.add_argument(
+    #     "--gmm", action="store_true", default=False
+    # )
 
 
     parser.add_argument(
@@ -752,6 +755,8 @@ def prepare_run(argv=None):
     # sat
     if args.sat is not None:
         configs["sat"]["enabled"] = args.sat
+    # if args.sat is not None:
+    #     configs["sat"]["gmm_fixed"] = args.gmm
     # other
     if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs
