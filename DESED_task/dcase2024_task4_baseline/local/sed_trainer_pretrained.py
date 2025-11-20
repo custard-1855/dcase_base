@@ -1452,6 +1452,8 @@ class SEDTask4(pl.LightningModule):
                 scores_unprocessed_teacher_strong
             )
 
+        # SAT有効時の疑似ラベル品質評価
+        if self.sat_enabled:
             # 1. 閾値の計算
             # shape: (K,) または (1, K) 
             adaptive_clip_thresholds = (
@@ -1461,7 +1463,7 @@ class SEDTask4(pl.LightningModule):
             )
 
             # --- Weak Pseudo Label Evaluation ---
-            if self.sat_enabled and torch.any(mask_weak):
+            if torch.any(mask_weak):
                 weak_preds_desed = weak_preds_teacher[mask_weak][:, :self.K]
                 labels_weak_desed = labels_weak[mask_weak][:, :self.K]
                 
@@ -1480,8 +1482,8 @@ class SEDTask4(pl.LightningModule):
                 self.log("val/sat/pseudo_label/weak/f1", f1_w)
                 self.log("val/sat/pseudo_label/weak/adoption_rate", adoption_w)
 
-                # --- Strong Pseudo Label Evaluation ---
-                if self.sat_enabled and torch.any(mask_strong):
+            # --- Strong Pseudo Label Evaluation ---
+            if torch.any(mask_strong):
                     # Shape: (B_strong, K, T)
                     strong_preds_desed = strong_preds_teacher[mask_strong][:, :self.K, :]
                     labels_strong_desed = labels[mask_strong][:, :self.K, :] # 変数名 labels に注意

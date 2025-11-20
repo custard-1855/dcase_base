@@ -732,6 +732,40 @@ def prepare_run(argv=None):
         "--cutmix_prob", default=1.0
     )
 
+    # Strong augmentation type selection
+    parser.add_argument(
+        "--strong_augment_type",
+        type=str,
+        default=None,
+        choices=["cutmix", "frame_shift_time_mask", "none"],
+        help="Type of strong augmentation for SAT (default: cutmix)"
+    )
+    # Frame Shift + Time Masking parameters
+    parser.add_argument(
+        "--strong_augment_prob",
+        type=float,
+        default=None,
+        help="Probability of applying Frame Shift + Time Masking"
+    )
+    parser.add_argument(
+        "--frame_shift_std",
+        type=float,
+        default=None,
+        help="Standard deviation for Gaussian frame shift"
+    )
+    parser.add_argument(
+        "--time_mask_max",
+        type=int,
+        default=None,
+        help="Maximum length of time mask"
+    )
+    parser.add_argument(
+        "--time_mask_prob",
+        type=float,
+        default=None,
+        help="Probability of applying time masking"
+    )
+
 
     parser.add_argument(
         "--sebbs", action="store_true", default=False

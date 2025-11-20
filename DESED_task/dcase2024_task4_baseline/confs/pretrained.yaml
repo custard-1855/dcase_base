@@ -15,9 +15,16 @@ sat:
   enabled: False
   lambda: 0.999
   w_u: 0.5
+  # Strong augmentation type selection
+  strong_augment_type: "cutmix"   # Options: "cutmix", "frame_shift_time_mask", "none"
   # CutMix strong augmentation for SAT
   cutmix_alpha: 1.0       # Beta distribution parameter for CutMix
   cutmix_prob: 1.0 #0.5        # Probability of applying CutMix (1.0 = always apply)
+  # Frame Shift + Time Masking parameters
+  strong_augment_prob: 1.0  # Probability of applying Frame Shift + Time Masking
+  frame_shift_std: 90       # Standard deviation for Gaussian frame shift
+  time_mask_max: 5          # Maximum length of time mask
+  time_mask_prob: 0.5       # Probability of applying time masking
   # gmm_fixed: False
 
 sebbs:
