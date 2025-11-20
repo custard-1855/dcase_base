@@ -72,11 +72,15 @@ def cutmix(data, target_c=None, target_f=None, alpha=1.0):
     batch_size, n_mels, time_frames = data.size()
     device = data.device
 
-    # Sample lambda from Beta distribution
     # ベータ分布を取得
-    lam = np.random.beta(alpha, alpha)
+    if alpha > 0:
+        dist = torch.distributions.beta.Beta(alpha, alpha)
+        lam = dist.sample().item()
+    else:
+        lam = 1.0
 
     # データの時間長とlambdaから,切る幅を決定
+    #### 現在はバッチ内で同一の比率. 複雑な処理を回避するため ####
     cut_width = int(time_frames * (1 - lam))
 
     if cut_width <= 0 or cut_width >= time_frames:
@@ -113,23 +117,46 @@ def cutmix(data, target_c=None, target_f=None, alpha=1.0):
         energy_orig = target_f.sum(dim=2) + epsilon
         energy_perm = target_f[perm].sum(dim=2) + epsilon
 
+        # 背景に残る部分
+        mask_inv = ~mask_expanded
+
         # target_f * mask_expanded.float() で、Trueの部分以外が0になる
-        cut_energy_bg = (target_f * mask_expanded.float()).sum(dim=2)
-        rem_energy_bg = energy_orig - epsilon - cut_energy_bg
+        # 背景画像の残存エネルギーを直接算出
+        rem_energy_bg = (target_f * mask_inv.float()).sum(dim=2)
+        energy_total_bg = target_f.sum(dim=2)
         rem_energy_patch = (target_f[perm] * mask_expanded.float()).sum(dim=2)
+        energy_total_patch = target_f[perm].sum(dim=2)
+
+        # エネルギーのフラグ
+        has_energy_bg = energy_total_bg > epsilon
+        has_energy_patch = energy_total_patch > epsilon
 
         # 残存率の計算
-        #   値域を [0, 1] に収める
-        ratio_bg = torch.clamp(rem_energy_bg / energy_orig, min=0.0, max=1.0)
-        ratio_patch = torch.clamp(rem_energy_patch / energy_perm, min=0.0, max=1.0)
+        ratio_bg_energy = rem_energy_bg / (energy_total_bg + epsilon)
+        ratio_patch_energy = rem_energy_patch / (energy_total_patch + epsilon)
 
-        # Clipラベルへの適用と統合
-        #   target_c (通常1.0) に残存率を掛ける
-        mixed_target_c_bg = target_c * ratio_bg
-        mixed_target_c_patch = target_c[perm] * ratio_patch
+
+        # --- フレームのエネルギーが小さい時,ラベルが信用できないので,時間比率でクリップラベルを混合 ---
+        cut_ratio = mask_expanded.float().mean(dim=2).squeeze(1) # [B] -> 各サンプルのカット率
+
+        n_classes = target_f.size(1)
+        cut_ratio_expanded = cut_ratio.unsqueeze(1).expand(-1, n_classes)
+
+        ratio_bg_area = 1.0 - cut_ratio_expanded
+        ratio_patch_area = cut_ratio_expanded
+
+        # エネルギーがあるクラス -> エネルギー比率を採用
+        # エネルギーがないクラス -> 面積比率を採用 (弱ラベルのみのデータ救済)
+        final_ratio_bg = torch.where(has_energy_bg, ratio_bg_energy, ratio_bg_area)
+        final_ratio_patch = torch.where(has_energy_patch, ratio_patch_energy, ratio_patch_area)
+
+        # --- ラベル適用 ---
+        mixed_target_c_bg = target_c * final_ratio_bg
+        mixed_target_c_patch = target_c[perm] * final_ratio_patch
         
-        #   両方の成分を統合 (Multi-labelなのでMax Poolingが適当)
-        mixed_target_c = torch.max(mixed_target_c_bg, mixed_target_c_patch)
+        # Additive mix 線形和を取る
+        mixed_target_c = mixed_target_c_bg + mixed_target_c_patch
+        # mixed_target_c = torch.max(mixed_target_c_bg, mixed_target_c_patch)
 
         return mixed_data, mixed_target_c, mixed_target_f
     else:
