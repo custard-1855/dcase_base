@@ -79,7 +79,7 @@ def cutmix(data, target_c=None, target_f=None, alpha=1.0):
 
     # Random permutation for mixing
     # バッチをランダムに並べる
-    perm = torch.randperm(batch_size)
+    perm = torch.randperm(batch_size, device=data.device)
 
     # Determine cut region along time axis
     # データの時間長とlambdaから,切る幅を決定
