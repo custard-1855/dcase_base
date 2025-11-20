@@ -110,21 +110,36 @@ def cutmix(data, target_c=None, target_f=None, alpha=1.0):
     mixed_data = torch.where(mask_expanded, data[perm], data)
 
     if target_f is not None and target_c is not None:
+        # target_fの時間次元に合わせたマスクを作成
+        # BEATsのembedding未使用でフレームがずれた?
+        target_time_frames = target_f.size(2)
+        
+        # target_fの時間解像度に合わせてstart_tsとcut_widthをスケーリング
+        scale_factor = target_time_frames / time_frames
+        target_cut_width = int(cut_width * scale_factor)
+        target_start_ts = (start_ts.float() * scale_factor).long()
+        
+        # target_f用のマスクを作成
+        arange_target = torch.arange(target_time_frames, device=device)
+        target_start_ts_expanded = target_start_ts.unsqueeze(1)
+        mask_target = (arange_target >= target_start_ts_expanded) & (arange_target < target_start_ts_expanded + target_cut_width)
+        mask_target_expanded = mask_target.unsqueeze(1)
+        
         # Frame-level targetも同様にマスクで合成
-        mixed_target_f = torch.where(mask_expanded, target_f[perm], target_f)
+        mixed_target_f = torch.where(mask_target_expanded, target_f[perm], target_f)
         
         epsilon = 1e-6
         energy_orig = target_f.sum(dim=2) + epsilon
         energy_perm = target_f[perm].sum(dim=2) + epsilon
 
         # 背景に残る部分
-        mask_inv = ~mask_expanded
+        mask_inv = ~mask_target_expanded
 
-        # target_f * mask_expanded.float() で、Trueの部分以外が0になる
+        # target_f * mask_target_expanded.float() で、Trueの部分以外が0になる
         # 背景画像の残存エネルギーを直接算出
         rem_energy_bg = (target_f * mask_inv.float()).sum(dim=2)
         energy_total_bg = target_f.sum(dim=2)
-        rem_energy_patch = (target_f[perm] * mask_expanded.float()).sum(dim=2)
+        rem_energy_patch = (target_f[perm] * mask_target_expanded.float()).sum(dim=2)
         energy_total_patch = target_f[perm].sum(dim=2)
 
         # エネルギーのフラグ
@@ -137,7 +152,7 @@ def cutmix(data, target_c=None, target_f=None, alpha=1.0):
 
 
         # --- フレームのエネルギーが小さい時,ラベルが信用できないので,時間比率でクリップラベルを混合 ---
-        cut_ratio = mask_expanded.float().mean(dim=2).squeeze(1) # [B] -> 各サンプルのカット率
+        cut_ratio = mask_target_expanded.float().mean(dim=2).squeeze(1) # [B] -> 各サンプルのカット率
 
         n_classes = target_f.size(1)
         cut_ratio_expanded = cut_ratio.unsqueeze(1).expand(-1, n_classes)
@@ -156,6 +171,7 @@ def cutmix(data, target_c=None, target_f=None, alpha=1.0):
         
         # Additive mix 線形和を取る
         mixed_target_c = mixed_target_c_bg + mixed_target_c_patch
+        mixed_target_c = torch.clamp(mixed_target_c, max=1.0)
         # mixed_target_c = torch.max(mixed_target_c_bg, mixed_target_c_patch)
 
         return mixed_data, mixed_target_c, mixed_target_f
