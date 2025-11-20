@@ -1487,69 +1487,69 @@ class SEDTask4(pl.LightningModule):
             )
 
         # SAT有効時の疑似ラベル品質評価
-        if self.sat_enabled:
-            # 1. 閾値の計算
-            # shape: (K,) または (1, K) 
-            adaptive_clip_thresholds = (
-                self.local_clip_probabilities /
-                torch.max(self.local_clip_probabilities) *
-                self.global_clip_threshold
-            )
+        # if self.sat_enabled:
+        #     # 1. 閾値の計算
+        #     # shape: (K,) または (1, K) 
+        #     adaptive_clip_thresholds = (
+        #         self.local_clip_probabilities /
+        #         torch.max(self.local_clip_probabilities) *
+        #         self.global_clip_threshold
+        #     )
 
-            # --- Weak Pseudo Label Evaluation ---
-            if torch.any(mask_weak):
-                weak_preds_desed = weak_preds_teacher[mask_weak][:, :self.K]
-                labels_weak_desed = labels_weak[mask_weak][:, :self.K]
+        #     # --- Weak Pseudo Label Evaluation ---
+        #     if torch.any(mask_weak):
+        #         weak_preds_desed = weak_preds_teacher[mask_weak][:, :self.K]
+        #         labels_weak_desed = labels_weak[mask_weak][:, :self.K]
                 
-                # クラス有効性マスク (B, K)
-                current_mask = valid_class_mask[mask_weak][:, :self.K]
+        #         # クラス有効性マスク (B, K)
+        #         current_mask = valid_class_mask[mask_weak][:, :self.K]
 
-                precision_w, recall_w, f1_w, adoption_w = self.evaluate_sat_pseudo_label_quality(
-                    teacher_preds=weak_preds_desed,
-                    ground_truth=labels_weak_desed,
-                    adaptive_thresholds=adaptive_clip_thresholds, # (K,) 自動でブロードキャスト
-                    mask=current_mask
-                )
+        #         precision_w, recall_w, f1_w, adoption_w = self.evaluate_sat_pseudo_label_quality(
+        #             teacher_preds=weak_preds_desed,
+        #             ground_truth=labels_weak_desed,
+        #             adaptive_thresholds=adaptive_clip_thresholds, # (K,) 自動でブロードキャスト
+        #             mask=current_mask
+        #         )
 
-                self.log("val/sat/pseudo_label/weak/precision", precision_w)
-                self.log("val/sat/pseudo_label/weak/recall", recall_w)
-                self.log("val/sat/pseudo_label/weak/f1", f1_w)
-                self.log("val/sat/pseudo_label/weak/adoption_rate", adoption_w)
+        #         self.log("val/sat/pseudo_label/weak/precision", precision_w)
+        #         self.log("val/sat/pseudo_label/weak/recall", recall_w)
+        #         self.log("val/sat/pseudo_label/weak/f1", f1_w)
+        #         self.log("val/sat/pseudo_label/weak/adoption_rate", adoption_w)
 
-            # --- Strong Pseudo Label Evaluation ---
-            if torch.any(mask_strong):
-                    # Shape: (B_strong, K, T)
-                    strong_preds_desed = strong_preds_teacher[mask_strong][:, :self.K, :]
-                    labels_strong_desed = labels[mask_strong][:, :self.K, :] # 変数名 labels に注意
+        #     # --- Strong Pseudo Label Evaluation ---
+        #     if torch.any(mask_strong):
+        #             # Shape: (B_strong, K, T)
+        #             strong_preds_desed = strong_preds_teacher[mask_strong][:, :self.K, :]
+        #             labels_strong_desed = labels[mask_strong][:, :self.K, :] # 変数名 labels に注意
                     
-                    # Clipレベルの予測を取得 (Gating用) -> Shape: (B_strong, K)
-                    weak_preds_strong = weak_preds_teacher[mask_strong][:, :self.K]
+        #             # Clipレベルの予測を取得 (Gating用) -> Shape: (B_strong, K)
+        #             weak_preds_strong = weak_preds_teacher[mask_strong][:, :self.K]
                     
-                    # Clipレベルで閾値を超えているか判定
-                    is_clip_active = (weak_preds_strong > adaptive_clip_thresholds).float()
+        #             # Clipレベルで閾値を超えているか判定
+        #             is_clip_active = (weak_preds_strong > adaptive_clip_thresholds).float()
                     
-                    # Gating処理: ClipがActiveでないクラスのFrame予測を全て0にする
-                    # (B, K, T) * (B, K, 1)
-                    filtered_strong_preds = strong_preds_desed * is_clip_active.unsqueeze(2)
+        #             # Gating処理: ClipがActiveでないクラスのFrame予測を全て0にする
+        #             # (B, K, T) * (B, K, 1)
+        #             filtered_strong_preds = strong_preds_desed * is_clip_active.unsqueeze(2)
 
-                    # Frame比較用の閾値を成形
-                    # adaptive_clip_thresholds が (K) でも (1, K) でも (1, K, 1) に安全に変形
-                    frame_thresholds = adaptive_clip_thresholds.reshape(1, -1, 1)
+        #             # Frame比較用の閾値を成形
+        #             # adaptive_clip_thresholds が (K) でも (1, K) でも (1, K, 1) に安全に変形
+        #             frame_thresholds = adaptive_clip_thresholds.reshape(1, -1, 1)
                     
-                    # クラス有効性マスク (B, K)
-                    current_mask = valid_class_mask[mask_strong][:, :self.K]
+        #             # クラス有効性マスク (B, K)
+        #             current_mask = valid_class_mask[mask_strong][:, :self.K]
 
-                    precision_s, recall_s, f1_s, adoption_s = self.evaluate_sat_pseudo_label_quality(
-                        teacher_preds=filtered_strong_preds,
-                        ground_truth=labels_strong_desed,
-                        adaptive_thresholds=frame_thresholds,
-                        mask=current_mask 
-                    )
+        #             precision_s, recall_s, f1_s, adoption_s = self.evaluate_sat_pseudo_label_quality(
+        #                 teacher_preds=filtered_strong_preds,
+        #                 ground_truth=labels_strong_desed,
+        #                 adaptive_thresholds=frame_thresholds,
+        #                 mask=current_mask 
+        #             )
 
-                    self.log("val/sat/pseudo_label/strong/precision", precision_s)
-                    self.log("val/sat/pseudo_label/strong/recall", recall_s)
-                    self.log("val/sat/pseudo_label/strong/f1", f1_s)
-                    self.log("val/sat/pseudo_label/strong/adoption_rate", adoption_s)
+        #             self.log("val/sat/pseudo_label/strong/precision", precision_s)
+        #             self.log("val/sat/pseudo_label/strong/recall", recall_s)
+        #             self.log("val/sat/pseudo_label/strong/f1", f1_s)
+        #             self.log("val/sat/pseudo_label/strong/adoption_rate", adoption_s)
 
         return
 
