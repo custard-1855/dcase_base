@@ -17,7 +17,7 @@ from sed_scores_eval.base_modules.scores import (create_score_dataframe,
                                                  validate_score_dataframe)
 from torchaudio.transforms import AmplitudeToDB, MelSpectrogram, MFCC
 
-from desed_task.data_augm import mixup, cutmix
+from desed_task.data_augm import mixup, cutmix, strong_augment
 from desed_task.utils.postprocess import ClassWiseMedianFilter
 from desed_task.evaluation.evaluation_measures import (
     compute_per_intersection_macro_f1, compute_psds_from_operating_points,
@@ -178,6 +178,15 @@ class SEDTask4(pl.LightningModule):
             # self.gmm_fixed = self.hparams.get("sat", {}).get("gmm_fixed", False)
 
             self.cutmix_alpha = self.hparams.get("sat", {}).get("cutmix_alpha", 1.0)
+
+            # Strong augmentation type selection
+            self.strong_augment_type = self.hparams.get("sat", {}).get("strong_augment_type", "cutmix")
+
+            # Frame Shift + Time Masking parameters
+            self.strong_augment_prob = self.hparams.get("sat", {}).get("strong_augment_prob", 1.0)
+            self.frame_shift_std = self.hparams.get("sat", {}).get("frame_shift_std", 90)
+            self.time_mask_max = self.hparams.get("sat", {}).get("time_mask_max", 5)
+            self.time_mask_prob = self.hparams.get("sat", {}).get("time_mask_prob", 0.5)
 
             # SACT (Clip) 用バッファ
             # register_buffer は、モデルの state_dict に含まれるが、optimizerの対象にならない
@@ -1141,23 +1150,42 @@ class SEDTask4(pl.LightningModule):
                 # 3. 疑似ラベル損失 (L^u) の計算 (ステップ 16)
                 # ===========================================================
 
-                # CutMix強拡張を適用
-                cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
+                # 強拡張を適用（タイプに応じて分岐）
+                if self.strong_augment_type == "cutmix":
+                    # CutMix強拡張を適用（既存実装）
+                    cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
 
-                # features_unlabeled = torch.log10(features_unlabeled + 1e-6)
-                if random.random() < float(cutmix_prob):
-                    # CutMixを適用（ラベルは不要なのでNone）
-                    features_SA, c_mixed, f_mixed = cutmix(
-                    # features_SA = cutmix(
-                        features_unlabeled,
-                        target_f=L_Frame_f,
-                        target_c=L_Clip_c,
-                        alpha=self.cutmix_alpha
-                    )
-                    L_Frame_f = f_mixed
-                    L_Clip_c = c_mixed
+                    if random.random() < float(cutmix_prob):
+                        features_SA, c_mixed, f_mixed = cutmix(
+                            features_unlabeled,
+                            target_f=L_Frame_f,
+                            target_c=L_Clip_c,
+                            alpha=self.cutmix_alpha
+                        )
+                        L_Frame_f = f_mixed
+                        L_Clip_c = c_mixed
+                    else:
+                        features_SA = features_unlabeled
+
+                elif self.strong_augment_type == "frame_shift_time_mask":
+                    # Frame Shift + Time Masking強拡張を適用（新実装）
+                    if random.random() < float(self.strong_augment_prob):
+                        features_SA, c_aug, f_aug = strong_augment(
+                            features_unlabeled,
+                            target_f=L_Frame_f,
+                            target_c=L_Clip_c,
+                            frame_shift_std=self.frame_shift_std,
+                            time_mask_max=self.time_mask_max,
+                            time_mask_prob=self.time_mask_prob,
+                            net_pooling=self.hparams["training"].get("net_pooling", 4)
+                        )
+                        L_Frame_f = f_aug
+                        L_Clip_c = c_aug
+                    else:
+                        features_SA = features_unlabeled
+
                 else:
-                    # CutMixを適用しない場合は元のデータをそのまま使用
+                    # 強拡張なし（"none"の場合）
                     features_SA = features_unlabeled
 
 
