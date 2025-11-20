@@ -69,70 +69,61 @@ def cutmix(data, target_c=None, target_f=None, alpha=1.0):
     Returns:
         torch.Tensor of mixed data and labels if target is given.
     """
-    batch_size = data.size(0)
-    n_mels = data.size(1)
-    time_frames = data.size(2)
+    batch_size, n_mels, time_frames = data.size()
+    device = data.device
 
     # Sample lambda from Beta distribution
     # ベータ分布を取得
     lam = np.random.beta(alpha, alpha)
 
-    # Random permutation for mixing
-    # バッチをランダムに並べる
-    perm = torch.randperm(batch_size, device=data.device)
-
-    # Determine cut region along time axis
     # データの時間長とlambdaから,切る幅を決定
     cut_width = int(time_frames * (1 - lam))
 
-    # Random start position
-    if cut_width > 0 and cut_width < time_frames:
-        start_t = np.random.randint(0, time_frames - cut_width + 1)
-        end_t = start_t + cut_width
-    else:
-        # If cut_width is 0 or >= time_frames, no mixing
+    if cut_width <= 0 or cut_width >= time_frames:
         if target_f is not None and target_c is not None:
             return data, target_c, target_f
-        else:
-            return data
+        return data
 
-    # Apply CutMix on time axis (frequency axis unchanged)
-    mixed_data = data.clone()
-    mixed_data[:, :, start_t:end_t] = data[perm, :, start_t:end_t]
+    # バッチをランダムに並べる
+    perm = torch.randperm(batch_size, device=data.device)
+
+    # shape: [batch_size]
+    start_ts = torch.randint(0, time_frames - cut_width + 1, (batch_size,), device=device)
+
+    # 時間インデックスを作成 [0, 1, 2, ..., T-1]
+    arange_t = torch.arange(time_frames, device=device).unsqueeze(0) # [1, T]
+    
+    # start_ts を [B, 1] に拡張してブロードキャスト比較
+    # mask: [Batch, Time] -> カットする場所がTrue
+    start_ts_expanded = start_ts.unsqueeze(1)
+    mask = (arange_t >= start_ts_expanded) & (arange_t < start_ts_expanded + cut_width)
+    
+    # 周波数軸に合わせて次元拡張: [Batch, 1, Time]
+    mask_expanded = mask.unsqueeze(1)
+
+
+    # maskがTrueの場所は perm データを、Falseの場所は original データを使う
+    mixed_data = torch.where(mask_expanded, data[perm], data)
 
     if target_f is not None and target_c is not None:
-        mixed_target_f = target_f.clone()
-        mixed_target_c = target_c.clone()
-
-        # Handle both frame-level [B, K, T] and clip-level [B, K] targets
-        # Frame-level target [B, K, T]
-        mixed_target_f[:, :, start_t:end_t] = target_f[perm, :, start_t:end_t]
+        # Frame-level targetも同様にマスクで合成
+        mixed_target_f = torch.where(mask_expanded, target_f[perm], target_f)
         
-        # Clip-level target [B, K]
-        # --- (A) オリジナルのエネルギー（確率の総和）を計算 ---
-        # ゼロ除算を防ぐための微小値
         epsilon = 1e-6
         energy_orig = target_f.sum(dim=2) + epsilon
         energy_perm = target_f[perm].sum(dim=2) + epsilon
 
-        # --- (B) CutMix後に残ったエネルギーを分離して計算 ---
-        
-        # Source 1 (背景画像側):
-        #   CutMix範囲(start_t:end_t)以外のエネルギーが残存量となる
-        #   計算: 全体 - カットされた部分
-        cut_energy_bg = target_f[:, :, start_t:end_t].sum(dim=2)
+        # target_f * mask_expanded.float() で、Trueの部分以外が0になる
+        cut_energy_bg = (target_f * mask_expanded.float()).sum(dim=2)
         rem_energy_bg = energy_orig - epsilon - cut_energy_bg
-        
-        # Source 2 (パッチ画像側):
-        #   CutMix範囲(start_t:end_t)に入っているエネルギーが残存量となる
-        rem_energy_patch = target_f[perm, :, start_t:end_t].sum(dim=2)
+        rem_energy_patch = (target_f[perm] * mask_expanded.float()).sum(dim=2)
 
-        # --- (C) 残存率 (Intersection over Self) の計算 ---
+        # 残存率の計算
         #   値域を [0, 1] に収める
         ratio_bg = torch.clamp(rem_energy_bg / energy_orig, min=0.0, max=1.0)
         ratio_patch = torch.clamp(rem_energy_patch / energy_perm, min=0.0, max=1.0)
 
-        # --- (D) Clipラベルへの適用と統合 ---
+        # Clipラベルへの適用と統合
         #   target_c (通常1.0) に残存率を掛ける
         mixed_target_c_bg = target_c * ratio_bg
         mixed_target_c_patch = target_c[perm] * ratio_patch
