@@ -2,7 +2,7 @@
 
 # 実験設定
 MIXSTYLE_TYPE="resMix"
-BASE_WANDB_DIR="sat/debug_non-used_embeddings"
+BASE_WANDB_DIR="sat/debug_non-used_embeddings/not-mix_lavel"
 
 # ログディレクトリの作成
 LOG_DIR="logs/sat/150epoch"
@@ -28,12 +28,12 @@ uv run train_pretrained.py \
 
 echo ""
 
-echo "[2/2] Running: sat"
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/cutmix_prob_0.5 \
-    --sat \
-    --cutmix_prob 0.5
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+# echo "[2/2] Running: sat"
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/cutmix_prob_0.5 \
+#     --sat \
+#     --cutmix_prob 0.5
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
-echo ""
+# echo ""
 
