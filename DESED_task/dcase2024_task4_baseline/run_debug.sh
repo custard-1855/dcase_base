@@ -2,7 +2,7 @@
 
 # 実験設定
 MIXSTYLE_TYPE="resMix"
-BASE_WANDB_DIR="sat/used_embeddings/cutmix_mix-label"
+BASE_WANDB_DIR="sat/used_embeddings/normal"
 
 # ログディレクトリの作成
 LOG_DIR="logs/sat/150epoch"
@@ -23,7 +23,7 @@ echo ""
 echo "[1/2] Running: sat"
 uv run train_pretrained.py \
     --wandb_dir ${BASE_WANDB_DIR} \
-    --sat \
+    --normal \
     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
 echo ""
