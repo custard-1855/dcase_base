@@ -1159,7 +1159,7 @@ class SEDTask4(pl.LightningModule):
                 strong_preds_student_SA, weak_preds_student_SA = self.detect(
                     features_SA,
                     self.sed_student,
-                    embeddings=embeddings_unlabeled #None,  # embeddingは使わない
+                    embeddings=embeddings_unlabeled, #None,  # embeddingは使わない
                     classes_mask=classes_mask_unlabeled,
                 )
 
