@@ -1154,8 +1154,8 @@ class SEDTask4(pl.LightningModule):
                         target_c=L_Clip_c,
                         alpha=self.cutmix_alpha
                     )
-                    # L_Frame_f = f_mixed
-                    # L_Clip_c = c_mixed
+                    L_Frame_f = f_mixed
+                    L_Clip_c = c_mixed
                 else:
                     # CutMixを適用しない場合は元のデータをそのまま使用
                     features_SA = features_unlabeled

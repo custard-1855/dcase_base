@@ -2,7 +2,7 @@
 
 # 実験設定
 MIXSTYLE_TYPE="resMix"
-BASE_WANDB_DIR="sat/150epoch"
+BASE_WANDB_DIR="sat/1120_100epoch"
 
 # ログディレクトリの作成
 LOG_DIR="logs/sat/150epoch"
@@ -20,9 +20,8 @@ echo ""
 ################################################################################
 # 実験1: sat
 ################################################################################
-echo "[1/2] Running: sat"
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/cutmix_pb_0.5 \
+    --wandb_dir ${BASE_WANDB_DIR}/cutmix_label_mixed \
     --sat \
     2>&1 | tee ${LOG_DIR}/normal${TIMESTAMP}.log
 
@@ -31,7 +30,6 @@ echo ""
 ################################################################################
 # 実験2: normal
 ################################################################################
-echo "[2/2] Running: normal"
 uv run train_pretrained.py \
     --wandb_dir ${BASE_WANDB_DIR}/normal \
     2>&1 | tee ${LOG_DIR}/normal_${TIMESTAMP}.log
