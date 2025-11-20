@@ -2,7 +2,7 @@
 
 # 実験設定
 MIXSTYLE_TYPE="resMix"
-BASE_WANDB_DIR="sat/debug_non-used_embeddings/cutmix_no-mix-label"
+BASE_WANDB_DIR="sat/used_embeddings/cutmix_mix-label"
 
 # ログディレクトリの作成
 LOG_DIR="logs/sat/150epoch"
