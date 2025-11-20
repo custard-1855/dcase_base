@@ -22,6 +22,7 @@ echo ""
 ################################################################################
 echo "[1/2] Running: sat"
 uv run train_pretrained.py \
+    --sat \
     --wandb_dir ${BASE_WANDB_DIR} \
     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
