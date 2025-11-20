@@ -1133,7 +1133,8 @@ class SEDTask4(pl.LightningModule):
 
                 if random.random() < float(cutmix_prob):
                     # CutMixを適用（ラベルは不要なのでNone）
-                    features_SA, c_mixed, f_mixed = cutmix(
+                    # features_SA, c_mixed, f_mixed = cutmix(
+                    features_SA = cutmix(
                         features_unlabeled,
                         # target_f=L_Frame_f,
                         # target_c=L_Clip_c,
