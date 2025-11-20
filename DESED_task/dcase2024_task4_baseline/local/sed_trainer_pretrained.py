@@ -1067,8 +1067,7 @@ class SEDTask4(pl.LightningModule):
                                 
                                 # GMMフィッティング
                                 # n_init=1だと初期値依存で失敗しやすいため、計算コスト許容なら5程度推奨
-                                # デバッグのため速度優先で1に変更
-                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=1, covariance_type='full', random_state=42)
+                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=5, covariance_type='full', random_state=42)
                                 gmm.fit(X)
                                 
                                 if not gmm.converged_:
@@ -1132,7 +1131,7 @@ class SEDTask4(pl.LightningModule):
                 # CutMix強拡張を適用
                 cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
 
-                if random.random() < cutmix_prob:
+                if random.random() < float(cutmix_prob):
                     # CutMixを適用（ラベルは不要なのでNone）
                     features_SA, c_mixed, f_mixed = cutmix(
                         features_unlabeled,

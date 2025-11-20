@@ -17,7 +17,7 @@ sat:
   w_u: 0.5
   # CutMix strong augmentation for SAT
   cutmix_alpha: 1.0       # Beta distribution parameter for CutMix
-  cutmix_prob: 0.5        # Probability of applying CutMix (1.0 = always apply)
+  cutmix_prob: 1.0 #0.5        # Probability of applying CutMix (1.0 = always apply)
   # gmm_fixed: False
 
 sebbs:
@@ -40,15 +40,15 @@ training:
   
   # 訓練制御
   num_workers: 6
-  n_epochs: 80
-  early_stop_patience: 80
+  n_epochs: 150
+  early_stop_patience: 125
   accumulate_batches: 1
   gradient_clip: 5.0
   
   # 検証設定
   val_thresholds: [0.5]
   n_test_thresholds: 50
-  validation_interval: 100
+  validation_interval: 10
   
   # データ分割
   weak_split: 0.9
@@ -141,7 +141,7 @@ net:
   pooling:  [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ] ] # for log mel
   dropstep_recurrent: 0.3
   dropstep_recurrent_len: 16
-  use_embeddings: True
+  use_embeddings: False #True
   embedding_size: 768
   embedding_type: frame
   aggregation_type: pool1d
