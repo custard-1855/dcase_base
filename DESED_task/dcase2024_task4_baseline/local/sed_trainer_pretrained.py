@@ -924,14 +924,14 @@ class SEDTask4(pl.LightningModule):
             # 弱拡張ラベルなしデータで予測を得て,疑似ラベル作成に使用
             # desedの10クラスのみ使用
             q_c = weak_preds_teacher[full_mask_unlabeled][:, :self.K]   # クリップ予測 (B_u, K)
-            class_means = q_c.mean(dim=0)  # (K,) - 各クラスのバッチ平均
-            for k in range(self.K):
-                self.log(f"debug_clip/q_c_mean_class_{k}", class_means[k])
+            # class_means = q_c.mean(dim=0)  # (K,) - 各クラスのバッチ平均
+            # for k in range(self.K):
+            #     self.log(f"debug_clip/q_c_mean_class_{k}", class_means[k])
     
             q_f = strong_preds_teacher[full_mask_unlabeled][:, :self.K, :] # フレーム予測 (B_u, K, T)
-            class_means = q_f.mean(dim=(0, 2))  # (K,) - 各クラスのバッチ平均
-            for k in range(self.K):
-                self.log(f"debug_clip/q_f_mean_class_{k}", class_means[k])
+            # class_means = q_f.mean(dim=(0, 2))  # (K,) - 各クラスのバッチ平均
+            # for k in range(self.K):
+            #     self.log(f"debug_clip/q_f_mean_class_{k}", class_means[k])
 
             
             # ===========================================================
@@ -942,6 +942,9 @@ class SEDTask4(pl.LightningModule):
             features_unlabeled = features[full_mask_unlabeled]
             embeddings_unlabeled = embeddings[full_mask_unlabeled]
             classes_mask_unlabeled = valid_class_mask[full_mask_unlabeled]
+
+            # print(f"[DEBUG] features_strong stats: min={features[strong_mask].min()}, max={features[strong_mask].max()}, mean={features[strong_mask].mean()}")
+            # print(f"[DEBUG] features_unlabeled stats: min={features_unlabeled.min()}, max={features_unlabeled.max()}, mean={features_unlabeled.mean()}")
 
             # # CutMix強拡張を適用
             # cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
@@ -1007,14 +1010,14 @@ class SEDTask4(pl.LightningModule):
                 batch_mean_q_c = torch.mean(q_c, dim=0) # (形状 [K])
                 self.local_clip_probabilities = self.sat_lambda * self.local_clip_probabilities.data + (1 - self.sat_lambda) * batch_mean_q_c # ok
                 p_tilde_s = self.local_clip_probabilities
-                for k in range(self.K):
-                    self.log(f"debug_clip/p_tilde_s{k}", p_tilde_s[k])
+                # for k in range(self.K):
+                #     self.log(f"debug_clip/p_tilde_s{k}", p_tilde_s[k])
 
                 # ステップ 6.4: 適応的閾値 tau_s^c(k) の計算 (Eq 4)
                 # (p_tilde_sの最大値で正規化)
                 adaptive_clip_thresholds = (p_tilde_s / torch.max(p_tilde_s)) * tau_s # (形状 [K]) # ok
-                for k in range(self.K):
-                    self.log(f"debug_clip/adaptive_clip_thresholds{k}", adaptive_clip_thresholds[k])
+                # for k in range(self.K):
+                #     self.log(f"debug_clip/adaptive_clip_thresholds{k}", adaptive_clip_thresholds[k])
 
                 # ステップ 7: クリップ疑似ラベル L_Clip_c の生成
                 L_Clip_c = (q_c > adaptive_clip_thresholds).float() # (形状 [B_u, K]) # ok?
@@ -1067,7 +1070,8 @@ class SEDTask4(pl.LightningModule):
                                 
                                 # GMMフィッティング
                                 # n_init=1だと初期値依存で失敗しやすいため、計算コスト許容なら5程度推奨
-                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=5, covariance_type='full', random_state=42)
+                                # 5はおそすぎる。 検証用に1に変更
+                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=1, covariance_type='full', random_state=42)
                                 gmm.fit(X)
                                 
                                 if not gmm.converged_:
@@ -1079,19 +1083,19 @@ class SEDTask4(pl.LightningModule):
                                     
                                     # Eq 8: "maximum probability in active mode"
                                     # ガウス分布の頂点である平均値を採用
-                                    # mu_a_k = float(gmm.means_[idx_active][0])  # numpy.float32をPython floatに変換
-                                    # adaptive_frame_thresholds_k[k] = mu_a_k
+                                    mu_a_k = float(gmm.means_[idx_active][0])  # numpy.float32をPython floatに変換
+                                    adaptive_frame_thresholds_k[k] = mu_a_k
 
-                                    # 仮修正
-                                    mp = float(gmm.means_[idx_active][0]) # active modeの平均
-                                    # mpより大きい予測値のみ抽出
-                                    candidates = active_preds_k[active_preds_k > mp]
+                                    # # 仮修正
+                                    # mp = float(gmm.means_[idx_active][0]) # active modeの平均
+                                    # # mpより大きい予測値のみ抽出
+                                    # candidates = active_preds_k[active_preds_k > mp]
 
-                                    if candidates.numel() > 0:
-                                        adaptive_frame_thresholds_k[k] = candidates.min() # その中の最小値を閾値に
-                                    else:
-                                        # mpを超えるものがなければmp自体、またはクリップ閾値を採用
-                                        adaptive_frame_thresholds_k[k] = mp
+                                    # if candidates.numel() > 0:
+                                    #     adaptive_frame_thresholds_k[k] = candidates.min() # その中の最小値を閾値に
+                                    # else:
+                                    #     # mpを超えるものがなければmp自体、またはクリップ閾値を採用
+                                    #     adaptive_frame_thresholds_k[k] = mp
 
                                     # print("[DEBUG] success")
                             else:
@@ -1131,6 +1135,7 @@ class SEDTask4(pl.LightningModule):
                 # CutMix強拡張を適用
                 cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
 
+                # features_unlabeled = torch.log10(features_unlabeled + 1e-6)
                 if random.random() < float(cutmix_prob):
                     # CutMixを適用（ラベルは不要なのでNone）
                     # features_SA, c_mixed, f_mixed = cutmix(
