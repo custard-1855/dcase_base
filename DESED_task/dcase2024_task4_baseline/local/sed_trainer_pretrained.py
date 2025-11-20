@@ -1141,8 +1141,8 @@ class SEDTask4(pl.LightningModule):
                     # features_SA, c_mixed, f_mixed = cutmix(
                     features_SA = cutmix(
                         features_unlabeled,
-                        # target_f=L_Frame_f,
-                        # target_c=L_Clip_c,
+                        target_f=L_Frame_f,
+                        target_c=L_Clip_c,
                         alpha=self.cutmix_alpha
                     )
                     # L_Frame_f = f_mixed
@@ -1159,7 +1159,7 @@ class SEDTask4(pl.LightningModule):
                 strong_preds_student_SA, weak_preds_student_SA = self.detect(
                     features_SA,
                     self.sed_student,
-                    embeddings=None,  # embeddingは使わない
+                    embeddings=embeddings_unlabeled #None,  # embeddingは使わない
                     classes_mask=classes_mask_unlabeled,
                 )
 
