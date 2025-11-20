@@ -744,6 +744,9 @@ def prepare_run(argv=None):
     with open(args.conf_file, "r") as f:
         configs = yaml.safe_load(f)
 
+    # WandB用に設定ファイルパスを保存
+    configs["config_file_path"] = os.path.abspath(args.conf_file)
+
     # MixStyle
     if args.attn_type is not None:
         configs["net"]["attn_type"] = args.attn_type
