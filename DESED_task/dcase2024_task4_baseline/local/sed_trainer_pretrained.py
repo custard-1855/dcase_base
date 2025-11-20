@@ -1307,10 +1307,16 @@ class SEDTask4(pl.LightningModule):
         if mask is not None:
             # maskをground_truthの形状に合わせる
             if ground_truth.dim() == 3 and mask.dim() == 2:
-                # (B, T) -> (B, 1, T) -> (B, C, T)
-                mask_expanded = mask.unsqueeze(1).expand_as(ground_truth)
+                # maskが(B, C)か(B, T)かを判定
+                # ground_truthが(B, C, T)の場合、shape[1]がクラス数
+                if mask.shape[1] == ground_truth.shape[1]:
+                    # (B, C) -> (B, C, 1) -> (B, C, T)
+                    mask_expanded = mask.unsqueeze(2).expand_as(ground_truth)
+                else:
+                    # (B, T) -> (B, 1, T) -> (B, C, T)
+                    mask_expanded = mask.unsqueeze(1).expand_as(ground_truth)
             elif ground_truth.dim() == 2 and mask.dim() == 1:
-                # (B) -> (B, 1) -> (B, C) 
+                # (B) -> (B, 1) -> (B, C)
                 mask_expanded = mask.unsqueeze(-1).expand_as(ground_truth)
             else:
                 # すでに形状が合っている場合
