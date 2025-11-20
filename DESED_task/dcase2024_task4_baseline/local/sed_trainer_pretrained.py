@@ -1152,7 +1152,7 @@ class SEDTask4(pl.LightningModule):
                     features_SA = features_unlabeled
 
 
-                print(f"[DEBUG] features_SA stats: min={features_SA.min()}, max={features_SA.max()}, mean={features_SA.mean()}")
+                # print(f"[DEBUG] features_SA stats: min={features_SA.min()}, max={features_SA.max()}, mean={features_SA.mean()}")
 
                 # 強拡張データで生徒モデルをフォワード
                 # 注: 疑似ラベル損失で生徒モデルを訓練するため、勾配計算が必要
