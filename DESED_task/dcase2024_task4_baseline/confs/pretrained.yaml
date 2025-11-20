@@ -55,7 +55,7 @@ training:
   # 検証設定
   val_thresholds: [0.5]
   n_test_thresholds: 50
-  validation_interval: 10
+  validation_interval: 1
   
   # データ分割
   weak_split: 0.9
