@@ -1080,7 +1080,7 @@ class SEDTask4(pl.LightningModule):
                                 # GMMフィッティング
                                 # n_init=1だと初期値依存で失敗しやすいため、計算コスト許容なら5程度推奨
                                 # 5はおそすぎる。 検証用に1に変更
-                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=1, covariance_type='full', random_state=42)
+                                gmm = GaussianMixture(n_components=2, max_iter=100, n_init=5, covariance_type='full', random_state=42)
                                 gmm.fit(X)
                                 
                                 if not gmm.converged_:
@@ -1266,6 +1266,52 @@ class SEDTask4(pl.LightningModule):
         # self.log("debug/ema_weight_distance", euclidean_dist)
         # self.log("debug/ema_cosine_sim", cosine_sim)
 
+
+    def evaluate_sat_pseudo_label_quality(self, teacher_preds, ground_truth, adaptive_thresholds, mask=None):
+        eps = 1e-8
+
+        # 1. 疑似ラベルの生成 (B, C, T) or (B, C)
+        pseudo_labels = (teacher_preds > adaptive_thresholds).float()
+
+        # 2. マスクの適用処理
+        valid_element_count = pseudo_labels.numel() # デフォルトは全要素数
+
+        if mask is not None:
+            # maskをground_truthの形状に合わせる
+            if ground_truth.dim() == 3 and mask.dim() == 2:
+                # (B, T) -> (B, 1, T) -> (B, C, T)
+                mask_expanded = mask.unsqueeze(1).expand_as(ground_truth)
+            elif ground_truth.dim() == 2 and mask.dim() == 1:
+                # (B) -> (B, 1) -> (B, C) 
+                mask_expanded = mask.unsqueeze(-1).expand_as(ground_truth)
+            else:
+                # すでに形状が合っている場合
+                mask_expanded = mask
+
+            # maskがbool型でない可能性も考慮し、確実にマスク処理を行う
+            # masked_fill(~mask, 0.0) よりも積算の方が型に対してロバストです
+            pseudo_labels = pseudo_labels * mask_expanded
+            ground_truth = ground_truth * mask_expanded
+            
+            # Adoption Rate計算用の分母（有効な要素数）を計算
+            valid_element_count = mask_expanded.sum()
+
+        # 3. TP, FP, FN の計算
+        # ground_truth も pseudo_labels も 積算でAND計算
+        tp = (pseudo_labels * ground_truth).sum()
+        fp = (pseudo_labels * (1 - ground_truth)).sum()
+        fn = ((1 - pseudo_labels) * ground_truth).sum()
+
+        # 4. 指標の算出
+        precision = tp / (tp + fp + eps)
+        recall = tp / (tp + fn + eps)
+        f1 = 2 * precision * recall / (precision + recall + eps)
+
+        # 有効な領域のみで割合を計算
+        adoption_rate = pseudo_labels.sum() / (valid_element_count + eps)
+
+        return precision, recall, f1, adoption_rate
+
     def validation_step(self, batch, batch_indx):
         """Apply validation to a batch (step). Used during trainer.fit
 
@@ -1405,6 +1451,69 @@ class SEDTask4(pl.LightningModule):
             self.val_tune_sebbs_teacher.update(
                 scores_unprocessed_teacher_strong
             )
+
+            # 1. 閾値の計算
+            # shape: (K,) または (1, K) 
+            adaptive_clip_thresholds = (
+                self.local_clip_probabilities /
+                torch.max(self.local_clip_probabilities) *
+                self.global_clip_threshold
+            )
+
+            # --- Weak Pseudo Label Evaluation ---
+            if self.sat_enabled and torch.any(mask_weak):
+                weak_preds_desed = weak_preds_teacher[mask_weak][:, :self.K]
+                labels_weak_desed = labels_weak[mask_weak][:, :self.K]
+                
+                # クラス有効性マスク (B, K)
+                current_mask = valid_class_mask[mask_weak][:, :self.K]
+
+                precision_w, recall_w, f1_w, adoption_w = self.evaluate_sat_pseudo_label_quality(
+                    teacher_preds=weak_preds_desed,
+                    ground_truth=labels_weak_desed,
+                    adaptive_thresholds=adaptive_clip_thresholds, # (K,) 自動でブロードキャスト
+                    mask=current_mask
+                )
+
+                self.log("val/sat/pseudo_label/weak/precision", precision_w)
+                self.log("val/sat/pseudo_label/weak/recall", recall_w)
+                self.log("val/sat/pseudo_label/weak/f1", f1_w)
+                self.log("val/sat/pseudo_label/weak/adoption_rate", adoption_w)
+
+                # --- Strong Pseudo Label Evaluation ---
+                if self.sat_enabled and torch.any(mask_strong):
+                    # Shape: (B_strong, K, T)
+                    strong_preds_desed = strong_preds_teacher[mask_strong][:, :self.K, :]
+                    labels_strong_desed = labels[mask_strong][:, :self.K, :] # 変数名 labels に注意
+                    
+                    # Clipレベルの予測を取得 (Gating用) -> Shape: (B_strong, K)
+                    weak_preds_strong = weak_preds_teacher[mask_strong][:, :self.K]
+                    
+                    # Clipレベルで閾値を超えているか判定
+                    is_clip_active = (weak_preds_strong > adaptive_clip_thresholds).float()
+                    
+                    # Gating処理: ClipがActiveでないクラスのFrame予測を全て0にする
+                    # (B, K, T) * (B, K, 1)
+                    filtered_strong_preds = strong_preds_desed * is_clip_active.unsqueeze(2)
+
+                    # Frame比較用の閾値を成形
+                    # adaptive_clip_thresholds が (K) でも (1, K) でも (1, K, 1) に安全に変形
+                    frame_thresholds = adaptive_clip_thresholds.reshape(1, -1, 1)
+                    
+                    # クラス有効性マスク (B, K)
+                    current_mask = valid_class_mask[mask_strong][:, :self.K]
+
+                    precision_s, recall_s, f1_s, adoption_s = self.evaluate_sat_pseudo_label_quality(
+                        teacher_preds=filtered_strong_preds,
+                        ground_truth=labels_strong_desed,
+                        adaptive_thresholds=frame_thresholds,
+                        mask=current_mask 
+                    )
+
+                    self.log("val/sat/pseudo_label/strong/precision", precision_s)
+                    self.log("val/sat/pseudo_label/strong/recall", recall_s)
+                    self.log("val/sat/pseudo_label/strong/f1", f1_s)
+                    self.log("val/sat/pseudo_label/strong/adoption_rate", adoption_s)
 
         return
 

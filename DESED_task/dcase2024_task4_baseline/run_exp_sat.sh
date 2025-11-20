@@ -2,7 +2,7 @@
 
 # 実験設定
 MIXSTYLE_TYPE="resMix"
-BASE_WANDB_DIR="sat/1120_100epoch"
+BASE_WANDB_DIR="sat/1120_50epoch"
 
 # ログディレクトリの作成
 LOG_DIR="logs/sat/150epoch"
