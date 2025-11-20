@@ -804,6 +804,17 @@ def prepare_run(argv=None):
         configs["sat"]["cutmix_alpha"] = args.cutmix_alpha
     if args.sat is not None:
         configs["sat"]["cutmix_prob"] = args.cutmix_prob
+    # Strong augmentation type and parameters
+    if args.strong_augment_type is not None:
+        configs["sat"]["strong_augment_type"] = args.strong_augment_type
+    if args.strong_augment_prob is not None:
+        configs["sat"]["strong_augment_prob"] = args.strong_augment_prob
+    if args.frame_shift_std is not None:
+        configs["sat"]["frame_shift_std"] = args.frame_shift_std
+    if args.time_mask_max is not None:
+        configs["sat"]["time_mask_max"] = args.time_mask_max
+    if args.time_mask_prob is not None:
+        configs["sat"]["time_mask_prob"] = args.time_mask_prob
     # other
     if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs

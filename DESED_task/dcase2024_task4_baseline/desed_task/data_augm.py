@@ -161,9 +161,17 @@ def cutmix(data, target_c=None, target_f=None, alpha=1.0):
         ratio_patch_area = cut_ratio_expanded
 
         # エネルギーがあるクラス -> エネルギー比率を採用
-        # エネルギーがないクラス -> 面積比率を採用 (弱ラベルのみのデータ救済)
-        final_ratio_bg = torch.where(has_energy_bg, ratio_bg_energy, ratio_bg_area)
-        final_ratio_patch = torch.where(has_energy_patch, ratio_patch_energy, ratio_patch_area)
+        # エネルギーがないクラス -> 面積比率は中途半端な信号を足しているかもしれない. 一旦やめて精度を見る
+        # 変更前
+        # final_ratio_bg = torch.where(has_energy_bg, ratio_bg_energy, ratio_bg_area)
+        # final_ratio_patch = torch.where(has_energy_patch, ratio_patch_energy, ratio_patch_area)
+
+        # 変更後
+        final_ratio_bg = torch.where(has_energy_bg, ratio_bg_energy, torch.ones_like(ratio_bg_energy))
+        final_ratio_patch = torch.where(has_energy_patch, ratio_patch_energy, torch.zeros_like(ratio_patch_energy))
+        # patchは後から追加. 不安定ならない扱いとする
+        # 下はあるとする,1にする実装
+        # final_ratio_patch = torch.where(has_energy_patch, ratio_patch_energy, torch.ones_like(ratio_patch_energy))
 
         # --- ラベル適用 ---
         mixed_target_c_bg = target_c * final_ratio_bg
