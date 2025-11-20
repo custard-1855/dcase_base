@@ -430,6 +430,15 @@ class SEDTask4(pl.LightningModule):
             self._wandb_checkpoint_dir = os.path.join(wandb.run.dir, "checkpoints")
             os.makedirs(self._wandb_checkpoint_dir, exist_ok=True)
             print(f"Checkpoint directory: {self._wandb_checkpoint_dir}")
+
+            # ハイパーパラメータをWandBに保存
+            wandb.config.update(self.hparams, allow_val_change=True)
+            print(f"WandB config updated with hyperparameters")
+
+            # 設定ファイル自体をWandBに保存
+            if "config_file_path" in self.hparams and os.path.exists(self.hparams["config_file_path"]):
+                wandb.save(self.hparams["config_file_path"], base_path=os.path.dirname(self.hparams["config_file_path"]))
+                print(f"Configuration file saved to WandB: {self.hparams['config_file_path']}")
         else:
             self._wandb_checkpoint_dir = None
 
@@ -1138,8 +1147,8 @@ class SEDTask4(pl.LightningModule):
                 # features_unlabeled = torch.log10(features_unlabeled + 1e-6)
                 if random.random() < float(cutmix_prob):
                     # CutMixを適用（ラベルは不要なのでNone）
-                    # features_SA, c_mixed, f_mixed = cutmix(
-                    features_SA = cutmix(
+                    features_SA, c_mixed, f_mixed = cutmix(
+                    # features_SA = cutmix(
                         features_unlabeled,
                         target_f=L_Frame_f,
                         target_c=L_Clip_c,
