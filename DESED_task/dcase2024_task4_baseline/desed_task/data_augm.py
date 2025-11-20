@@ -201,3 +201,58 @@ def add_noise(mels, snrs=(6, 30), dims=(1, 2)):
     mels = mels + torch.randn(mels.shape, device=mels.device) * sigma
 
     return mels
+
+
+def strong_augment(data, target_f=None, target_c=None,
+                   frame_shift_std=90, time_mask_max=5,
+                   time_mask_prob=0.5, net_pooling=4):
+    """Strong augmentation combining Frame Shift and Time Masking.
+
+    Applies frame shift followed by time masking for strong augmentation.
+    Unlike CutMix, this operates on a single sample without mixing.
+
+    Args:
+        data: torch.Tensor, input tensor of shape [batch_size, n_mels, time_frames].
+        target_f: torch.Tensor or None, frame-level labels of shape
+            [batch_size, n_classes, time_frames_label].
+        target_c: torch.Tensor or None, clip-level labels of shape [batch_size, n_classes].
+        frame_shift_std: float, standard deviation for Gaussian frame shift (default: 90).
+        time_mask_max: int, maximum length of time mask (default: 5).
+        time_mask_prob: float, probability of applying time masking per sample (default: 0.5).
+        net_pooling: int, pooling factor for label alignment (default: 4).
+
+    Returns:
+        Augmented data and labels if provided.
+    """
+    import torchaudio.transforms as T
+
+    # 1. Frame Shiftを適用（既存の関数を使用）
+    if target_f is not None:
+        # frame_shift関数はラベルも一緒にシフトする
+        # net_poolingに応じてラベルのシフト量を調整
+        shifted_data, shifted_target_f = frame_shift(data, target_f, net_pooling=net_pooling)
+    else:
+        # ラベルがない場合は、dataのみシフト
+        batch_size, n_mels, time_frames = data.size()
+        shifted = []
+        for bindx in range(batch_size):
+            shift = int(random.gauss(0, frame_shift_std))
+            shifted.append(torch.roll(data[bindx], shift, dims=-1))
+        shifted_data = torch.stack(shifted)
+        shifted_target_f = None
+
+    # 2. Time Maskingを適用（torchaudio使用）
+    # iid_masks=True: バッチ内の各サンプルに異なるマスクを適用
+    # p: 各サンプルにマスクを適用する確率
+    time_mask = T.TimeMasking(
+        time_mask_param=time_mask_max,
+        iid_masks=True,
+        p=time_mask_prob
+    )
+    masked_data = time_mask(shifted_data)
+
+    # クリップラベルは変化しない（クリップ全体のラベルなので）
+    if target_f is not None and target_c is not None:
+        return masked_data, target_c, shifted_target_f
+    else:
+        return masked_data
