@@ -33,7 +33,7 @@ echo "Number of jobs: $N_JOBS"
 echo "========================================"
 
 # Optuna実行
-python optuna_pretrained.py \
+uv run optuna_pretrained.py \
     --conf_file "$CONF_FILE" \
     --log_dir "$LOG_DIR" \
     --n_jobs "$N_JOBS" \
