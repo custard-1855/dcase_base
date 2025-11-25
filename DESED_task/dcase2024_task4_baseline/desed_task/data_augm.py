@@ -211,7 +211,7 @@ def add_noise(mels, snrs=(6, 30), dims=(1, 2)):
     return mels
 
 
-def strong_augment(data, target_f=None, target_c=None,
+def strong_augment(data, target_c=None, target_f=None,
                    frame_shift_std=90, time_mask_max=5,
                    time_mask_prob=0.5, net_pooling=4):
     """Strong augmentation combining Frame Shift and Time Masking.
