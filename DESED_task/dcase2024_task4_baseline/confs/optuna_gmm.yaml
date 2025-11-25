@@ -126,6 +126,7 @@ net:
   embedding_size: 768
   embedding_type: frame
   aggregation_type: pool1d
+  mixstyle_type: resMix
   specaugm_t_p: 0.0
   specaugm_t_l: 5
   specaugm_f_p: 0.0
