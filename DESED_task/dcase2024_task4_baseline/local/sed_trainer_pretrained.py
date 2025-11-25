@@ -965,7 +965,7 @@ class SEDTask4(pl.LightningModule):
                                 # n_init=1だと初期値依存で失敗しやすい
                                 gmm = GaussianMixture(
                                     n_components=2, 
-                                    max_iter=10, 
+                                    max_iter=30, 
                                     n_init=3, 
                                     covariance_type='full', 
                                     tol=1e-2,  
