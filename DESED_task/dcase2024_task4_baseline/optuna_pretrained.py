@@ -33,6 +33,12 @@ def prepare_run(argv=None):
         "--test_from_checkpoint", default=None, help="Test the model specified"
     )
     parser.add_argument(
+        "--tune_gmm",
+        action="store_true",
+        default=False,
+        help="Tune GMM parameters for SAT. Requires a trained checkpoint.",
+    )
+    parser.add_argument(
         "--fast_dev_run",
         action="store_true",
         default=False,
@@ -60,11 +66,12 @@ def prepare_run(argv=None):
         test_model_state_dict = checkpoint["state_dict"]
 
     test_only = test_from_checkpoint is not None
+    tune_gmm = args.tune_gmm
     configs["optuna"]["n_jobs"] = int(args.n_jobs)
     configs["optuna"]["storage"] = f"sqlite:///{args.log_dir}/optuna-sed.db"
     configs["optuna"]["output_log"] = f"{args.log_dir}/optuna-sed.log"
     Path(args.log_dir).mkdir(parents=True, exist_ok=True)
-    return configs, args, test_model_state_dict, test_only
+    return configs, args, test_model_state_dict, test_only, tune_gmm
 
 
 def sample_params_train(configs, trial: optuna.Trial):
@@ -109,9 +116,42 @@ def sample_params_eval(configs, trial: optuna.Trial):
     return configs
 
 
+def sample_params_gmm(configs, trial: optuna.Trial):
+    """GMMパラメータの探索空間を定義
+    
+    SAT (Self-Adaptive Training)で使用されるGMMのパラメータを最適化します。
+    対数スケールでの探索により、広い範囲を効率的にカバーします。
+    """
+    
+    # GMMの初期化回数 (1-10の範囲)
+    # 値が大きいほど安定するが計算時間が増加
+    configs["sat"]["gmm_n_init"] = trial.suggest_int(
+        "gmm_n_init", 1, 10
+    )
+    
+    # EMアルゴリズムの最大イテレーション数
+    configs["sat"]["gmm_max_iter"] = trial.suggest_int(
+        "gmm_max_iter", 20, 100, step=10
+    )
+    
+    # 共分散行列の正則化パラメータ (対数スケール)
+    # 数値安定性のために重要
+    configs["sat"]["gmm_reg_covar"] = trial.suggest_float(
+        "gmm_reg_covar", 1e-6, 1e-3, log=True
+    )
+    
+    # 収束判定の閾値 (対数スケール)
+    # 小さいほど厳密だが反復回数が増加
+    configs["sat"]["gmm_tol"] = trial.suggest_float(
+        "gmm_tol", 1e-6, 1e-1, log=True
+    )
+    
+    return configs
+
+
 def objective(
     trial: optuna.Trial, gpu_id: int, config: dict, optuna_output_dir: str, fast_dev_run,
-test_model_state_dict
+test_model_state_dict, tune_gmm=False
 ):
 
     with Path(optuna_output_dir, f"trial-{trial.number}") as output_dir:
@@ -122,7 +162,9 @@ test_model_state_dict
             # Set up some configs based on the current trial
 
             # Sample parameters for this trial
-            if test_model_state_dict is not None:
+            if tune_gmm:
+                config = sample_params_gmm(config, trial)
+            elif test_model_state_dict is not None:
                 config = sample_params_eval(config, trial)
             else:
                 config = sample_params_train(config, trial)
@@ -148,17 +190,19 @@ test_model_state_dict
 
 if __name__ == "__main__":
     # prepare run
-    config, args, test_model_state_dict, test_only = prepare_run()
+    config, args, test_model_state_dict, test_only, tune_gmm = prepare_run()
     # if test only we only tune the median filter
 
-    if test_only:
+    if tune_gmm:
+        study_name = "tuning_gmm"
+    elif test_only:
         study_name = "tuning_postprocessing"
     else:
         study_name = "tuning_train"
 
     def optimize(gpu_id):
         worker_func = lambda trial: objective(
-            trial, gpu_id, deepcopy(config), args.log_dir, args.fast_dev_run, test_model_state_dict
+            trial, gpu_id, deepcopy(config), args.log_dir, args.fast_dev_run, test_model_state_dict, tune_gmm
         )
 
         study = optuna.create_study(

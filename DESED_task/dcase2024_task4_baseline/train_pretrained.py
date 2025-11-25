@@ -774,6 +774,32 @@ def prepare_run(argv=None):
         "--wandb_dir"
     )
 
+    # GMM parameters
+    parser.add_argument(
+        "--gmm_n_init",
+        type=int,
+        default=None,
+        help="Number of initializations for GMM (default: 3)"
+    )
+    parser.add_argument(
+        "--gmm_max_iter",
+        type=int,
+        default=None,
+        help="Maximum iterations for GMM convergence (default: 30)"
+    )
+    parser.add_argument(
+        "--gmm_reg_covar",
+        type=float,
+        default=None,
+        help="Regularization for GMM covariance (default: 5e-4)"
+    )
+    parser.add_argument(
+        "--gmm_tol",
+        type=float,
+        default=None,
+        help="Convergence tolerance for GMM (default: 1e-2)"
+    )
+
     args = parser.parse_args(argv)
     with open(args.conf_file, "r") as f:
         configs = yaml.safe_load(f)
@@ -820,6 +846,18 @@ def prepare_run(argv=None):
         configs["sebbs"]["enabled"] = args.sebbs
     if args.wandb_dir is not None:
         configs["net"]["wandb_dir"] = args.wandb_dir
+
+    # GMM parameters
+    if "sat" not in configs:
+        configs["sat"] = {}
+    if args.gmm_n_init is not None:
+        configs["sat"]["gmm_n_init"] = args.gmm_n_init
+    if args.gmm_max_iter is not None:
+        configs["sat"]["gmm_max_iter"] = args.gmm_max_iter
+    if args.gmm_reg_covar is not None:
+        configs["sat"]["gmm_reg_covar"] = args.gmm_reg_covar
+    if args.gmm_tol is not None:
+        configs["sat"]["gmm_tol"] = args.gmm_tol
 
 
 

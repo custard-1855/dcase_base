@@ -205,6 +205,12 @@ class SEDTask4(pl.LightningModule):
                 self.gmm_imported = False
                 # 学習開始時に一度だけ警告
                 warnings.warn("sklearn.mixture.GaussianMixture not found. SAFT (GMM fitting) will be disabled.")
+            
+            # GMMパラメータの取得（デフォルト値も設定）
+            self.gmm_n_init = self.hparams.get("sat", {}).get("gmm_n_init", 5)
+            self.gmm_max_iter = self.hparams.get("sat", {}).get("gmm_max_iter", 100)
+            self.gmm_reg_covar = self.hparams.get("sat", {}).get("gmm_reg_covar", 1e-6)
+            self.gmm_tol = self.hparams.get("sat", {}).get("gmm_tol", 1e-3)
         # ===========================================================
 
 
@@ -965,11 +971,11 @@ class SEDTask4(pl.LightningModule):
                                 # n_init=1だと初期値依存で失敗しやすい
                                 gmm = GaussianMixture(
                                     n_components=2, 
-                                    max_iter=30, 
-                                    n_init=3, 
+                                    max_iter=self.gmm_max_iter, 
+                                    n_init=self.gmm_n_init, 
                                     covariance_type='full', 
-                                    tol=1e-2,  
-                                    reg_covar=5e-4,
+                                    tol=self.gmm_tol,  
+                                    reg_covar=self.gmm_reg_covar,
                                     random_state=42)
                                 gmm.fit(X)
                                 
