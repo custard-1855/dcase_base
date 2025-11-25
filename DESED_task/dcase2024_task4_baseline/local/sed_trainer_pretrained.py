@@ -966,7 +966,7 @@ class SEDTask4(pl.LightningModule):
                                 gmm = GaussianMixture(
                                     n_components=2, 
                                     max_iter=10, 
-                                    n_init=1, 
+                                    n_init=3, 
                                     covariance_type='full', 
                                     tol=1e-2,  
                                     reg_covar=5e-4,
@@ -976,6 +976,7 @@ class SEDTask4(pl.LightningModule):
                                 if not gmm.converged_:
                                     # 収束しなかった場合はFallback（クリップ閾値などを使用）
                                     adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
+                                    print("Warning: Not converged")
                                 else:
                                     # active (平均値が高い方) のクラスタを見つける
                                     idx_active = np.argmax(gmm.means_)
