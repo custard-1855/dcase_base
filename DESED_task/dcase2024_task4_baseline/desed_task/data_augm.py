@@ -53,139 +53,133 @@ def mixup(data, target=None, alpha=0.2, beta=0.2, mixup_label_type="soft"):
             return mixed_data
 
 
-def cutmix(data, target_c=None, target_f=None, alpha=1.0):
-    """CutMix data augmentation for time axis only.
-
-    Applies CutMix augmentation by cutting and pasting a rectangular region
-    along the time axis only. Frequency axis is not modified to avoid touching
-    domain information.
-
-    Args:
-        data: torch.Tensor, input tensor of shape [batch_size, n_mels, time_frames].
-        target: torch.Tensor or None, target labels of shape [batch_size, n_classes, time_frames]
-            or [batch_size, n_classes]. If None, do not return targets.
-        alpha: float, parameter for the Beta distribution.
-
-    Returns:
-        torch.Tensor of mixed data and labels if target is given.
+def cutmix(data, embeddings, target_c=None, target_f=None, alpha=1.0):
     """
-    batch_size, n_mels, time_frames = data.size()
+    CutMix for Spectrogram AND BEATs Embeddings (Time-Synchronized).
+    
+    Args:
+        data: Spectrogram tensor [batch, n_mels, time_spec].
+        embeddings: BEATs features [batch, embed_dim, time_emb].
+        target_c: Clip-level targets [batch, n_classes].
+        target_f: Frame-level targets [batch, n_classes, time_target].
+        alpha: Beta distribution parameter.
+        
+    Returns:
+        mixed_data, mixed_embeddings, mixed_target_c, mixed_target_f
+    """
+    batch_size, n_mels, time_spec = data.size()
     device = data.device
 
-    # ベータ分布を取得
+    # --- 1. カットパラメータの決定 (スペクトログラム基準) ---
     if alpha > 0:
         dist = torch.distributions.beta.Beta(alpha, alpha)
         lam = dist.sample().item()
     else:
         lam = 1.0
 
-    # データの時間長とlambdaから,切る幅を決定
-    #### 現在はバッチ内で同一の比率. 複雑な処理を回避するため ####
-    cut_width = int(time_frames * (1 - lam))
+    # カット幅 (1 - lambda)
+    cut_width = int(time_spec * (1 - lam))
 
-    if cut_width <= 0 or cut_width >= time_frames:
-        if target_f is not None and target_c is not None:
-            return data, target_c, target_f
-        return data
+    # カット幅が無効な場合
+    if cut_width <= 0 or cut_width >= time_spec:
+        # 何もせず返す
+        return data, embeddings, target_c, target_f
 
-    # バッチをランダムに並べる
-    perm = torch.randperm(batch_size, device=data.device)
+    # --- 2. 共通のランダム置換 (Permutation) ---
+    # スペクトログラム、Embedding、ラベル全てで同じ相手と混ぜる必要がある
+    perm = torch.randperm(batch_size, device=device)
 
-    # shape: [batch_size]
-    start_ts = torch.randint(0, time_frames - cut_width + 1, (batch_size,), device=device)
+    # --- 3. マスク生成ヘルパー関数 ---
+    # 異なる時間解像度に対応するための内部関数
+    def generate_mask(total_time, ref_start_ts, ref_total_time, ref_cut_width):
+        """
+        基準(Spectrogram)のカット位置を、指定された時間長(total_time)に合わせてスケーリングしマスクを生成
+        """
+        scale = total_time / ref_total_time
+        
+        # スケーリング後の開始位置と幅
+        # round() で丸めることでズレを防ぐ
+        scaled_start = (ref_start_ts.float() * scale).round().long()
+        scaled_width = int(ref_cut_width * scale)
+        
+        # マスク作成
+        arange = torch.arange(total_time, device=device).unsqueeze(0) # [1, T]
+        start_exp = scaled_start.unsqueeze(1) # [B, 1]
+        
+        # [B, 1, T]
+        mask = (arange >= start_exp) & (arange < start_exp + scaled_width)
+        return mask.unsqueeze(1) 
 
-    # 時間インデックスを作成 [0, 1, 2, ..., T-1]
-    arange_t = torch.arange(time_frames, device=device).unsqueeze(0) # [1, T]
+    # --- 4. スペクトログラムのMix ---
+    # 基準となるカット開始位置 [Batch]
+    start_ts = torch.randint(0, time_spec - cut_width + 1, (batch_size,), device=device)
     
-    # start_ts を [B, 1] に拡張してブロードキャスト比較
-    # mask: [Batch, Time] -> カットする場所がTrue
-    start_ts_expanded = start_ts.unsqueeze(1)
-    mask = (arange_t >= start_ts_expanded) & (arange_t < start_ts_expanded + cut_width)
+    # スペクトログラム用マスク
+    mask_spec = generate_mask(time_spec, start_ts, time_spec, cut_width)
+    mixed_data = torch.where(mask_spec, data[perm], data)
+
+    # --- 5. BEATs EmbeddingsのMix ---
+    # Embeddingの時間長を取得
+    time_emb = embeddings.size(2)
     
-    # 周波数軸に合わせて次元拡張: [Batch, 1, Time]
-    mask_expanded = mask.unsqueeze(1)
+    # Embedding用マスク (スペクトログラムのカット位置を投影)
+    mask_emb = generate_mask(time_emb, start_ts, time_spec, cut_width)
+    mixed_embeddings = torch.where(mask_emb, embeddings[perm], embeddings)
 
+    # ラベルがない場合はここで終了
+    if target_c is None or target_f is None:
+        return mixed_data, mixed_embeddings
 
-    # maskがTrueの場所は perm データを、Falseの場所は original データを使う
-    mixed_data = torch.where(mask_expanded, data[perm], data)
+    # --- 6. ラベルのMix (Energy-based + Area Fallback) ---
+    
+    # --- 6.1 Strong Label (Target_F) のMix ---
+    time_target = target_f.size(2)
+    mask_target = generate_mask(time_target, start_ts, time_spec, cut_width)
+    mixed_target_f = torch.where(mask_target, target_f[perm], target_f)
 
-    if target_f is not None and target_c is not None:
-        # target_fの時間次元に合わせたマスクを作成
-        # BEATsのembedding未使用でフレームがずれた?
-        target_time_frames = target_f.size(2)
-        
-        # target_fの時間解像度に合わせてstart_tsとcut_widthをスケーリング
-        scale_factor = target_time_frames / time_frames
-        target_cut_width = int(cut_width * scale_factor)
-        target_start_ts = (start_ts.float() * scale_factor).long()
-        
-        # target_f用のマスクを作成
-        arange_target = torch.arange(target_time_frames, device=device)
-        target_start_ts_expanded = target_start_ts.unsqueeze(1)
-        mask_target = (arange_target >= target_start_ts_expanded) & (arange_target < target_start_ts_expanded + target_cut_width)
-        mask_target_expanded = mask_target.unsqueeze(1)
-        
-        # Frame-level targetも同様にマスクで合成
-        mixed_target_f = torch.where(mask_target_expanded, target_f[perm], target_f)
-        
-        epsilon = 1e-6
-        energy_orig = target_f.sum(dim=2) + epsilon
-        energy_perm = target_f[perm].sum(dim=2) + epsilon
+    # --- 6.2 Weak Label (Target_C) の再計算 ---
+    
+    # マスクの反転（背景部分）
+    mask_inv = ~mask_target
 
-        # 背景に残る部分
-        mask_inv = ~mask_target_expanded
+    epsilon = 1e-6
+    
+    # 背景のエネルギー残存率
+    energy_bg = (target_f * mask_inv.float()).sum(dim=2)
+    total_energy_bg = target_f.sum(dim=2)
+    ratio_bg_energy = energy_bg / (total_energy_bg + epsilon)
+    
+    # パッチのエネルギー混入率
+    energy_patch = (target_f[perm] * mask_target.float()).sum(dim=2)
+    total_energy_patch = target_f[perm].sum(dim=2)
+    ratio_patch_energy = energy_patch / (total_energy_patch + epsilon)
 
-        # target_f * mask_target_expanded.float() で、Trueの部分以外が0になる
-        # 背景画像の残存エネルギーを直接算出
-        rem_energy_bg = (target_f * mask_inv.float()).sum(dim=2)
-        energy_total_bg = target_f.sum(dim=2)
-        rem_energy_patch = (target_f[perm] * mask_target_expanded.float()).sum(dim=2)
-        energy_total_patch = target_f[perm].sum(dim=2)
+    # エネルギー有無フラグ
+    has_energy_bg = total_energy_bg > epsilon
+    has_energy_patch = total_energy_patch > epsilon
 
-        # エネルギーのフラグ
-        has_energy_bg = energy_total_bg > epsilon
-        has_energy_patch = energy_total_patch > epsilon
+    # [Fallback] 面積比率計算
+    # target解像度でのカット率
+    cut_ratio = mask_target.float().mean(dim=2).squeeze(1) # [B]
+    
+    # クラス次元へ拡張
+    n_classes = target_c.size(1)
+    cut_ratio_exp = cut_ratio.unsqueeze(1).expand(-1, n_classes)
+    
+    bg_area_ratio = 1.0 - cut_ratio_exp
+    patch_area_ratio = cut_ratio_exp
 
-        # 残存率の計算
-        ratio_bg_energy = rem_energy_bg / (energy_total_bg + epsilon)
-        ratio_patch_energy = rem_energy_patch / (energy_total_patch + epsilon)
+    # 最終比率の決定 (エネルギーがない場合は面積比率を採用)
+    final_ratio_bg = torch.where(has_energy_bg, ratio_bg_energy, bg_area_ratio)
+    final_ratio_patch = torch.where(has_energy_patch, ratio_patch_energy, patch_area_ratio)
 
+    # ラベル適用
+    mixed_target_c_bg = target_c * final_ratio_bg
+    mixed_target_c_patch = target_c[perm] * final_ratio_patch
+    
+    mixed_target_c = torch.clamp(mixed_target_c_bg + mixed_target_c_patch, max=1.0)
 
-        # --- フレームのエネルギーが小さい時,ラベルが信用できないので,時間比率でクリップラベルを混合 ---
-        cut_ratio = mask_target_expanded.float().mean(dim=2).squeeze(1) # [B] -> 各サンプルのカット率
-
-        n_classes = target_f.size(1)
-        cut_ratio_expanded = cut_ratio.unsqueeze(1).expand(-1, n_classes)
-
-        ratio_bg_area = 1.0 - cut_ratio_expanded
-        ratio_patch_area = cut_ratio_expanded
-
-        # エネルギーがあるクラス -> エネルギー比率を採用
-        # エネルギーがないクラス -> 面積比率は中途半端な信号を足しているかもしれない. 一旦やめて精度を見る
-        # 変更前
-        # final_ratio_bg = torch.where(has_energy_bg, ratio_bg_energy, ratio_bg_area)
-        # final_ratio_patch = torch.where(has_energy_patch, ratio_patch_energy, ratio_patch_area)
-
-        # 変更後
-        final_ratio_bg = torch.where(has_energy_bg, ratio_bg_energy, torch.ones_like(ratio_bg_energy))
-        final_ratio_patch = torch.where(has_energy_patch, ratio_patch_energy, torch.zeros_like(ratio_patch_energy))
-        # patchは後から追加. 不安定ならない扱いとする
-        # 下はあるとする,1にする実装
-        # final_ratio_patch = torch.where(has_energy_patch, ratio_patch_energy, torch.ones_like(ratio_patch_energy))
-
-        # --- ラベル適用 ---
-        mixed_target_c_bg = target_c * final_ratio_bg
-        mixed_target_c_patch = target_c[perm] * final_ratio_patch
-        
-        # Additive mix 線形和を取る
-        mixed_target_c = mixed_target_c_bg + mixed_target_c_patch
-        mixed_target_c = torch.clamp(mixed_target_c, max=1.0)
-        # mixed_target_c = torch.max(mixed_target_c_bg, mixed_target_c_patch)
-
-        return mixed_data, mixed_target_c, mixed_target_f
-    else:
-        return mixed_data
-
+    return mixed_data, mixed_embeddings, mixed_target_c, mixed_target_f
 
 def add_noise(mels, snrs=(6, 30), dims=(1, 2)):
     """Add white noise to mels spectrograms
