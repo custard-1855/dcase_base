@@ -806,9 +806,7 @@ class SEDTask4(pl.LightningModule):
                 L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, K, 1)).float() # (B_u, K, T)
 
 
-                # 4. Strong Augmentation for Student (CRITICAL FIX)
-                # embeddingsの整合性を保つため、Augment関数がembeddingsも返すように変更する必要があります。
-                # ここでは変数として受け取る形に修正しています。
+                # 4. Strong Augmentation for Student
                 embeddings_SA = embeddings_unlabeled # Default logic
                 if self.strong_augment_type == "cutmix":
                     cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)

@@ -5,6 +5,9 @@ exp/
 lightning_logs/
 *.pt
 *.hdf5
+*.wav
+# data dir
+data/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
