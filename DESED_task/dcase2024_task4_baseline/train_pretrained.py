@@ -661,7 +661,7 @@ def single_run(
 def prepare_run(argv=None):
     parser = argparse.ArgumentParser("Training a SED system for DESED Task")
     parser.add_argument(
-        "--conf_file",
+        "---",
         default="./confs/pretrained.yaml",
         help="The configuration file with all the experiment parameters.",
     )
@@ -705,17 +705,6 @@ def prepare_run(argv=None):
     )
     parser.add_argument(
         "--mixstyle_type", default="disabled",
-    )
-
-    # CMT
-    parser.add_argument(
-        "--cmt", action="store_true", default=False
-    )
-    # parser.add_argument(
-    #     "--scale", action="store_true", default=False
-    # )
-    parser.add_argument(
-        "--warmup_epochs", default=0
     )
 
     # sat
@@ -814,13 +803,6 @@ def prepare_run(argv=None):
         configs["net"]["attn_deepen"] = args.attn_deepen
     if args.mixstyle_type is not None:
         configs["net"]["mixstyle_type"] = args.mixstyle_type
-    # CMT
-    if args.cmt is not None:
-        configs["cmt"]["enabled"] = args.cmt
-    # if args.cmt is not None:
-    #     configs["cmt"]["scale"] = args.scale
-    if args.cmt is not None:
-        configs["cmt"]["warmup_epochs"] = args.warmup_epochs
     # sat
     if args.sat is not None:
         configs["sat"]["enabled"] = args.sat
