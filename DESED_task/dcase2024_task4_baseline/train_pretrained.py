@@ -661,7 +661,7 @@ def single_run(
 def prepare_run(argv=None):
     parser = argparse.ArgumentParser("Training a SED system for DESED Task")
     parser.add_argument(
-        "---",
+        "--confs",
         default="./confs/pretrained.yaml",
         help="The configuration file with all the experiment parameters.",
     )
@@ -790,11 +790,11 @@ def prepare_run(argv=None):
     )
 
     args = parser.parse_args(argv)
-    with open(args.conf_file, "r") as f:
+    with open(args.confs, "r") as f:
         configs = yaml.safe_load(f)
 
     # WandB用に設定ファイルパスを保存
-    configs["config_file_path"] = os.path.abspath(args.conf_file)
+    configs["config_file_path"] = os.path.abspath(args.confs)
 
     # MixStyle
     if args.attn_type is not None:
