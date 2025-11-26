@@ -613,28 +613,28 @@ class SEDTask4(pl.LightningModule):
 
         features = self.mel_spec(audio)
 
+        # バッチ数の累積和を取得
         indx_maestro, indx_synth, indx_strong, indx_weak, indx_unlabelled = np.cumsum(
             self.hparams["training"]["batch_size"]
-        ) # バッチ数の累積和を各要素で得る
-
+        ) 
         batch_num = features.shape[0]
+
         # deriving masks for each dataset
         strong_mask = torch.zeros(batch_num).to(features).bool()
         weak_mask = torch.zeros(batch_num).to(features).bool()
-        mask_unlabeled = torch.zeros(batch_num).to(features).bool() # 一貫性損失用
-        full_mask_unlabeled = torch.zeros(batch_num).to(features).bool() # SAT用
+        mask_consistency = torch.zeros(batch_num).to(features).bool()
+        mask_pure_unlabeled = torch.zeros(batch_num).to(features).bool()
 
-        strong_mask[:indx_strong] = 1 # maestro,合成(synthは確か合成音),強ラベルデータ
-        weak_mask[indx_strong:indx_weak] = 1 # 弱ラベルデータ
-        mask_unlabeled[indx_maestro:] = 1 # maestro以外: 合成,強,弱,ラベルなしデータ
-        full_mask_unlabeled[indx_weak:] = 1 # ラベルなしデータ
+        strong_mask[:indx_strong] = 1 # maestro,合成 強ラベル
+        weak_mask[indx_strong:indx_weak] = 1 # 弱ラベル
+        mask_consistency[indx_maestro:] = 1 # maestro以外
+        mask_pure_unlabeled[indx_weak:] = 1 # 純粋なラベルなし
 
-        # deriving weak labels
+        # --- Mixup ---
+        # Note: Mixup should ideally handle consistency of masks if strictly implemented, 
+        # but standard SED baselines often mix features/labels and keep original masks.
         mixup_type = self.hparams["training"].get("mixup")
-        if (
-            mixup_type is not None
-            and self.hparams["training"]["mixup_prob"] > random.random()
-        ):
+        if mixup_type is not None and self.hparams["training"]["mixup_prob"] > random.random():
             # NOTE: mix only within same dataset !
             features, embeddings, labels = self.apply_mixup(
                 features, embeddings, labels, indx_strong, indx_weak
@@ -645,7 +645,6 @@ class SEDTask4(pl.LightningModule):
             features, embeddings, labels = self.apply_mixup(
                 features, embeddings, labels, 0, indx_maestro
             )
-            # ラベルなしデータを拡張
             features, embeddings, labels = self.apply_mixup(
                 features, embeddings, labels, indx_weak, indx_unlabelled
             )
@@ -658,31 +657,26 @@ class SEDTask4(pl.LightningModule):
         )
         labels_weak = labels_weak.masked_fill(~valid_class_mask[weak_mask], 0.0)
 
-        # sed student forward
+        # --- Student forward ---
         strong_preds_student, weak_preds_student = self.detect(
             features,
             self.sed_student,
             embeddings=embeddings,
             classes_mask=valid_class_mask,
         )
-        # 生徒モデルにラベルなしデータも入れるが,lossに使う際にmaskする
 
-        # print(f"[DEBUG] Student | strong: {strong_preds_student}, weak: {weak_preds_student}")
-
-        # supervised loss on strong labels
+        # ---Supervised loss ---
         loss_strong = self.supervised_loss(
             strong_preds_student[strong_mask],
             labels[strong_mask],
         )
-        # supervised loss on weakly labelled
-
         loss_weak = self.supervised_loss(
             weak_preds_student[weak_mask],
             labels_weak,
         )
-        # total supervised loss
         tot_loss_supervised = loss_strong + loss_weak
 
+        # ---Teacher Forward (No Grad) ---
         with torch.no_grad(): 
             strong_preds_teacher, weak_preds_teacher = self.detect(
                 features,
@@ -691,110 +685,90 @@ class SEDTask4(pl.LightningModule):
                 classes_mask=valid_class_mask,    
             )
 
+        # --- Consistency Loss (Mean Teacher) ---
+        weight = self.hparams["training"]["const_max"]
+        if self.current_epoch < self.hparams["training"]["epoch_decay"]:
+            weight *= self.scheduler["scheduler"]._get_scaling_factor()
 
-        weight = (
-            self.hparams["training"]["const_max"]
-            * self.scheduler["scheduler"]._get_scaling_factor()
-        ) if self.current_epoch < self.hparams["training"]["epoch_decay"] else self.hparams["training"]["const_max"]
-        # should we apply the valid mask for classes also here ?
-
-        # Original Mean Teacher consistency loss
         strong_self_sup_loss = self.selfsup_loss(
-            strong_preds_student[mask_unlabeled],
-            strong_preds_teacher.detach()[mask_unlabeled],
+            strong_preds_student[mask_consistency],
+            strong_preds_teacher.detach()[mask_consistency],
         )
         weak_self_sup_loss = self.selfsup_loss(
-            weak_preds_student[mask_unlabeled],
-            weak_preds_teacher.detach()[mask_unlabeled],
+            weak_preds_student[mask_consistency],
+            weak_preds_teacher.detach()[mask_consistency],
         )
-
         tot_self_loss = (strong_self_sup_loss + weak_self_sup_loss) * weight
 
 
-        # ===========================================================
-        # SAT
-        # ===========================================================
+        # --- SAT (Self-Adaptive Theresholdings) Logic ---
         loss_pseudo = torch.tensor(0.0).to(self.device)
 
         if self.sat_enabled:
-            # 教師モデルで弱拡張,ラベルなしデータ(desed)を予測し,疑似ラベルに使用
-            q_c = weak_preds_teacher[full_mask_unlabeled][:, :self.K]   # クリップ予測 (B_u, K)
-            q_f = strong_preds_teacher[full_mask_unlabeled][:, :self.K, :] # フレーム予測 (B_u, K, T)
+            # ラベルなしデータ部分のみ抽出
+            q_c = weak_preds_teacher[mask_pure_unlabeled][:, :self.K]   # (B_u, K)
+            q_f = strong_preds_teacher[mask_pure_unlabeled][:, :self.K, :] # (B_u, K, T)
 
-            # ラベルなしデータの特徴量を取得
-            features_unlabeled = features[full_mask_unlabeled]
-            embeddings_unlabeled = embeddings[full_mask_unlabeled]
-            classes_mask_unlabeled = valid_class_mask[full_mask_unlabeled]
+            features_unlabeled = features[mask_pure_unlabeled]
+            embeddings_unlabeled = embeddings[mask_pure_unlabeled]
+            classes_mask_consistency = valid_class_mask[mask_pure_unlabeled]
 
             # B, K, T: バッチ,クラス,フレーム
-            if q_c.dim() == 0 or q_f.dim() == 0:
-                 # バッチにラベルなしデータが1つもなかった場合
-                 pass # loss_pseudo は 0.0
-            else:
+            if q_c.shape[0] > 0: # バッチ内にラベルなしデータがある場合のみ実行
                 B_u, K = q_c.shape
-                _, _, T = q_f.shape # q_fは (B_u, K, T)
-                assert K == self.K, f"Expected {self.K_desed} classes, got {K}"
-            
-                # ===========================================================
-                # 1. SACT (Clip-level Adaptive Thresholding) (ステップ 6, 7)
-                # ===========================================================
-                
-                # ステップ 6.1: バッチの基礎閾値 v_b の計算 (Eq 1)
-                
-                # 期待個数 (形状 [B_u])
-                expected_counts = torch.ceil(torch.sum(q_c, dim=1))
-                # 降順ソート (形状 [B_u, K])
-                sorted_preds, _ = torch.sort(q_c, dim=1, descending=True)
-                # インデックスの準備 (0-based index)
-                indices = (expected_counts - 1).long().clamp(0, K - 1)
-                # 基礎閾値 v_b を取得 (形状 [B_u])
-                v_b = sorted_preds.gather(1, indices.unsqueeze(1)).squeeze(1)
 
-                # ステップ 6.2: グローバル閾値 tau_s のEMA更新 (Eq 2)
-                batch_mean_v_b = torch.mean(v_b)
+                # 1. Global/Local THereshold Updataes (EMA)                            
+                expected_counts = torch.ceil(torch.sum(q_c, dim=1)) # (B_u)
+                sorted_preds, _ = torch.sort(q_c, dim=1, descending=True) # (B_u, K)
+                indices = (expected_counts - 1).long().clamp(0, K - 1)
+                v_b = sorted_preds.gather(1, indices.unsqueeze(1)).squeeze(1) # (B_u)
+
+                batch_mean_v_b = torch.mean(v_b) # (K)
+                # Note: Assuming self.global_clip_threshold is a registered buffer
                 self.global_clip_threshold = self.sat_lambda * self.global_clip_threshold.data + (1 - self.sat_lambda) * batch_mean_v_b
                 tau_s = self.global_clip_threshold
 
-                # ステップ 6.3: ローカル確率 p_tilde_s(k) のEMA更新 (Eq 3)
-                batch_mean_q_c = torch.mean(q_c, dim=0) # (形状 [K])
+                batch_mean_q_c = torch.mean(q_c, dim=0) # (K)
                 self.local_clip_probabilities = self.sat_lambda * self.local_clip_probabilities.data + (1 - self.sat_lambda) * batch_mean_q_c
                 p_tilde_s = self.local_clip_probabilities
 
-                # ステップ 6.4: 適応的閾値 tau_s^c(k) の計算 (Eq 4)
-                adaptive_clip_thresholds = (p_tilde_s / torch.max(p_tilde_s)) * tau_s # (形状 [K])
+                adaptive_clip_thresholds = (p_tilde_s / torch.max(p_tilde_s) + 1e-6) * tau_s # (K)
 
-                # ステップ 7: クリップ疑似ラベル L_Clip_c の生成
-                L_Clip_c = (q_c > adaptive_clip_thresholds).float() # (形状 [B_u, K])
+                # 2. Generate Clip Psuedo Labels
+                L_Clip_c = (q_c > adaptive_clip_thresholds).float() # (B_u, K)
                 
-                # ===========================================================
-                # 2. SAFT (Frame-level Adaptive Thresholding) (ステップ 11, 12)
-                # ===========================================================
-                
-                # (形状 [K]) 11.1
+                # 3. Generate Frame Pseudo Labels (GMM / Fallback) 
                 adaptive_frame_thresholds_k = torch.zeros(K, device=self.device)
+
+                # Zero-out frames where clip prediction is 0 BEFORE GMM
                 filtered_q_f = q_f * L_Clip_c.unsqueeze(2)
 
                 if self.gmm_imported:
-                    try:                        
-                        # ステップ 11.2-4: GMMによる閾値計算 (Eq 7-9)
-                        for k in range(self.K):
-                            # クラス k の、フィルタリング後の0より大きい予測値を取得
-                            class_k_preds = filtered_q_f[:, k, :]
-                            active_preds_k = class_k_preds[class_k_preds > 1e-8]
-                            
-                            if (self.current_epoch % 10 == 0) and (batch_indx == 0):
-                                if active_preds_k.numel() > 0:
-                                    data_for_hist = active_preds_k.detach().cpu().numpy()
-                                    
-                                    hist = wandb.Histogram(data_for_hist)
-                                    self._maybe_wandb_log({
-                                        f"distribution/pred_hist_class_{k}": hist
-                                    })
+                    for k in range(self.K):
+                        # Clipフィルタ後の数値のみ見る
+                        if L_Clip_c[:, k].sum() == 0:
+                            # このバッチでこのクラスの正例予測が一つもない場合
+                            adaptive_frame_thresholds_k[k] = 0.5 # Default fallback
+                            continue
 
-                            if active_preds_k.numel() >= 20:
-                                X = active_preds_k.detach().cpu().numpy().reshape(-1, 1)
+                        class_k_preds = filtered_q_f[:, k, :]
+                        # 0より大きい予測値のみ抽出
+                        active_preds_k = class_k_preds[class_k_preds > 1e-4]
+                        
+                        # GMM分布のlog?
+                        if (self.current_epoch % 10 == 0) and (batch_indx == 0):
+                            if active_preds_k.numel() > 0:
+                                data_for_hist = active_preds_k.detach().cpu().numpy()
                                 
-                                # n_init=1だと初期値依存で失敗しやすい
+                                hist = wandb.Histogram(data_for_hist)
+                                self._maybe_wandb_log({
+                                    f"distribution/pred_hist_class_{k}": hist
+                                })
+
+                        # GMMに十分なサンプルがあるか確認
+                        if active_preds_k.numel() >= 20:
+                            try:
+                                X = active_preds_k.detach().cpu().numpy().reshape(-1, 1)
                                 gmm = GaussianMixture(
                                     n_components=2, 
                                     max_iter=self.gmm_max_iter, 
@@ -805,69 +779,56 @@ class SEDTask4(pl.LightningModule):
                                     random_state=42)
                                 gmm.fit(X)
                                 
-                                if not gmm.converged_:
-                                    # 収束しなかった場合はFallback（クリップ閾値などを使用）
-                                    adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
-                                    print("Warning: Not converged")
-                                else:
-                                    # active (平均値が高い方) のクラスタを見つける
-                                    idx_active = np.argmax(gmm.means_)
-                                    
-                                    # Eq 8: "maximum probability in active mode"
-                                    # ガウス分布の頂点である平均値を採用
+                                if gmm.converged_:
+                                    idx_active = np.argmax(gmm.means_)                                
                                     mu_a_k = float(gmm.means_[idx_active][0])
                                     adaptive_frame_thresholds_k[k] = mu_a_k
-                            else:
-                                # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
-                                adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
-                                if self.current_epoch > 30:
-                                    print("[DEBUG] lack sample: ", active_preds_k.numel())
                                 else:
-                                    pass
-                            
-                            # クリップの閾値
-                            self.log(f"debug/adaptive_clip_thresholds_{k}", adaptive_clip_thresholds[k])
-                            # フレームの閾値
-                            self.log(f"debug/adaptive_frame_thresholds_{k}", adaptive_frame_thresholds_k[k])
-                            # クラスごとに予測値の最大（空でない場合のみ）
-                            if active_preds_k.numel() > 0:
-                                self.log(f"debug/active_preds_{k}_max", active_preds_k.max())
+                                    adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8                                
+                                    print("Warning: Not converged")
+                            except Exception as e:
+                                adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8
+                                print(f"GMM fit failed for class {k}: {e}")
+                        else:
+                            # サンプル不足
+                            adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8
+                            if self.current_epoch > 30:
+                                print("[DEBUG] lack sample: ", active_preds_k.numel())
 
-                    except Exception as e:
-                        # GMMフィット失敗時（特異行列エラーなど）の安全策
-                        print(f"GMM fit failed for class {k}: {e}")
-                        adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
+                        self.log(f"debug/adaptive_clip_thresholds_{k}", adaptive_clip_thresholds[k])
+                        self.log(f"debug/adaptive_frame_thresholds_{k}", adaptive_frame_thresholds_k[k])
+                        if active_preds_k.numel() > 0:
+                            self.log(f"debug/active_preds_{k}_max", active_preds_k.max())
                 else:
-                    # サンプル不足時はクリップ単位の閾値を流用（または固定値0.5など）
-                    adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k]
-                    print("[DEBUG] lack sample for GMM")
+                    adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8
 
-                # ステップ 11.5 & 12: フレーム疑似ラベル L_Frame_f の生成 (Eq 10)
-                # 閾値 (形状 [K]) を (1, K, 1) に拡張してブロードキャスト
+                # Frame Pseudo Labels
                 L_Frame_f = (filtered_q_f > adaptive_frame_thresholds_k.view(1, K, 1)).float() # (B_u, K, T)
 
-                # ===========================================================
-                # 3. 疑似ラベル損失 (L^u) の計算 (ステップ 16)
-                # ===========================================================
 
-                # 強拡張を適用（タイプに応じて分岐）
+                # 4. Strong Augmentation for Student (CRITICAL FIX)
+                # embeddingsの整合性を保つため、Augment関数がembeddingsも返すように変更する必要があります。
+                # ここでは変数として受け取る形に修正しています。
+                embeddings_SA = embeddings_unlabeled # Default logic
                 if self.strong_augment_type == "cutmix":
-                    # CutMix強拡張を適用（既存実装）
                     cutmix_prob = self.hparams.get("sat", {}).get("cutmix_prob", 1.0)
-
                     if random.random() < float(cutmix_prob):
-                        features_SA, c_mixed, f_mixed = cutmix(
+                        # embeddingsもmixする
+                        features_SA, embeddings_SA, c_mixed, f_mixed = cutmix(
                             features_unlabeled,
+                            embeddings_unlabeled,
                             target_c=L_Clip_c,
                             target_f=L_Frame_f,
                             alpha=self.cutmix_alpha
                         )
-                        L_Clip_c = c_mixed
-                        L_Frame_f = f_mixed
+                        L_Clip_c, L_Frame_f = c_mixed, f_mixed
                     else:
                         features_SA = features_unlabeled
 
                 elif self.strong_augment_type == "frame_shift_time_mask":
+                    # TimeMask等はEmbeddings（時間軸を持たない場合）には影響しない場合が多いが、
+                    # FrameShiftは時間ズレを起こすため、Embeddingsが時間情報を持つならShiftが必要。
+                    # ここでは単純化のためFeaturesのみ対象とするが、注意が必要。
                     if random.random() < float(self.strong_augment_prob):
                         features_SA, c_aug, f_aug = strong_augment(
                             features_unlabeled,
@@ -878,38 +839,30 @@ class SEDTask4(pl.LightningModule):
                             time_mask_prob=self.time_mask_prob,
                             net_pooling=self.hparams["training"].get("net_pooling", 4)
                         )
-                        L_Clip_c = c_aug
-                        L_Frame_f = f_aug
+                        L_Clip_c, L_Frame_f = c_aug, f_aug
+                        # embeddigns_SA = ...
                     else:
                         features_SA = features_unlabeled
 
                 else:
                     features_SA = features_unlabeled
 
-                # 強拡張データで生徒モデルをフォワード
+                # 5. Student Forward on Strong Augmented Data
                 strong_preds_student_SA, weak_preds_student_SA = self.detect(
                     features_SA,
                     self.sed_student,
-                    embeddings=embeddings_unlabeled,
-                    classes_mask=classes_mask_unlabeled,
+                    embeddings=embeddings_SA,
+                    classes_mask=classes_mask_consistency,
                 )
 
-                # 疑似ラベル損失計算用の予測値
-                s_c = weak_preds_student_SA[:, :self.K]  # クリップレベル予測 (B_u, K)
-                s_f = strong_preds_student_SA[:, :self.K, :]  # フレームレベル予測 (B_u, K, T)
-
-                # クリップ疑似ラベル損失 (B_u, K)
+                # Pseudo Label Loss
                 criterion = torch.nn.BCELoss()
-                loss_pseudo_clip = criterion(
-                    s_c,
-                    L_Clip_c
-                )
-                
-                # フレーム疑似ラベル損失 (B_u, K, T)
-                loss_pseudo_frame = criterion(
-                    s_f,
-                    L_Frame_f
-                )
+                # 予測値のClamp
+                s_c = torch.clamp(weak_preds_student_SA[:, :self.K], 1e-7, 1 - 1e-7)  # (B_u, K)
+                s_f = torch.clamp(strong_preds_student_SA[:, :self.K, :], 1e-7, 1 - 1e-7)  # (B_u, K, T)
+
+                loss_pseudo_clip = criterion(s_c, L_Clip_c)
+                loss_pseudo_frame = criterion(s_f,L_Frame_f)
                 
                 loss_pseudo = self.sat_w_u * (loss_pseudo_clip + loss_pseudo_frame)
 
@@ -922,7 +875,6 @@ class SEDTask4(pl.LightningModule):
                 self.log("train/sat/L_Clip_c_ratio", L_Clip_c.mean())
                 self.log("train/sat/L_Frame_f_ratio", L_Frame_f.mean())
         
-        # 既存の損失に、計算した疑似ラベル損失を加える
         tot_loss = tot_loss_supervised + tot_self_loss + loss_pseudo
 
         # 教師あり学習の損失
@@ -943,7 +895,6 @@ class SEDTask4(pl.LightningModule):
         self.log("train/lr", self.opt.param_groups[-1]["lr"], prog_bar=True)
 
         # 各種step情報
-        # self.log("train/step/scheduler_step_num", self.scheduler["scheduler"].step_num, prog_bar=True)
         self.log("train/step/global_step", self.global_step)
         self.log("train/step/current_epoch", self.current_epoch)
 
