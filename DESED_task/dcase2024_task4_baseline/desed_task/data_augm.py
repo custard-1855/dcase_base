@@ -53,7 +53,7 @@ def mixup(data, target=None, alpha=0.2, beta=0.2, mixup_label_type="soft"):
             return mixed_data
 
 
-def cutmix(data, embeddings, target_c=None, target_f=None, alpha=1.0):
+def cutmix(data, embeddings, target_c, target_f, alpha=1.0):
     """
     CutMix for Spectrogram AND BEATs Embeddings (Time-Synchronized).
     
@@ -125,10 +125,6 @@ def cutmix(data, embeddings, target_c=None, target_f=None, alpha=1.0):
     # Embedding用マスク (スペクトログラムのカット位置を投影)
     mask_emb = generate_mask(time_emb, start_ts, time_spec, cut_width)
     mixed_embeddings = torch.where(mask_emb, embeddings[perm], embeddings)
-
-    # ラベルがない場合はここで終了
-    if target_c is None or target_f is None:
-        return mixed_data, mixed_embeddings
 
     # --- 6. ラベルのMix (Energy-based + Area Fallback) ---
     
