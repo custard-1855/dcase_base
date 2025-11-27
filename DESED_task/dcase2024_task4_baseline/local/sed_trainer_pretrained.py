@@ -790,19 +790,17 @@ class SEDTask4(pl.LightningModule):
                 elif self.strong_augment_type == "frame_shift_time_mask":
                     # TimeMask等はEmbeddings（時間軸を持たない場合）には影響しない場合が多いが、
                     # FrameShiftは時間ズレを起こすため、Embeddingsが時間情報を持つならShiftが必要。
-                    # ここでは単純化のためFeaturesのみ対象とするが、注意が必要。
                     if random.random() < float(self.strong_augment_prob):
-                        features_SA, c_aug, f_aug = strong_augment(
+                        features_SA, embeddings_SA, c_aug, f_aug = SpecAugment(
                             features_unlabeled,
+                            embeddings_unlabeled,
                             target_c=L_Clip_c,
                             target_f=L_Frame_f,
                             frame_shift_std=self.frame_shift_std,
                             time_mask_max=self.time_mask_max,
-                            time_mask_prob=self.time_mask_prob,
                             net_pooling=self.hparams["training"].get("net_pooling", 4)
                         )
                         L_Clip_c, L_Frame_f = c_aug, f_aug
-                        # embeddigns_SA = ...
                     else:
                         features_SA = features_unlabeled
 
