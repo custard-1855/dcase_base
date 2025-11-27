@@ -17,7 +17,7 @@ from sed_scores_eval.base_modules.scores import (create_score_dataframe,
                                                  validate_score_dataframe)
 from torchaudio.transforms import AmplitudeToDB, MelSpectrogram, MFCC
 
-from desed_task.data_augm import mixup, cutmix, strong_augment
+from desed_task.data_augm import *
 from desed_task.utils.postprocess import ClassWiseMedianFilter
 from desed_task.evaluation.evaluation_measures import (
     compute_per_intersection_macro_f1, compute_psds_from_operating_points,
@@ -155,27 +155,18 @@ class SEDTask4(pl.LightningModule):
         self.sed_student = sed_student
         self.median_filter = ClassWiseMedianFilter(self.hparams["net"]["median_filter"])
 
+        self.mixup_augmentor = MixupAugmentor(self.hparams["training"])
 
-        # ===========================================================
-        # SAT-SED (Self-Adaptive Thresholding) Parameters
-        # ===========================================================
+        # --- SAT-SED (Self-Adaptive Thresholding) Parameters ---
         self.sat_enabled = self.hparams.get("sat", {}).get("enabled", False)
         
         if self.sat_enabled:
-            # 継続的な警告を避けるため、一度だけ警告
-            # if not self.hparams["training"]["self_sup_loss"] == "bce":
-            #      warnings.warn(f"SAT-SED is enabled, but self_sup_loss is '{self.hparams['training']['self_sup_loss']}'. "
-            #                    f"SAT-SED pseudo-labeling is designed to work with BCE loss (self.selfsup_loss).")
-            
             # desedのクラス数
             self.K = len(classes_labels_desed)
             # EMA係数 (lambda)
             self.sat_lambda = self.hparams.get("sat", {}).get("lambda", 0.999) 
             # 疑似ラベル損失の重み (w_u)
             self.sat_w_u = self.hparams.get("sat", {}).get("w_u", 0.5) 
-            # ウォームアップエポック
-            # self.sat_warmup_epochs = self.hparams.get("sat", {}).get("warmup_epochs", 0)
-            # self.gmm_fixed = self.hparams.get("sat", {}).get("gmm_fixed", False)
 
             self.cutmix_alpha = self.hparams.get("sat", {}).get("cutmix_alpha", 1.0)
 
@@ -190,13 +181,10 @@ class SEDTask4(pl.LightningModule):
 
             # SACT (Clip) 用バッファ
             # register_buffer は、モデルの state_dict に含まれるが、optimizerの対象にならない
-            # tau_s (Eq 2)
             self.register_buffer("global_clip_threshold", torch.tensor(1.0 / self.K)) 
-            # p_tilde_s (Eq 3)
             self.register_buffer("local_clip_probabilities", torch.full((self.K,), 1.0 / self.K)) 
             
             # SAFT (Frame) GMMパラメータ (Eq 7)
-            # GMMをsklearnで使うためのimportチェック
             try:
                 # __init__時点で GMM がインポート可能か確認
                 from sklearn.mixture import GaussianMixture
@@ -206,7 +194,6 @@ class SEDTask4(pl.LightningModule):
                 # 学習開始時に一度だけ警告
                 warnings.warn("sklearn.mixture.GaussianMixture not found. SAFT (GMM fitting) will be disabled.")
             
-            # GMMパラメータの取得（デフォルト値も設定）
             self.gmm_n_init = self.hparams.get("sat", {}).get("gmm_n_init", 5)
             self.gmm_max_iter = self.hparams.get("sat", {}).get("gmm_max_iter", 100)
             self.gmm_reg_covar = self.hparams.get("sat", {}).get("gmm_reg_covar", 1e-6)
@@ -214,8 +201,6 @@ class SEDTask4(pl.LightningModule):
 
         # cSEBBs param
         self.sebbs_enabled = self.hparams.get("sebbs", {}).get("enabled", False)
-
-
 
         if self.hparams["pretrained"]["e2e"]:
             self.pretrained_model = pretrained_model
@@ -560,27 +545,6 @@ class SEDTask4(pl.LightningModule):
                 self.scaler(self.take_log(mel_feats)), embeddings=embeddings, **kwargs
             )
 
-    def apply_mixup(self, features, embeddings, labels, start_indx, stop_indx):
-        # made a dedicated method as we need to apply mixup only
-        # within each dataset that has the same classes
-        mixup_type = self.hparams["training"].get("mixup")
-        batch_num = features.shape[0]
-        current_mask = torch.zeros(batch_num).to(features).bool()
-        current_mask[start_indx:stop_indx] = 1
-        features[current_mask], labels[current_mask] = mixup(
-            features[current_mask], labels[current_mask], mixup_label_type=mixup_type
-        )
-
-        if embeddings is not None:
-            # apply mixup also on embeddings
-            embeddings[current_mask], labels[current_mask] = mixup(
-                embeddings[current_mask],
-                labels[current_mask],
-                mixup_label_type=mixup_type,
-            )
-
-        return features, embeddings, labels
-
     def _unpack_batch(self, batch):
 
         if not self.hparams["pretrained"]["e2e"]:
@@ -636,16 +600,16 @@ class SEDTask4(pl.LightningModule):
         mixup_type = self.hparams["training"].get("mixup")
         if mixup_type is not None and self.hparams["training"]["mixup_prob"] > random.random():
             # NOTE: mix only within same dataset !
-            features, embeddings, labels = self.apply_mixup(
+            features, embeddings, labels = self.mixup_augmentor.apply_mixup(
                 features, embeddings, labels, indx_strong, indx_weak
             )
-            features, embeddings, labels = self.apply_mixup(
+            features, embeddings, labels = self.mixup_augmentor.apply_mixup(
                 features, embeddings, labels, indx_maestro, indx_strong
             )
-            features, embeddings, labels = self.apply_mixup(
+            features, embeddings, labels = self.mixup_augmentor.apply_mixup(
                 features, embeddings, labels, 0, indx_maestro
             )
-            features, embeddings, labels = self.apply_mixup(
+            features, embeddings, labels = self.mixup_augmentor.apply_mixup(
                 features, embeddings, labels, indx_weak, indx_unlabelled
             )
 
