@@ -4,18 +4,6 @@ import numpy as np
 import torch
 
 
-def frame_shift(mels, labels, net_pooling=4):
-    bsz, n_bands, frames = mels.shape
-    shifted = []
-    new_labels = []
-    for bindx in range(bsz):
-        shift = int(random.gauss(0, 90))
-        shifted.append(torch.roll(mels[bindx], shift, dims=-1))
-        shift = -abs(shift) // net_pooling if shift < 0 else shift // net_pooling
-        new_labels.append(torch.roll(labels[bindx], shift, dims=-1))
-    return torch.stack(shifted), torch.stack(new_labels)
-
-
 class MixupAugmentor:
     def __init__(self, config):
         """
@@ -225,57 +213,147 @@ def add_noise(mels, snrs=(6, 30), dims=(1, 2)):
 
     return mels
 
-
-def strong_augment(data, target_c=None, target_f=None,
-                   frame_shift_std=90, time_mask_max=5,
-                   time_mask_prob=0.5, net_pooling=4):
-    """Strong augmentation combining Frame Shift and Time Masking.
-
-    Applies frame shift followed by time masking for strong augmentation.
-    Unlike CutMix, this operates on a single sample without mixing.
-
-    Args:
-        data: torch.Tensor, input tensor of shape [batch_size, n_mels, time_frames].
-        target_f: torch.Tensor or None, frame-level labels of shape
-            [batch_size, n_classes, time_frames_label].
-        target_c: torch.Tensor or None, clip-level labels of shape [batch_size, n_classes].
-        frame_shift_std: float, standard deviation for Gaussian frame shift (default: 90).
-        time_mask_max: int, maximum length of time mask (default: 5).
-        time_mask_prob: float, probability of applying time masking per sample (default: 0.5).
-        net_pooling: int, pooling factor for label alignment (default: 4).
-
-    Returns:
-        Augmented data and labels if provided.
+def frame_shift(mels, labels, embeddings=None, shift_std=90, net_pooling=4):
     """
-    import torchaudio.transforms as T
-
-    # 1. Frame Shiftを適用（既存の関数を使用）
-    if target_f is not None:
-        # frame_shift関数はラベルも一緒にシフトする
-        # net_poolingに応じてラベルのシフト量を調整
-        shifted_data, shifted_target_f = frame_shift(data, target_f, net_pooling=net_pooling)
+    Applies frame shift with zero-padding (Random Gaussian Shift).
+    
+    Args:
+        mels: [B, n_mels, T]
+        labels: [B, n_classes, T_label]
+        embeddings: [B, dim, T_emb] or None
+    """
+    bsz, n_bands, frames = mels.shape
+    
+    # Embeddings情報の取得
+    if embeddings is not None:
+        emb_frames = embeddings.shape[-1]
     else:
-        # ラベルがない場合は、dataのみシフト
-        batch_size, n_mels, time_frames = data.size()
-        shifted = []
-        for bindx in range(batch_size):
-            shift = int(random.gauss(0, frame_shift_std))
-            shifted.append(torch.roll(data[bindx], shift, dims=-1))
-        shifted_data = torch.stack(shifted)
-        shifted_target_f = None
+        emb_frames = 0
 
-    # 2. Time Maskingを適用（torchaudio使用）
-    # iid_masks=True: バッチ内の各サンプルに異なるマスクを適用
-    # p: 各サンプルにマスクを適用する確率
-    time_mask = T.TimeMasking(
-        time_mask_param=time_mask_max,
-        iid_masks=True,
-        p=time_mask_prob
+    l_frames = labels.shape[-1] if labels is not None else 0
+    
+    # 出力用バッファ (ゼロ初期化)
+    out_mels = torch.zeros_like(mels)
+    out_labels = torch.zeros_like(labels) if labels is not None else None
+    out_embs = torch.zeros_like(embeddings) if embeddings is not None else None
+
+    for i in range(bsz):
+        # 1. シフト量の決定 (Gaussian)
+        shift = int(random.gauss(0, shift_std))
+        
+        # 2. Mel Shift
+        if shift == 0:
+            out_mels[i] = mels[i]
+        elif shift > 0:
+            if shift < frames:
+                out_mels[i, :, shift:] = mels[i, :, :-shift]
+        else: # shift < 0
+            shift_abs = abs(shift)
+            if shift_abs < frames:
+                out_mels[i, :, :-shift_abs] = mels[i, :, shift_abs:]
+
+        # 3. Embeddings Shift (解像度に合わせてスケーリング)
+        if embeddings is not None:
+            scale_e = emb_frames / frames if frames > 0 else 0
+            e_shift = int(shift * scale_e)
+            
+            if e_shift == 0:
+                out_embs[i] = embeddings[i]
+            elif e_shift > 0:
+                if e_shift < emb_frames:
+                    out_embs[i, :, e_shift:] = embeddings[i, :, :-e_shift]
+            else:
+                e_shift_abs = abs(e_shift)
+                if e_shift_abs < emb_frames:
+                    out_embs[i, :, :-e_shift_abs] = embeddings[i, :, e_shift_abs:]
+
+        # 4. Label Shift (Poolingに合わせてスケーリング)
+        if labels is not None:
+            l_shift = int(shift / net_pooling)
+            
+            if l_shift == 0:
+                out_labels[i] = labels[i]
+            elif l_shift > 0:
+                if l_shift < l_frames:
+                    out_labels[i, :, l_shift:] = labels[i, :, :-l_shift]
+            else:
+                l_shift_abs = abs(l_shift)
+                if l_shift_abs < l_frames:
+                    out_labels[i, :, :-l_shift_abs] = labels[i, :, l_shift_abs:]
+
+    return out_mels, out_labels, out_embs
+
+
+def apply_synchronized_time_mask(mels, embeddings=None, mask_max=5):
+    """
+    Apply time masking to Mels and Embeddings synchronously.
+    Unlike torchaudio.transforms.TimeMasking, this ensures both features 
+    are masked at the same physical time location.
+    """
+    B, F, T_mel = mels.shape
+    masked_mels = mels.clone()
+    masked_embs = embeddings.clone() if embeddings is not None else None
+    
+    # Embeddingsの時間スケール比率
+    T_emb = embeddings.shape[-1] if embeddings is not None else 0
+    scale = T_emb / T_mel if (embeddings is not None and T_mel > 0) else 0
+
+    for i in range(B):
+        # マスクの長さをランダム決定 (0 ~ mask_max)
+        t_mask_len = random.randint(0, mask_max)
+        if t_mask_len == 0 or t_mask_len >= T_mel:
+            continue
+            
+        # マスク開始位置をランダム決定
+        t_start = random.randint(0, T_mel - t_mask_len)
+        
+        # --- Mel Masking ---
+        masked_mels[i, :, t_start : t_start + t_mask_len] = 0.0
+        
+        # --- Embeddings Masking (同期) ---
+        if embeddings is not None:
+            # 時間位置をEmbeddingsの解像度に変換
+            e_start = int(t_start * scale)
+            e_len = int(t_mask_len * scale)
+            
+            # Embeddingsの解像度が低い場合、e_lenが0になるのを防ぐか、
+            # あるいは「Melでマスクされた領域に対応するEmb領域」を正確に消す
+            if e_len > 0 and e_start < T_emb:
+                e_end = min(e_start + e_len, T_emb)
+                masked_embs[i, :, e_start : e_end] = 0.0
+                
+    return masked_mels, masked_embs
+
+
+def SpecAugment(data, embeddings=None, target_c=None, target_f=None,
+                   frame_shift_std=90, time_mask_max=5, net_pooling=4):
+    """
+    Augmentation pipeline: Frame Shift -> Time Masking (Always applied).
+    
+    Args:
+        data: [Batch, n_mels, time]
+        embeddings: [Batch, dim, time_emb]
+        target_f: Frame-level labels
+        target_c: Clip-level labels (passed through)
+        frame_shift_std: Std dev for Gaussian shift
+        time_mask_max: Max length of time mask
+        net_pooling: Pooling factor for label alignment
+    """
+    
+    # 1. Frame Shift
+    shifted_data, shifted_target_f, shifted_embeddings = frame_shift(
+            data, 
+            target_f,
+            embeddings=embeddings,
+            shift_std=frame_shift_std, 
+            net_pooling=net_pooling
+        )
+
+    # 2. Time Masking (Always applied, Synchronized)
+    masked_data, masked_embeddings = apply_synchronized_time_mask(
+        shifted_data, 
+        shifted_embeddings, 
+        mask_max=time_mask_max
     )
-    masked_data = time_mask(shifted_data)
 
-    # クリップラベルは変化しない（クリップ全体のラベルなので）
-    if target_f is not None and target_c is not None:
-        return masked_data, target_c, shifted_target_f
-    else:
-        return masked_data
+    return masked_data, masked_embeddings, target_c, shifted_target_f

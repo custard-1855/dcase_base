@@ -24,7 +24,6 @@ sat:
   strong_augment_prob: 1.0  # Probability of applying Frame Shift + Time Masking
   frame_shift_std: 90       # Standard deviation for Gaussian frame shift
   time_mask_max: 5          # Maximum length of time mask
-  time_mask_prob: 0.5       # Probability of applying time masking
   # gmm_fixed: False
   # GMM parameters for adaptive threshold calculation (Eq 7-9)
   gmm_n_init: 3             # Number of GMM initializations (higher = more stable but slower)
