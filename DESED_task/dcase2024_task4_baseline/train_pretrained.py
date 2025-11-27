@@ -186,23 +186,6 @@ def single_run(
     if seed:
         pl.seed_everything(seed, workers=True)
 
-    # missing_filesディレクトリのファイル名一覧を取得
-    #missing_files_dir = os.path.join(os.path.dirname(__file__), "missing_files")
-    #print("[DEBUG] mising_file_dir: ", missing_files_dir)
-    #if os.path.exists(missing_files_dir):
-    #    missing_files = set(os.listdir(missing_files_dir))
-    #else:
-    #     missing_files = set()
-
-
-    #def filter_missing(df, missing_files=missing_files):
-        # filename列がmissing_files集合に含まれていない行だけ残す
-    #    if "filename" in df.columns:
-    #        before = len(df)
-    #        df = df[~df["filename"].isin(missing_files)].reset_index(drop=True)
-    #        print(f"filter_missing: {before-len(df)} files removed")
-    #    return df
-
 
     def filter_nonexistent_files(df, folder):
         # folder: ファイルが格納されているディレクトリ
@@ -623,13 +606,6 @@ def single_run(
         deterministic=config["training"]["deterministic"],
         enable_progress_bar=config["training"]["enable_progress_bar"],
     )
-
-    #train_dataloaders = SafeDataLoader(train_dataset, batch_size=64, num_workers=4)
-    # debug obj_metric
-    #val_loader = SafeDataLoader(valid_dataset, batch_size=32)
-    #for batch in val_loader:
-    #    print(f"[Debug] {batch}")
-    #    break  # 1バッチだけ表示
 
     if test_state_dict is None:
         # start tracking energy consumption
