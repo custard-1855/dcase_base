@@ -16,41 +16,66 @@ def frame_shift(mels, labels, net_pooling=4):
     return torch.stack(shifted), torch.stack(new_labels)
 
 
-def mixup(data, target=None, alpha=0.2, beta=0.2, mixup_label_type="soft"):
-    """Mixup data augmentation by permuting the data.
+class MixupAugmentor:
+    def __init__(self, config):
+        """
+        Args:
+            config: hparams全体、もしくは mixup に関する辞書
+        """
+        self.mixup_type = config.get("mixup", "soft")
+        self.alpha = config.get("mixup_alpha", 0.2)
+        self.beta = config.get("mixup_beta", 0.2)
 
-    Args:
-        data: input tensor, must be a batch so data can be permuted and mixed.
-        target: tensor of the target to be mixed, if None, do not return targets.
-        alpha: float, the parameter to the np.random.beta distribution
-        beta: float, the parameter to the np.random.beta distribution
-        mixup_label_type: str, the type of mixup to be used choice between {'soft', 'hard'}.
-    Returns:
-        torch.Tensor of mixed data and labels if given
-    """
-    with torch.no_grad():
-        batch_size = data.size(0)
-        c = np.random.beta(alpha, beta)
+    def apply_mixup(self, features, embeddings, labels, start_indx, stop_indx):        
+        # マスクの作成
+        batch_num = features.shape[0]
+        current_mask = torch.zeros(batch_num).to(features.device).bool() # device対応を追加
+        current_mask[start_indx:stop_indx] = 1
+        
+        # 対象データの抽出
+        masked_features = features[current_mask]
+        masked_labels = labels[current_mask]
+        masked_embeddings = embeddings[current_mask] if embeddings is not None else None
 
-        perm = torch.randperm(batch_size)
+        # --- 修正ポイント: パラメータをここで1回だけ生成 ---
+        # データ数を取得
+        sub_batch_size = masked_features.size(0)
+        
+        # Mixupパラメータの生成 (alpha, betaはhparamsから取ると想定、ここではデフォルト値)
+        alpha, beta = 0.2, 0.2 
+        lam = np.random.beta(alpha, beta)
+        perm = torch.randperm(sub_batch_size).to(features.device) # deviceを合わせる
 
-        mixed_data = c * data + (1 - c) * data[perm, :]
-        if target is not None:
-            if mixup_label_type == "soft":
-                mixed_target = torch.clamp(
-                    c * target + (1 - c) * target[perm, :], min=0, max=1
-                )
-            elif mixup_label_type == "hard":
-                mixed_target = torch.clamp(target + target[perm, :], min=0, max=1)
-            else:
-                raise NotImplementedError(
-                    f"mixup_label_type: {mixup_label_type} not implemented. choice in "
-                    f"{'soft', 'hard'}"
-                )
+        # --- Features の Mixup ---
+        features[current_mask] = self._mixup_data(masked_features, perm, lam)
 
-            return mixed_data, mixed_target
+        # --- Embeddings の Mixup (存在する場合、同じ perm と lam を使用) ---
+        if embeddings is not None:
+            embeddings[current_mask] = self._mixup_data(masked_embeddings, perm, lam)
+
+        # --- Labels の Mixup (最後に1回だけ、同じ perm と lam を使用) ---
+        labels[current_mask] = self._mixup_target(masked_labels, perm, lam)
+
+        return features, embeddings, labels
+
+    def _mixup_data(self, data, perm, lam):
+        """データ（features/embeddings）の混合のみを行うヘルパー関数"""
+        return lam * data + (1 - lam) * data[perm, :]
+
+    def _mixup_target(self, target, perm, lam):
+        """ラベルの混合のみを行うヘルパー関数"""
+        if self.mixup_type == "soft":
+            mixed_target = torch.clamp(
+                lam * target + (1 - lam) * target[perm, :], min=0, max=1
+            )
+        elif self.mixup_type == "hard":
+            # Hard mixupの実装意図が「足してクリップ」であれば元のまま
+            mixed_target = torch.clamp(target + target[perm, :], min=0, max=1)
         else:
-            return mixed_data
+             raise NotImplementedError(
+                f"mixup_label_type: {self.mixup_type} not implemented."
+            )
+        return mixed_target
 
 
 def cutmix(data, embeddings, target_c, target_f, alpha=1.0):
