@@ -829,7 +829,8 @@ class SEDTask4(pl.LightningModule):
         # --- SAT (Self-Adaptive Theresholdings) Logic ---
         loss_pseudo = torch.tensor(0.0).to(self.device)
 
-        if self.sat_enabled and self.current_epoch >= self.hparams["sat"].get("sat_start_epoch", 0):
+        # if self.sat_enabled and self.current_epoch >= self.hparams["sat"].get("sat_start_epoch", 0):
+        if self.sat_enabled:
             # ラベルなしデータ部分のみ抽出
             q_c = weak_preds_teacher[mask_pure_unlabeled][:, :self.K]   # (B_u, K)
             q_f = strong_preds_teacher[mask_pure_unlabeled][:, :self.K, :] # (B_u, K, T)
