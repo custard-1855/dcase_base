@@ -197,7 +197,7 @@ class SEDTask4(pl.LightningModule):
             self.gmm_n_init = self.hparams.get("sat", {}).get("gmm_n_init", 5)
             self.gmm_max_iter = self.hparams.get("sat", {}).get("gmm_max_iter", 100)
             self.gmm_reg_covar = float(self.hparams.get("sat", {}).get("gmm_reg_covar", 1e-6))
-            self.gmm_tol = self.hparams.get("sat", {}).get("gmm_tol", 1e-3)
+            self.gmm_tol = float(self.hparams.get("sat", {}).get("gmm_tol", 1e-3))
 
         # cSEBBs param
         self.sebbs_enabled = self.hparams.get("sebbs", {}).get("enabled", False)
