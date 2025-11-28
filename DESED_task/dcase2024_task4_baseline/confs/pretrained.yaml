@@ -9,7 +9,7 @@ cmt:
   phi_clip: 0.5             # クリップレベル閾値 (論文では0.5)
   phi_frame: 0.5          # フレームレベル閾値 (論文では0.5)
   scale: False
-  warmup_epochs: 50
+  warmup_epochs: 0
 
 sat:
   enabled: False
