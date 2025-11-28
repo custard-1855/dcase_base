@@ -838,9 +838,9 @@ class SEDTask4(pl.LightningModule):
                 loss_pseudo_clip = criterion(s_c, L_Clip_c)
                 loss_pseudo_frame = criterion(s_f,L_Frame_f)
                 
-                # loss_pseudo = self.sat_w_u * (loss_pseudo_clip + loss_pseudo_frame)
+                loss_pseudo = self.sat_w_u * (loss_pseudo_clip + loss_pseudo_frame)
                 # MeanTeacherと一緒にRamp-up
-                loss_pseudo = weight * (loss_pseudo_clip + loss_pseudo_frame)
+                # loss_pseudo = weight * (loss_pseudo_clip + loss_pseudo_frame)
 
                 # ロギング
                 self.log("train/sat/loss_pseudo_clip", loss_pseudo_clip)
