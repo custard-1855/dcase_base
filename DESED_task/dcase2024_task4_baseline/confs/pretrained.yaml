@@ -15,6 +15,7 @@ sat:
   enabled: False
   lambda: 0.999
   w_u: 0.5
+  sat_start_epoch: 20
   # Strong augmentation type selection
   strong_augment_type: "cutmix"   # Options: "cutmix", "frame_shift_time_mask", "none"
   # CutMix strong augmentation for SAT
