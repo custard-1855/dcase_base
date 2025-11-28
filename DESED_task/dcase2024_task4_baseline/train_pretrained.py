@@ -675,9 +675,9 @@ def prepare_run(argv=None):
     parser.add_argument(
         "--cmt", action="store_true", default=False
     )
-    # parser.add_argument(
-    #     "--scale", action="store_true", default=False
-    # )
+    parser.add_argument(
+        "--phi_frame", default=0.5
+    )
     parser.add_argument(
         "--warmup_epochs", default=0
     )
@@ -785,8 +785,8 @@ def prepare_run(argv=None):
     # CMT
     if args.cmt is not None:
         configs["cmt"]["enabled"] = args.cmt
-    # if args.cmt is not None:
-    #     configs["cmt"]["scale"] = args.scale
+    if args.cmt is not None:
+        configs["cmt"]["phi_frame"] = args.phi_frame
     if args.cmt is not None:
         configs["cmt"]["warmup_epochs"] = args.warmup_epochs
     # MixStyle
