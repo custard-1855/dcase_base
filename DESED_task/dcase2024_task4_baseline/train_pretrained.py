@@ -671,6 +671,16 @@ def prepare_run(argv=None):
         "--eval_from_checkpoint", default=None, help="Evaluate the model specified"
     )
     # 実験管理用
+    # CMT
+    parser.add_argument(
+        "--cmt", action="store_true", default=False
+    )
+    # parser.add_argument(
+    #     "--scale", action="store_true", default=False
+    # )
+    parser.add_argument(
+        "--warmup_epochs", default=0
+    )
     # MixStyle
     parser.add_argument(
         "--attn_type", default="default",
@@ -772,6 +782,13 @@ def prepare_run(argv=None):
     # WandB用に設定ファイルパスを保存
     configs["config_file_path"] = os.path.abspath(args.confs)
 
+    # CMT
+    if args.cmt is not None:
+        configs["cmt"]["enabled"] = args.cmt
+    # if args.cmt is not None:
+    #     configs["cmt"]["scale"] = args.scale
+    if args.cmt is not None:
+        configs["cmt"]["warmup_epochs"] = args.warmup_epochs
     # MixStyle
     if args.attn_type is not None:
         configs["net"]["attn_type"] = args.attn_type
