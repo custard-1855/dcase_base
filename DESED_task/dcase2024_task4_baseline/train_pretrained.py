@@ -756,13 +756,13 @@ def prepare_run(argv=None):
         "--gmm_reg_covar",
         type=float,
         default=None,
-        help="Regularization for GMM covariance (default: 5e-4)"
+        help="Regularization for GMM covariance (default: 1e-6)"
     )
     parser.add_argument(
         "--gmm_tol",
         type=float,
         default=None,
-        help="Convergence tolerance for GMM (default: 1e-2)"
+        help="Convergence tolerance for GMM (default: 1e-3)"
     )
 
     args = parser.parse_args(argv)
