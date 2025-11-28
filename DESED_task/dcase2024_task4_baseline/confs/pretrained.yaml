@@ -52,8 +52,8 @@ training:
   
   # 訓練制御
   num_workers: 6
-  n_epochs: 50
-  early_stop_patience: 50
+  n_epochs: 150
+  early_stop_patience: 150
   accumulate_batches: 1
   gradient_clip: 5.0
   
