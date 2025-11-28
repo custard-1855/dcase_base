@@ -936,7 +936,7 @@ class SEDTask4(pl.LightningModule):
         y_w: (batch, classes)
         y_s: (batch, classes, frames)
         """
-        print("[DEBUG] y_w, y_s: ", y_s.shape(), y_s.shape())
+        print("[DEBUG] y_w, y_s: ", y_s.size(), y_s.size())
         # Step 1: Clip-level thresholding
         y_tilde_w = (y_w > phi_clip).float()
         
