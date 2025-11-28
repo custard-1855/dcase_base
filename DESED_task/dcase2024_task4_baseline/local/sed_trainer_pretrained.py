@@ -290,6 +290,10 @@ class SEDTask4(pl.LightningModule):
         self.test_buffer_detections_thres05_student = pd.DataFrame()
         self.test_buffer_detections_thres05_teacher = pd.DataFrame()
 
+        # Prediction distribution tracking for validation
+        self.prediction_distribution = self._init_prediction_distribution()
+        self.prediction_bins = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0]
+
     _exp_dir = None
 
     @property
@@ -522,6 +526,163 @@ class SEDTask4(pl.LightningModule):
                 )
             )
             return scaler
+
+
+    def _init_prediction_distribution(self):
+        """Initialize prediction distribution tracking structure."""
+        # defaultdictの構造を少し変更し、各ビンの統計を一括管理
+        # counts: そのビンに入った予測の総数
+        # pos_labels: そのビンに入った予測のうち、正解ラベルが1だった数
+        # neg_labels: そのビンに入った予測のうち、正解ラベルが0だった数
+        return {
+            'student': {
+                'strong': defaultdict(lambda: {'counts': np.zeros(len(self.prediction_bins)-1, dtype=int),
+                                            'pos_labels': np.zeros(len(self.prediction_bins)-1, dtype=int)}),
+                'weak': defaultdict(lambda: {'counts': np.zeros(len(self.prediction_bins)-1, dtype=int),
+                                        'pos_labels': np.zeros(len(self.prediction_bins)-1, dtype=int)})
+            },
+            'teacher': {
+                'strong': defaultdict(lambda: {'counts': np.zeros(len(self.prediction_bins)-1, dtype=int),
+                                            'pos_labels': np.zeros(len(self.prediction_bins)-1, dtype=int)}),
+                'weak': defaultdict(lambda: {'counts': np.zeros(len(self.prediction_bins)-1, dtype=int),
+                                        'pos_labels': np.zeros(len(self.prediction_bins)-1, dtype=int)})
+            }
+        }
+
+    def _accumulate_prediction_distribution(self, preds, labels, model_type, pred_type, valid_class_mask=None):
+        """Accumulate prediction distribution statistics using vectorized operations."""
+        # Move to CPU and convert to numpy
+        preds_np = preds.detach().cpu().numpy()
+        labels_np = labels.detach().cpu().numpy()
+
+        if valid_class_mask is not None:
+            valid_class_mask_np = valid_class_mask.detach().cpu().numpy()
+        else:
+            valid_class_mask_np = np.ones(preds_np.shape[:2], dtype=bool)
+
+        bins = self.prediction_bins
+        num_classes = preds_np.shape[1]
+
+        for class_idx in range(num_classes):
+            if class_idx >= len(self.encoder.labels):
+                continue
+
+            class_name = self.encoder.labels[class_idx]
+
+            # Extract data for this class
+            class_preds = preds_np[:, class_idx]       # (B,) or (B, T)
+            class_labels = labels_np[:, class_idx]     # (B,) or (B, T)
+            class_mask = valid_class_mask_np[:, class_idx] # (B,)
+
+            # Filter valid data
+            if pred_type == 'strong':
+                # Strong: (B, T) -> Mask invalid files -> Flatten
+                # class_mask (B,) を (B, 1) に拡張してブロードキャストマスクを作成
+                # validなバッチのデータのみを取り出してフラット化
+                valid_indices = np.where(class_mask)[0]
+                if len(valid_indices) == 0:
+                    continue
+                class_preds_flat = class_preds[valid_indices].flatten()
+                class_labels_flat = class_labels[valid_indices].flatten()
+            else:
+                # Weak: (B,) -> Mask invalid files
+                class_preds_flat = class_preds[class_mask]
+                class_labels_flat = class_labels[class_mask]
+
+            if class_preds_flat.size == 0:
+                continue
+
+            # --- Vectorized Optimization using np.histogram ---
+            
+            # 1. Count predictions in each bin
+            counts, _ = np.histogram(class_preds_flat, bins=bins)
+            
+            # 2. Count Positive Labels in each bin (where label == 1)
+            # labelが1である予測値だけを取り出してヒストグラムを作る
+            pos_preds = class_preds_flat[class_labels_flat >= 0.5] # 念のため閾値処理
+            pos_counts, _ = np.histogram(pos_preds, bins=bins)
+
+            # Update dictionary
+            # np.add.at 等を使わなくても、単純な加算でOK
+            self.prediction_distribution[model_type][pred_type][class_name]['counts'] += counts
+            self.prediction_distribution[model_type][pred_type][class_name]['pos_labels'] += pos_counts
+
+    def _save_prediction_distribution_csv(self, epoch):
+        """Save prediction distribution to CSV file."""
+        rows = []
+        bins = self.prediction_bins
+
+        for model_type in ['student', 'teacher']:
+            for pred_type in ['strong', 'weak']:
+                dist = self.prediction_distribution[model_type][pred_type]
+
+                for class_name, stats in dist.items():
+                    counts = stats['counts']
+                    pos_labels = stats['pos_labels']
+                    # neg_labels = counts - pos_labels (計算可能)
+
+                    for i in range(len(bins) - 1):
+                        bin_name = f"{bins[i]:.1f}-{bins[i+1]:.1f}"
+                        
+                        count = counts[i]
+                        n_pos = pos_labels[i]
+                        n_neg = count - n_pos
+
+                        # 必要であればここで TP/FP/FN/TN 相当のロジックに変換可能
+                        # 例: 閾値0.5と仮定した場合の解釈
+                        # bin < 0.5 の範囲: n_pos -> FN (見逃し), n_neg -> TN
+                        # bin >= 0.5 の範囲: n_pos -> TP, n_neg -> FP (誤検知)
+                        
+                        # ここではシンプルに分布と正解率を保存
+                        rows.append({
+                            'epoch': epoch,
+                            'model_type': model_type,
+                            'pred_type': pred_type,
+                            'class_name': class_name,
+                            'bin_range': bin_name,
+                            'count': count,
+                            'pos_labels': n_pos,
+                            'neg_labels': n_neg,
+                            'pos_ratio': n_pos / count if count > 0 else 0
+                        })
+
+        if len(rows) > 0:
+            df = pd.DataFrame(rows)
+            csv_path = os.path.join(self.exp_dir, f"prediction_distribution_epoch_{epoch}.csv")
+            df.to_csv(csv_path, index=False)
+            print(f"Prediction distribution saved to {csv_path}")
+
+    def _log_prediction_distribution(self):
+        """Log prediction distribution statistics."""
+        bins = self.prediction_bins
+        # binの中心値を計算しておく
+        bin_centers = (np.array(bins[:-1]) + np.array(bins[1:])) / 2
+
+        for model_type in ['student', 'teacher']:
+            for pred_type in ['strong', 'weak']:
+                dist = self.prediction_distribution[model_type][pred_type]
+
+                for class_name, stats in dist.items():
+                    counts = stats['counts']
+                    pos_labels = stats['pos_labels']
+                    total_count = np.sum(counts)
+
+                    for i in range(len(bins) - 1):
+                        bin_name = f"{bins[i]:.1f}-{bins[i+1]:.1f}"
+                        
+                        # Log counts
+                        self.log(f"val/dist/{model_type}/{pred_type}/{class_name}/{bin_name}_count", counts[i])
+                        
+                        # Log accuracy within bin (Calibration)
+                        # そのビンの中でどれだけ正解ラベルが1だったか（予測確率と一致しているのが理想）
+                        if counts[i] > 0:
+                            accuracy_in_bin = pos_labels[i] / counts[i]
+                            self.log(f"val/dist/{model_type}/{pred_type}/{class_name}/{bin_name}_pos_ratio", accuracy_in_bin)
+
+                    # Log mean prediction value (approximate)
+                    if total_count > 0:
+                        mean_pred = np.sum(counts * bin_centers) / total_count
+                        self.log(f"val/dist/{model_type}/{pred_type}/{class_name}/mean_pred", mean_pred)
 
     def take_log(self, mels):
         """Apply the log transformation to mel spectrograms.
@@ -828,7 +989,9 @@ class SEDTask4(pl.LightningModule):
                 loss_pseudo_clip = criterion(s_c, L_Clip_c)
                 loss_pseudo_frame = criterion(s_f,L_Frame_f)
                 
-                loss_pseudo = self.sat_w_u * (loss_pseudo_clip + loss_pseudo_frame)
+                # loss_pseudo = self.sat_w_u * (loss_pseudo_clip + loss_pseudo_frame)
+                # MeanTeacherと一緒にRamp-up
+                loss_pseudo = weight * (loss_pseudo_clip + loss_pseudo_frame)
 
                 # ロギング
                 self.log("train/sat/loss_pseudo_clip", loss_pseudo_clip)
@@ -1006,6 +1169,18 @@ class SEDTask4(pl.LightningModule):
                 weak_preds_teacher[mask_weak], labels_weak.long()
             )
 
+            # Accumulate prediction distribution for weak predictions
+            self._accumulate_prediction_distribution(
+                weak_preds_student[mask_weak], labels_weak,
+                model_type='student', pred_type='weak',
+                valid_class_mask=valid_class_mask[mask_weak]
+            )
+            self._accumulate_prediction_distribution(
+                weak_preds_teacher[mask_weak], labels_weak,
+                model_type='teacher', pred_type='weak',
+                valid_class_mask=valid_class_mask[mask_weak]
+            )
+
         if torch.any(mask_strong):
             loss_strong_student = self.supervised_loss(
                 strong_preds_student[mask_strong], labels[mask_strong]
@@ -1065,6 +1240,18 @@ class SEDTask4(pl.LightningModule):
 
             self.val_tune_sebbs_teacher.update(
                 scores_unprocessed_teacher_strong
+            )
+
+            # Accumulate prediction distribution for strong predictions
+            self._accumulate_prediction_distribution(
+                strong_preds_student[mask_strong], labels[mask_strong],
+                model_type='student', pred_type='strong',
+                valid_class_mask=valid_class_mask[mask_strong]
+            )
+            self._accumulate_prediction_distribution(
+                strong_preds_teacher[mask_strong], labels[mask_strong],
+                model_type='teacher', pred_type='strong',
+                valid_class_mask=valid_class_mask[mask_strong]
             )
 
         # SAT有効時の疑似ラベル品質評価
@@ -1398,12 +1585,19 @@ class SEDTask4(pl.LightningModule):
         self.log("val/teacher/segment_mauc/sed_scores_eval", segment_mauc_teacher)
         self.log("val/teacher/segment_mpauc/sed_scores_eval", segment_mpauc_teacher)
 
+        # Log and save prediction distribution
+        self._log_prediction_distribution()
+        self._save_prediction_distribution_csv(self.current_epoch)
+
         # free the buffers
         self.val_buffer_sed_scores_eval_student = {}
         self.val_buffer_sed_scores_eval_teacher = {}
 
         self.get_weak_student_f1_seg_macro.reset()
         self.get_weak_teacher_f1_seg_macro.reset()
+
+        # Reset prediction distribution for next epoch
+        self.prediction_distribution = self._init_prediction_distribution()
 
         return obj_metric
 
