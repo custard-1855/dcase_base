@@ -668,7 +668,7 @@ class SEDTask4(pl.LightningModule):
         # --- SAT (Self-Adaptive Theresholdings) Logic ---
         loss_pseudo = torch.tensor(0.0).to(self.device)
 
-        if self.sat_enabled:
+        if self.sat_enabled and self.current_epoch >= self.hparams["sat"].get("sat_start_epoch", 0):
             # ラベルなしデータ部分のみ抽出
             q_c = weak_preds_teacher[mask_pure_unlabeled][:, :self.K]   # (B_u, K)
             q_f = strong_preds_teacher[mask_pure_unlabeled][:, :self.K, :] # (B_u, K, T)
@@ -700,7 +700,11 @@ class SEDTask4(pl.LightningModule):
 
                 # 2. Generate Clip Psuedo Labels
                 L_Clip_c = (q_c > adaptive_clip_thresholds).float() # (B_u, K)
-                
+
+                # 発火率を確認
+                positive_ratio = L_Clip_c.sum() / L_Clip_c.numel()
+                self.log("debug/pseudo_label_positive_ratio", positive_ratio)
+
                 # 3. Generate Frame Pseudo Labels (GMM / Fallback) 
                 adaptive_frame_thresholds_k = torch.zeros(K, device=self.device)
 
@@ -834,6 +838,9 @@ class SEDTask4(pl.LightningModule):
                 # 疑似ラベルの密度（どのくらいの割合が1になったか）
                 self.log("train/sat/L_Clip_c_ratio", L_Clip_c.mean())
                 self.log("train/sat/L_Frame_f_ratio", L_Frame_f.mean())
+        else:
+            loss_pseudo = torch.tensor(0.0).to(self.device)
+
         
         tot_loss = tot_loss_supervised + tot_self_loss + loss_pseudo
 
