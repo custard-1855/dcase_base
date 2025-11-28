@@ -798,8 +798,6 @@ class SEDTask4(pl.LightningModule):
                         features_SA = features_unlabeled
 
                 elif self.strong_augment_type == "frame_shift_time_mask":
-                    # TimeMask等はEmbeddings（時間軸を持たない場合）には影響しない場合が多いが、
-                    # FrameShiftは時間ズレを起こすため、Embeddingsが時間情報を持つならShiftが必要。
                     if random.random() < float(self.strong_augment_prob):
                         features_SA, embeddings_SA, c_aug, f_aug = SpecAugment(
                             features_unlabeled,
@@ -1012,18 +1010,6 @@ class SEDTask4(pl.LightningModule):
             )
             self.get_weak_teacher_f1_seg_macro(
                 weak_preds_teacher[mask_weak], labels_weak.long()
-            )
-
-            # Accumulate prediction distribution for weak predictions
-            self._accumulate_prediction_distribution(
-                weak_preds_student[mask_weak], labels_weak,
-                model_type='student', pred_type='weak',
-                valid_class_mask=valid_class_mask[mask_weak]
-            )
-            self._accumulate_prediction_distribution(
-                weak_preds_teacher[mask_weak], labels_weak,
-                model_type='teacher', pred_type='weak',
-                valid_class_mask=valid_class_mask[mask_weak]
             )
 
         if torch.any(mask_strong):
