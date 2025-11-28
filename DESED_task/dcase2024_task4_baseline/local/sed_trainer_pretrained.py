@@ -290,10 +290,6 @@ class SEDTask4(pl.LightningModule):
         self.test_buffer_detections_thres05_student = pd.DataFrame()
         self.test_buffer_detections_thres05_teacher = pd.DataFrame()
 
-        # Prediction distribution tracking for validation
-        self.prediction_distribution = self._init_prediction_distribution()
-        self.prediction_bins = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.0]
-
     _exp_dir = None
 
     @property
