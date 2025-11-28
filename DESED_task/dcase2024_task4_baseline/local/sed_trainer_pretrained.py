@@ -201,8 +201,8 @@ class SEDTask4(pl.LightningModule):
 
         # CMT parameters
         self.cmt_enabled = self.hparams.get("cmt", {}).get("enabled", False)
-        self.cmt_phi_clip = self.hparams.get("cmt", {}).get("phi_clip", 0.5)
-        self.cmt_phi_frame = self.hparams.get("cmt", {}).get("phi_frame", 0.5)
+        self.cmt_phi_clip = float(self.hparams.get("cmt", {}).get("phi_clip", 0.5))
+        self.cmt_phi_frame = float(self.hparams.get("cmt", {}).get("phi_frame", 0.5))
         self.cmt_scale = self.hparams.get("cmt", {}).get("scale", False)
         self.cmt_warmup_epochs = int(self.hparams.get("cmt", {}).get("warmup_epochs", 50))
 
