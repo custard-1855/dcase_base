@@ -90,10 +90,10 @@ echo ""
 ################################################################################
 echo "[3/4] Running: sat"
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/MixStyle_SEBBS_warm-up-0_phi-frame-0.3 \
+    --wandb_dir ${BASE_WANDB_DIR}/MixStyle_SEBBS_warm-up-0_phi-frame-0.4 \
     --cmt \
     --warmup_epochs 0 \
-    --phi_frame 0.3 \
+    --phi_frame 0.4 \
     --attn_type ${ATTN_TYPE} \
     --attn_deepen ${ATTN_DEEPEN} \
     --mixstyle_type ${MIXSTYLE_TYPE} \
@@ -107,9 +107,9 @@ echo ""
 ################################################################################
 echo "[3/4] Running: sat"
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/MixStyle_SEBBS_warm-up-50_phi-frame-0.3 \
+    --wandb_dir ${BASE_WANDB_DIR}/MixStyle_SEBBS_warm-up-50_phi-frame-0.4 \
     --cmt \
-    --phi_frame 0.3 \
+    --phi_frame 0.4 \
     --warmup_epochs 50 \
     --attn_type ${ATTN_TYPE} \
     --attn_deepen ${ATTN_DEEPEN} \
