@@ -895,35 +895,38 @@ class SEDTask4(pl.LightningModule):
                                     f"distribution/pred_hist_class_{k}": hist
                                 })
 
+                        # GMMを無効化して検証
+                        adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8
+
                         # GMMに十分なサンプルがあるか確認
-                        if active_preds_k.numel() >= 20:
-                            try:
-                                X = active_preds_k.detach().cpu().numpy().reshape(-1, 1)
-                                gmm = GaussianMixture(
-                                    n_components=2, 
-                                    max_iter=self.gmm_max_iter, 
-                                    n_init=self.gmm_n_init, 
-                                    covariance_type='full', 
-                                    tol=self.gmm_tol,  
-                                    reg_covar=self.gmm_reg_covar,
-                                    random_state=42)
-                                gmm.fit(X)
+                        # if active_preds_k.numel() >= 20:
+                        #     try:
+                        #         X = active_preds_k.detach().cpu().numpy().reshape(-1, 1)
+                        #         gmm = GaussianMixture(
+                        #             n_components=2, 
+                        #             max_iter=self.gmm_max_iter, 
+                        #             n_init=self.gmm_n_init, 
+                        #             covariance_type='full', 
+                        #             tol=self.gmm_tol,  
+                        #             reg_covar=self.gmm_reg_covar,
+                        #             random_state=42)
+                        #         gmm.fit(X)
                                 
-                                if gmm.converged_:
-                                    idx_active = np.argmax(gmm.means_)                                
-                                    mu_a_k = float(gmm.means_[idx_active][0])
-                                    adaptive_frame_thresholds_k[k] = mu_a_k
-                                else:
-                                    adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8                                
-                                    print("Warning: Not converged")
-                            except Exception as e:
-                                adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8
-                                print(f"GMM fit failed for class {k}: {e}")
-                        else:
-                            # サンプル不足
-                            adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8
-                            if self.current_epoch > 30:
-                                print("[DEBUG] lack sample: ", active_preds_k.numel())
+                        #         if gmm.converged_:
+                        #             idx_active = np.argmax(gmm.means_)                                
+                        #             mu_a_k = float(gmm.means_[idx_active][0])
+                        #             adaptive_frame_thresholds_k[k] = mu_a_k
+                        #         else:
+                        #             adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8                                
+                        #             print("Warning: Not converged")
+                        #     except Exception as e:
+                        #         adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8
+                        #         print(f"GMM fit failed for class {k}: {e}")
+                        # else:
+                        #     # サンプル不足
+                        #     adaptive_frame_thresholds_k[k] = adaptive_clip_thresholds[k] * 0.8
+                        #     if self.current_epoch > 30:
+                        #         print("[DEBUG] lack sample: ", active_preds_k.numel())
 
                         self.log(f"debug/adaptive_clip_thresholds_{k}", adaptive_clip_thresholds[k])
                         self.log(f"debug/adaptive_frame_thresholds_{k}", adaptive_frame_thresholds_k[k])
