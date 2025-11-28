@@ -199,6 +199,14 @@ class SEDTask4(pl.LightningModule):
             self.gmm_reg_covar = float(self.hparams.get("sat", {}).get("gmm_reg_covar", 1e-6))
             self.gmm_tol = float(self.hparams.get("sat", {}).get("gmm_tol", 1e-3))
 
+        # CMT parameters
+        self.cmt_enabled = self.hparams.get("cmt", {}).get("enabled", False)
+        self.cmt_phi_clip = self.hparams.get("cmt", {}).get("phi_clip", 0.5)
+        self.cmt_phi_frame = self.hparams.get("cmt", {}).get("phi_frame", 0.5)
+        self.cmt_scale = self.hparams.get("cmt", {}).get("scale", False)
+        self.cmt_warmup_epochs = int(self.hparams.get("cmt", {}).get("warmup_epochs", 50))
+
+
         # cSEBBs param
         self.sebbs_enabled = self.hparams.get("sebbs", {}).get("enabled", False)
 
@@ -656,14 +664,65 @@ class SEDTask4(pl.LightningModule):
         if self.current_epoch < self.hparams["training"]["epoch_decay"]:
             weight *= self.scheduler["scheduler"]._get_scaling_factor()
 
-        strong_self_sup_loss = self.selfsup_loss(
-            strong_preds_student[mask_consistency],
-            strong_preds_teacher.detach()[mask_consistency],
-        )
-        weak_self_sup_loss = self.selfsup_loss(
-            weak_preds_student[mask_consistency],
-            weak_preds_teacher.detach()[mask_consistency],
-        )
+        cmt_active = self.cmt_enabled and (self.current_epoch >= self.cmt_warmup_epochs)
+
+        # # CMT
+        if cmt_active:
+            # Apply CMT processing
+            with torch.no_grad():
+                # Apply CMT postprocessing to teacher predictions
+                # full_mask_unlabeledに修正
+                teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
+                    weak_preds_teacher[mask_consistency], 
+                    strong_preds_teacher[mask_consistency],
+                    phi_clip=self.cmt_phi_clip,
+                    phi_frame=self.cmt_phi_frame,
+                )
+                
+                # Compute confidence weights
+                confidence_w, confidence_s = self.compute_cmt_confidence_weights(
+                    weak_preds_teacher[mask_consistency],
+                    strong_preds_teacher[mask_consistency],
+                    teacher_pseudo_w,
+                    teacher_pseudo_s
+                )
+
+                # # Debug statistics
+                # pseudo_label_ratio_w = teacher_pseudo_w.mean()
+                # pseudo_label_ratio_s = teacher_pseudo_s.mean()
+                # confidence_w_mean = confidence_w.mean()
+                # confidence_s_mean = confidence_s.mean()
+                # teacher_pred_w_mean = weak_preds_teacher[mask_unlabeled].mean()
+                # teacher_pred_s_mean = strong_preds_teacher[mask_unlabeled].mean()
+            
+            # Compute CMT consistency loss with confidence weighting
+            weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
+                weak_preds_student[mask_consistency],
+                strong_preds_student[mask_consistency],
+                teacher_pseudo_w,
+                teacher_pseudo_s,
+                confidence_w,
+                confidence_s
+            )
+        else:
+            # Original Mean Teacher consistency loss
+            strong_self_sup_loss = self.selfsup_loss(
+                strong_preds_student[mask_consistency],
+                strong_preds_teacher.detach()[mask_consistency],
+            )
+            weak_self_sup_loss = self.selfsup_loss(
+                weak_preds_student[mask_consistency],
+                weak_preds_teacher.detach()[mask_consistency],
+            )
+
+        # strong_self_sup_loss = self.selfsup_loss(
+        #     strong_preds_student[mask_consistency],
+        #     strong_preds_teacher.detach()[mask_consistency],
+        # )
+        # weak_self_sup_loss = self.selfsup_loss(
+        #     weak_preds_student[mask_consistency],
+        #     weak_preds_teacher.detach()[mask_consistency],
+        # )
         tot_self_loss = (strong_self_sup_loss + weak_self_sup_loss) * weight
 
 
@@ -869,6 +928,103 @@ class SEDTask4(pl.LightningModule):
         self.log("train/step/current_epoch", self.current_epoch)
 
         return tot_loss
+
+
+    def apply_cmt_postprocessing(self, y_w, y_s, phi_clip=0.5, phi_frame=0.5):
+        """
+        Apply Confident Mean Teacher postprocessing.
+        y_w: (batch, classes)
+        y_s: (batch, classes, frames)
+        """
+        print("[DEBUG] y_w, y_s: ", y_s.shape(), y_s.shape())
+        # Step 1: Clip-level thresholding
+        y_tilde_w = (y_w > phi_clip).float()
+        
+        # Expand weak pseudo-labels to match strong shape: (batch, classes, 1) -> (batch, classes, frames)
+        y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s)
+
+        # Step 2 & 3: Frame-level thresholding with Weak constraint
+        # Weakが1かつStrongが閾値を超えた場合のみ1
+        y_s_binary = y_w_expanded * (y_s > phi_frame).float()
+
+        # Step 4: Median filtering
+        # 注意: GPU->CPU変換はコストがかかるが、scipyフィルタを使うなら必須
+        y_tilde_s_list = []
+        original_device = y_s.device
+
+        # y_s_binary: (batch, classes, frames)
+        y_s_numpy = y_s_binary.detach().cpu().numpy()
+
+        for i in range(y_s.shape[0]):
+            # (classes, frames) -> (frames, classes) に転置してフィルタ適用
+            # 多くのSED実装では (frames, classes) で処理されることが多い
+            sample = y_s_numpy[i].transpose(1, 0) 
+            
+            # self.median_filterの実装に依存するが、
+            # 時間軸(frames)方向のみにフィルタがかかるように注意が必要
+            filtered = self.median_filter(sample) 
+            y_tilde_s_list.append(filtered)
+
+        y_tilde_s = np.stack(y_tilde_s_list, axis=0) # (batch, frames, classes)
+        y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
+        y_tilde_s = y_tilde_s.transpose(1, 2) # -> (batch, classes, frames)
+
+        return y_tilde_w, y_tilde_s
+
+    def compute_cmt_confidence_weights(self, y_w, y_s, y_tilde_w, y_tilde_s):
+        """
+        Compute confidence weights based on teacher's certainty.
+        Correction: High confidence for both positive (near 1) and negative (near 0) predictions.
+        """
+        # --- 修正箇所: 負例（0予測）の信頼度も考慮する ---
+        
+        # Weak Confidence:
+        # 予測が1なら確率はy_w, 予測が0なら確率は(1 - y_w)
+        # これにより、y_w=0.01 (y_tilde=0) の時、信頼度は 0.99 となる
+        c_w = torch.where(y_tilde_w > 0.5, y_w, 1.0 - y_w)
+
+        # Strong Confidence:
+        y_w_prob_expanded = y_w.unsqueeze(-1).expand_as(y_s)
+        
+        # 教師のStrong予測自体の確信度
+        conf_s_frame = torch.where(y_tilde_s > 0.5, y_s, 1.0 - y_s)
+        
+        # 最終的なStrong重み: フレーム単体の確信度 × クリップ全体の確信度(Weak)
+        # Weakが0ならStrongも信頼できないとする場合は y_w_prob_expanded を掛ける
+        # （実装方針によるが、元のコードの意図を汲むならWeak確率を乗算するのが妥当）
+        c_s = conf_s_frame * y_w_prob_expanded
+
+        return c_w, c_s
+
+    def compute_cmt_consistency_loss(self, student_w, student_s, teacher_pseudo_w, teacher_pseudo_s, 
+                                   confidence_w, confidence_s):
+        """
+        Compute weighted BCE loss.
+        """
+        # Weak Loss
+        bce_w = F.binary_cross_entropy(student_w, teacher_pseudo_w, reduction='none')
+        weighted_bce_w = confidence_w * bce_w
+
+        if self.cmt_scale:
+            # 信頼度が0より大きいサンプルのみで平均を取る（重要）
+            mask_w = (confidence_w > 0).float()
+            num_nonzero_w = mask_w.sum().clamp(min=1.0)
+            loss_w_con = weighted_bce_w.sum() / num_nonzero_w
+        else:
+            loss_w_con = weighted_bce_w.mean()
+        
+        # Strong Loss
+        bce_s = F.binary_cross_entropy(student_s, teacher_pseudo_s, reduction='none')
+        weighted_bce_s = confidence_s * bce_s
+
+        if self.cmt_scale:
+            mask_s = (confidence_s > 0).float()
+            num_nonzero_s = mask_s.sum().clamp(min=1.0)
+            loss_s_con = weighted_bce_s.sum() / num_nonzero_s
+        else:
+            loss_s_con = weighted_bce_s.mean()
+        
+        return loss_w_con, loss_s_con
 
     def on_before_zero_grad(self, *args, **kwargs):
         # update EMA teacher
