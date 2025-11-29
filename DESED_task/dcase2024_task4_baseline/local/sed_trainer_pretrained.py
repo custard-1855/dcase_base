@@ -673,16 +673,16 @@ class SEDTask4(pl.LightningModule):
                 # Apply CMT postprocessing to teacher predictions
                 # full_mask_unlabeledに修正
                 teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
-                    weak_preds_teacher[mask_consistency], 
-                    strong_preds_teacher[mask_consistency],
+                    weak_preds_teacher[mask_pure_unlabeled], 
+                    strong_preds_teacher[mask_pure_unlabeled],
                     phi_clip=self.cmt_phi_clip,
                     phi_frame=self.cmt_phi_frame,
                 )
                 
                 # Compute confidence weights
                 confidence_w, confidence_s = self.compute_cmt_confidence_weights(
-                    weak_preds_teacher[mask_consistency],
-                    strong_preds_teacher[mask_consistency],
+                    weak_preds_teacher[mask_pure_unlabeled],
+                    strong_preds_teacher[mask_pure_unlabeled],
                     teacher_pseudo_w,
                     teacher_pseudo_s
                 )
@@ -697,8 +697,8 @@ class SEDTask4(pl.LightningModule):
             
             # Compute CMT consistency loss with confidence weighting
             weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
-                weak_preds_student[mask_consistency],
-                strong_preds_student[mask_consistency],
+                weak_preds_student[mask_pure_unlabeled],
+                strong_preds_student[mask_pure_unlabeled],
                 teacher_pseudo_w,
                 teacher_pseudo_s,
                 confidence_w,
@@ -707,12 +707,12 @@ class SEDTask4(pl.LightningModule):
         else:
             # Original Mean Teacher consistency loss
             strong_self_sup_loss = self.selfsup_loss(
-                strong_preds_student[mask_consistency],
-                strong_preds_teacher.detach()[mask_consistency],
+                strong_preds_student[mask_pure_unlabeled],
+                strong_preds_teacher.detach()[mask_pure_unlabeled],
             )
             weak_self_sup_loss = self.selfsup_loss(
-                weak_preds_student[mask_consistency],
-                weak_preds_teacher.detach()[mask_consistency],
+                weak_preds_student[mask_pure_unlabeled],
+                weak_preds_teacher.detach()[mask_pure_unlabeled],
             )
 
         # strong_self_sup_loss = self.selfsup_loss(
@@ -904,7 +904,7 @@ class SEDTask4(pl.LightningModule):
             loss_pseudo = torch.tensor(0.0).to(self.device)
 
         
-        tot_loss = tot_loss_supervised + tot_self_loss + loss_pseudo
+        tot_loss = tot_loss_supervised + tot_self_loss #+ loss_pseudo
 
         # 教師あり学習の損失
         self.log("train/student/loss_strong", loss_strong)
