@@ -21,60 +21,62 @@ echo "=========================================="
 echo ""
 
 
+# 後で200で回す. 収束の遅さが学習精度低下の原因かもしれない
+# ################################################################################
+# # 実験1: CMT 200
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/CMT \
+#     --cmt \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+
+# echo ""
+
 ################################################################################
-# 実験1: CMT pure_unlabeled
+# 実験2: Nomal
 ################################################################################
-echo "[1/4] Running: sat"
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/CMT/mask_pure_unlabeled \
+    --wandb_dir ${BASE_WANDB_DIR}/Normal \
+    2>&1 | tee ${LOG_DIR}/75${TIMESTAMP}.log
+
+echo ""
+
+################################################################################
+# 実験3: MixStyle
+################################################################################
+uv run train_pretrained.py \
+    --wandb_dir ${BASE_WANDB_DIR}/MixStyle \
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
+    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+
+echo ""
+
+################################################################################
+# 実験4: CMT + SEBBs
+################################################################################
+uv run train_pretrained.py \
+    --wandb_dir ${BASE_WANDB_DIR}/CMT_frame-0.5_warm-up-50 + SEBBs \
     --cmt \
-    2>&1 | tee ${LOG_DIR}/75${TIMESTAMP}.log
+    --phi_frame 0.5 \
+    --warmup_epochs 50 \
+    --sebbs \
+    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
 echo ""
 
+
 ################################################################################
-# 実験2: Nomal(MeanTeacher) pure_unlabeled
+# 実験4: SEBBs
 ################################################################################
-echo "[2/4] Running: sat"
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/Normal/mask_pure_unlabeled \
-    2>&1 | tee ${LOG_DIR}/75${TIMESTAMP}.log
+    --wandb_dir ${BASE_WANDB_DIR}/SEBBs \
+    --sebbs \
+    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
 echo ""
 
-# ################################################################################
-# # 実験3: CMT + MixStyle + SEBBs
-# ################################################################################
-# echo "[3/4] Running: sat"
-# uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/MixStyle_SEBBS_warm-up-0_phi-frame-0.4 \
-#     --cmt \
-#     --warmup_epochs 0 \
-#     --phi_frame 0.4 \
-#     --attn_type ${ATTN_TYPE} \
-#     --attn_deepen ${ATTN_DEEPEN} \
-#     --mixstyle_type ${MIXSTYLE_TYPE} \
-#     --sebbs \
-#     2>&1 | tee ${LOG_DIR}/75${TIMESTAMP}.log
-
-# echo ""
-
-# ################################################################################
-# # 実験4: CMT + MixStyle + SEBBs
-# ################################################################################
-# echo "[3/4] Running: sat"
-# uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/MixStyle_SEBBS_warm-up-50_phi-frame-0.4 \
-#     --cmt \
-#     --phi_frame 0.4 \
-#     --warmup_epochs 50 \
-#     --attn_type ${ATTN_TYPE} \
-#     --attn_deepen ${ATTN_DEEPEN} \
-#     --mixstyle_type ${MIXSTYLE_TYPE} \
-#     --sebbs \
-#     2>&1 | tee ${LOG_DIR}/75${TIMESTAMP}.log
-
-# echo ""
 
 
 # ################################################################################
