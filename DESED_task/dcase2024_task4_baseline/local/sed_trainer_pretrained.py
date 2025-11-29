@@ -666,23 +666,22 @@ class SEDTask4(pl.LightningModule):
 
         cmt_active = self.cmt_enabled and (self.current_epoch >= self.cmt_warmup_epochs)
 
-        # # CMT
+        # # CMT # こちらも一時的にmask_consistencyに戻す. 比較検証のため
         if cmt_active:
             # Apply CMT processing
             with torch.no_grad():
                 # Apply CMT postprocessing to teacher predictions
-                # full_mask_unlabeledに修正
                 teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
-                    weak_preds_teacher[mask_pure_unlabeled], 
-                    strong_preds_teacher[mask_pure_unlabeled],
+                    weak_preds_teacher[mask_consistency], 
+                    strong_preds_teacher[mask_consistency],
                     phi_clip=self.cmt_phi_clip,
                     phi_frame=self.cmt_phi_frame,
                 )
                 
                 # Compute confidence weights
                 confidence_w, confidence_s = self.compute_cmt_confidence_weights(
-                    weak_preds_teacher[mask_pure_unlabeled],
-                    strong_preds_teacher[mask_pure_unlabeled],
+                    weak_preds_teacher[mask_consistency],
+                    strong_preds_teacher[mask_consistency],
                     teacher_pseudo_w,
                     teacher_pseudo_s
                 )
@@ -697,8 +696,8 @@ class SEDTask4(pl.LightningModule):
             
             # Compute CMT consistency loss with confidence weighting
             weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
-                weak_preds_student[mask_pure_unlabeled],
-                strong_preds_student[mask_pure_unlabeled],
+                weak_preds_student[mask_consistency],
+                strong_preds_student[mask_consistency],
                 teacher_pseudo_w,
                 teacher_pseudo_s,
                 confidence_w,
