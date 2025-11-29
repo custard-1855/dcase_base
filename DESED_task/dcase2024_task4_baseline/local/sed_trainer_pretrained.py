@@ -706,13 +706,14 @@ class SEDTask4(pl.LightningModule):
             )
         else:
             # Original Mean Teacher consistency loss
+            # 一時的にmask_consistencyに戻し,純粋な精度を見る
             strong_self_sup_loss = self.selfsup_loss(
-                strong_preds_student[mask_pure_unlabeled],
-                strong_preds_teacher.detach()[mask_pure_unlabeled],
+                strong_preds_student[mask_consistency],
+                strong_preds_teacher.detach()[mask_consistency],
             )
             weak_self_sup_loss = self.selfsup_loss(
-                weak_preds_student[mask_pure_unlabeled],
-                weak_preds_teacher.detach()[mask_pure_unlabeled],
+                weak_preds_student[mask_consistency],
+                weak_preds_teacher.detach()[mask_consistency],
             )
 
         # strong_self_sup_loss = self.selfsup_loss(
