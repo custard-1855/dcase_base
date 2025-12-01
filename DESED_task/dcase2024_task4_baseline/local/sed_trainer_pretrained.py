@@ -996,6 +996,12 @@ class SEDTask4(pl.LightningModule):
         # c_s = conf_s_frame * y_w_prob_expanded
         c_s = conf_s_frame * c_w_expanded
 
+        neg_weight_scale = 0.5  # 0.1~0.5くらいで調整
+        is_negative = (y_tilde_s < 0.5).float()
+        
+        scale_factor = is_negative * neg_weight_scale + (1.0 - is_negative) * 1.0
+        c_s = c_s * scale_factor
+
         return c_w, c_s
 
     def compute_cmt_consistency_loss(self, student_w, student_s, teacher_pseudo_w, teacher_pseudo_s, 
