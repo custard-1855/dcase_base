@@ -11,30 +11,6 @@ cmt:
   scale: False
   warmup_epochs: 0
 
-sat:
-  enabled: False
-  lambda: 0.999
-  w_u: 0.5
-  sat_start_epoch: 20
-  # Strong augmentation type selection
-  strong_augment_type: "cutmix"   # Options: "cutmix", "frame_shift_time_mask", "none"
-  # CutMix strong augmentation for SAT
-  cutmix_alpha: 1.0       # Beta distribution parameter for CutMix
-  cutmix_prob: 1.0 #0.5        # Probability of applying CutMix (1.0 = always apply)
-  # Frame Shift + Time Masking parameters
-  strong_augment_prob: 1.0  # Probability of applying Frame Shift + Time Masking
-  frame_shift_std: 90       # Standard deviation for Gaussian frame shift
-  time_mask_max: 5          # Maximum length of time mask
-  # gmm_fixed: False
-  # GMM parameters for adaptive threshold calculation (Eq 7-9)
-  gmm_n_init: 5             # Number of GMM initializations (higher = more stable but slower)
-  gmm_max_iter: 100          # Maximum EM iterations for GMM convergence
-  gmm_reg_covar: 1e-6     # Covariance regularization (higher = more stable, lower = more flexible)
-  gmm_tol: 1e-3             # Convergence tolerance (lower = stricter convergence)
-
-sebbs:
-  enabled: false
-
 
 training:  
   # バッチサイズ（論文推奨）
@@ -165,7 +141,3 @@ net:
   # wandb
   use_wandb: True
   wandb_dir: "any"
-  # for MixStyle
-  attn_type: default
-  attn_deepen: true
-  mixstyle_type: resMix
