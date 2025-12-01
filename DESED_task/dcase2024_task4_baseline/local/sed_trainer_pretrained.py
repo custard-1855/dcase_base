@@ -991,7 +991,10 @@ class SEDTask4(pl.LightningModule):
         # 最終的なStrong重み: フレーム単体の確信度 × クリップ全体の確信度(Weak)
         # Weakが0ならStrongも信頼できないとする場合は y_w_prob_expanded を掛ける
         # （実装方針によるが、元のコードの意図を汲むならWeak確率を乗算するのが妥当）
-        c_s = conf_s_frame * y_w_prob_expanded
+
+        c_w_expanded = c_w.unsqueeze(-1).expand_as(y_s)
+        # c_s = conf_s_frame * y_w_prob_expanded
+        c_s = conf_s_frame * c_w_expanded
 
         return c_w, c_s
 
