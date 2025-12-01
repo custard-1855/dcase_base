@@ -670,28 +670,6 @@ def prepare_run(argv=None):
     parser.add_argument(
         "--eval_from_checkpoint", default=None, help="Evaluate the model specified"
     )
-    # 実験管理用
-    # CMT
-    parser.add_argument(
-        "--cmt", action="store_true", default=False
-    )
-    parser.add_argument(
-        "--phi_frame", default=0.5
-    )
-    parser.add_argument(
-        "--warmup_epochs", default=0
-    )
-    # MixStyle
-    parser.add_argument(
-        "--attn_type", default="default",
-    )
-    parser.add_argument(
-        "--attn_deepen", 
-        default=2,
-    )
-    parser.add_argument(
-        "--mixstyle_type", default="disabled",
-    )
 
     # sat
     parser.add_argument(
@@ -741,10 +719,6 @@ def prepare_run(argv=None):
         help="Probability of applying time masking"
     )
 
-
-    parser.add_argument(
-        "--sebbs", action="store_true", default=False
-    )
     parser.add_argument(
         "--wandb_dir"
     )
@@ -782,20 +756,6 @@ def prepare_run(argv=None):
     # WandB用に設定ファイルパスを保存
     configs["config_file_path"] = os.path.abspath(args.confs)
 
-    # CMT
-    if args.cmt is not None:
-        configs["cmt"]["enabled"] = args.cmt
-    if args.cmt is not None:
-        configs["cmt"]["phi_frame"] = args.phi_frame
-    if args.cmt is not None:
-        configs["cmt"]["warmup_epochs"] = args.warmup_epochs
-    # MixStyle
-    if args.attn_type is not None:
-        configs["net"]["attn_type"] = args.attn_type
-    if args.attn_deepen is not None:
-        configs["net"]["attn_deepen"] = args.attn_deepen
-    if args.mixstyle_type is not None:
-        configs["net"]["mixstyle_type"] = args.mixstyle_type
     # sat
     if args.sat is not None:
         configs["sat"]["enabled"] = args.sat
@@ -817,8 +777,6 @@ def prepare_run(argv=None):
     if args.time_mask_prob is not None:
         configs["sat"]["time_mask_prob"] = args.time_mask_prob
     # other
-    if args.sebbs is not None:
-        configs["sebbs"]["enabled"] = args.sebbs
     if args.wandb_dir is not None:
         configs["net"]["wandb_dir"] = args.wandb_dir
 

@@ -4,13 +4,6 @@ pretrained:
   freezed: True
   extracted_embeddings_dir: ./embeddings
 
-cmt:
-  enabled: False          # CMTを有効化
-  phi_clip: 0.5             # クリップレベル閾値 (論文では0.5)
-  phi_frame: 0.5          # フレームレベル閾値 (論文では0.5)
-  scale: False
-  warmup_epochs: 0
-
 sat:
   enabled: False
   lambda: 0.999
@@ -31,9 +24,6 @@ sat:
   gmm_max_iter: 100          # Maximum EM iterations for GMM convergence
   gmm_reg_covar: 1e-6     # Covariance regularization (higher = more stable, lower = more flexible)
   gmm_tol: 1e-3             # Convergence tolerance (lower = stricter convergence)
-
-sebbs:
-  enabled: false
 
 
 training:  
@@ -148,8 +138,6 @@ net:
   padding: [1, 1, 1, 1, 1, 1, 1]
   stride: [1, 1, 1, 1, 1, 1, 1]
   nb_filters: [ 16, 32, 64, 128, 128, 128, 128 ]
-  # MFCCは40, log melは128
-  # pooling: [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 5 ], [ 1, 1 ], [ 1, 1 ], [ 1, 1 ] ] # for MFCC
   pooling:  [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ] ] # for log mel
   dropstep_recurrent: 0.3
   dropstep_recurrent_len: 16
@@ -165,7 +153,3 @@ net:
   # wandb
   use_wandb: True
   wandb_dir: "any"
-  # for MixStyle
-  attn_type: default
-  attn_deepen: true
-  mixstyle_type: resMix
