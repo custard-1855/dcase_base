@@ -730,14 +730,18 @@ class SEDTask4(pl.LightningModule):
         y_s: (batch, classes, frames)
         """
         # Step 1: Clip-level thresholding for unlabeled data
-        y_tilde_w = (y_w[index_weak:] > phi_clip).float()
+        # y_tilde_w = (y_w[index_weak:] > phi_clip).float()
+        y_tilde_w = (y_w > phi_clip).float()
         
         # Expand weak pseudo-labels to match strong shape: (batch, classes, 1) -> (batch, classes, frames)
-        y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s[index_weak:])
+        # y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s[index_weak:])
+        y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s)
 
         # Step 2 & 3: Frame-level thresholding with Weak constraint
         # Weakが1かつStrongが閾値を超えた場合のみ1
-        y_s_binary = y_w_expanded * (y_s[index_weak:] > phi_frame).float()
+        # y_s_binary = y_w_expanded * (y_s[index_weak:] > phi_frame).float()
+        y_s_binary = y_w_expanded * (y_s > phi_frame).float()
+
 
         # Step 4: Median filtering
         y_tilde_s_list = []
@@ -746,7 +750,8 @@ class SEDTask4(pl.LightningModule):
         # y_s_binary: (batch, classes, frames)
         y_s_numpy = y_s_binary.detach().cpu().numpy()
 
-        for i in range(y_s[index_weak:].shape[0]):
+        # for i in range(y_s[index_weak:].shape[0]):
+        for i in range(y_s.shape[0]):
             # (classes, frames) -> (frames, classes) に転置してフィルタ適用
             sample = y_s_numpy[i].transpose(1, 0) 
             filtered = self.median_filter(sample) 
@@ -756,8 +761,8 @@ class SEDTask4(pl.LightningModule):
         y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
         y_tilde_s = y_tilde_s.transpose(1, 2) # -> (batch, classes, frames)
 
-        y_tilde_w = torch.cat((y_w[:index_weak], y_tilde_w), dim=0)
-        y_tilde_s = torch.cat((y_s[:index_weak], y_tilde_s), dim=0)
+        # y_tilde_w = torch.cat((y_w[:index_weak], y_tilde_w), dim=0)
+        # y_tilde_s = torch.cat((y_s[:index_weak], y_tilde_s), dim=0)
 
         return y_tilde_w, y_tilde_s
 
