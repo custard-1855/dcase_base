@@ -681,6 +681,10 @@ def prepare_run(argv=None):
     parser.add_argument(
         "--warmup_epochs", default=0
     )
+    parser.add_argument(
+        "--use_neg_sample", action="store_true", default=False
+    )
+
 
     parser.add_argument(
         "--wandb_dir"
@@ -700,6 +704,9 @@ def prepare_run(argv=None):
         configs["cmt"]["phi_frame"] = args.phi_frame
     if args.cmt is not None:
         configs["cmt"]["warmup_epochs"] = args.warmup_epochs
+    if args.cmt is not None:
+        configs["cmt"]["use_neg_sample"] = args.use_neg_sample
+
     if args.wandb_dir is not None:
         configs["net"]["wandb_dir"] = args.wandb_dir
 
