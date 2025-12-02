@@ -227,26 +227,7 @@ class CRNN(nn.Module):
 
         # input x: batch, time, freq?
         x = self.apply_specaugment(x)
-
-        #--- normal ---
-        # print("[DEBUG]: x:", x.size()) # ([57, 128, 626])
-
         x = x.transpose(1, 2).unsqueeze(1)
-        # print("[DEBUG]: x:", x.size()) # ([57, 1, 626, 128])
-
-        # print("[DEBUG]: SpecAugument:", x.size()) # ([57, 128, 626])
-
-
-        #--- MFCC ---
-        # # dct init内で宣言
-        # # (..., time, n_mels(freq)) dot (n_mels, n_mfcc) -> (..., n_nfcc, time)
-        # mfcc = torch.matmul(x.transpose(-1, -2), self.dct_mat).transpose(-1, -2)
-        # # print("[DEBUG]: mfcc:", mfcc.size()) # ([57, 40, 626])
-
-        # # x: (batch, freq, time) > (batch, time, freq) > (batch, channel, freq, time)
-        # # x = mfcc.transpose(1,2).unsqueeze(1) # transposeを追加 frame, freqの順に
-        # x = mfcc.transpose(1,2) # チャンネル追加を削除
-        # # print("[DEBUG]: mfcc:", x.size()) # ([57, 1, 40, 626]) 元は 40 > 128 # 期待されるsizeと逆
 
         #--- delta, delta delta ---
             # 時間軸でのlog mel + MFCCは効果が薄い?
@@ -271,10 +252,6 @@ class CRNN(nn.Module):
         x = self.cnn(x)
         bs, chan, frames, freq = x.size()
 
-        # normal
-        # print("[DEBUG]: cnn:", x.size()) # ([57, 128, 156, 1])
-
-        # print("[DEBUG]: cnn:", x.size()) # ([57, 128, 10, 15])
 
         if self.cnn_integration:
             x = x.reshape(bs_in, chan * nc_in, frames, freq)
@@ -288,8 +265,6 @@ class CRNN(nn.Module):
         else:
             x = x.squeeze(-1)
             x = x.permute(0, 2, 1)  # [bs, frames, chan]
-        # print("[DEBUG]: cnn:", x.size()) # ([57, 156, 128])
-
         
 
         # rnn features
