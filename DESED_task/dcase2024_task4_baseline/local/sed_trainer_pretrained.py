@@ -613,6 +613,7 @@ class SEDTask4(pl.LightningModule):
                 teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
                     weak_preds_teacher[mask_consistency], 
                     strong_preds_teacher[mask_consistency],
+                    index_weak=indx_weak,
                     phi_clip=self.cmt_phi_clip,
                     phi_frame=self.cmt_phi_frame,
                 )
@@ -634,6 +635,7 @@ class SEDTask4(pl.LightningModule):
                 # teacher_pred_s_mean = strong_preds_teacher[mask_unlabeled].mean()
             
             # Compute CMT consistency loss with confidence weighting
+            # ラベルなしを渡す
             weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
                 weak_preds_student[mask_consistency],
                 strong_preds_student[mask_consistency],
@@ -690,21 +692,21 @@ class SEDTask4(pl.LightningModule):
         return tot_loss
 
 
-    def apply_cmt_postprocessing(self, y_w, y_s, phi_clip=0.5, phi_frame=0.5):
+    def apply_cmt_postprocessing(self, y_w, y_s, index_weak, phi_clip=0.5, phi_frame=0.5):
         """
         Apply Confident Mean Teacher postprocessing.
         y_w: (batch, classes)
         y_s: (batch, classes, frames)
         """
-        # Step 1: Clip-level thresholding
-        y_tilde_w = (y_w > phi_clip).float()
+        # Step 1: Clip-level thresholding for unlabeled data
+        y_tilde_w = (y_w[index_weak:] > phi_clip).float()
         
         # Expand weak pseudo-labels to match strong shape: (batch, classes, 1) -> (batch, classes, frames)
-        y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s)
+        y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s[index_weak:])
 
         # Step 2 & 3: Frame-level thresholding with Weak constraint
         # Weakが1かつStrongが閾値を超えた場合のみ1
-        y_s_binary = y_w_expanded * (y_s > phi_frame).float()
+        y_s_binary = y_w_expanded * (y_s[index_weak:] > phi_frame).float()
 
         # Step 4: Median filtering
         y_tilde_s_list = []
@@ -723,6 +725,9 @@ class SEDTask4(pl.LightningModule):
         y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
         y_tilde_s = y_tilde_s.transpose(1, 2) # -> (batch, classes, frames)
 
+        y_tilde_w = torch.cat((y_w[:index_weak], y_tilde_w), dim=0)
+        y_tilde_s = torch.cat((y_s[:index_weak], y_tilde_s), dim=0)
+
         return y_tilde_w, y_tilde_s
 
     def compute_cmt_confidence_weights(self, y_w, y_s, y_tilde_w, y_tilde_s):
@@ -730,36 +735,22 @@ class SEDTask4(pl.LightningModule):
         Compute confidence weights based on teacher's certainty.
         Correction: High confidence for both positive (near 1) and negative (near 0) predictions.
         """
-        # --- 修正箇所: 負例（0予測）の信頼度も考慮する ---
-        
-        # Weak Confidence:
-        # 予測>phiなら確率はy_w, 予測<phiなら確率は(1 - y_w)
-        # これにより、y_w=0.01 (y_tilde=0) の時、信頼度は 0.99 となる
-        c_w = torch.where(y_tilde_w > self.cmt_phi_clip, y_w, 1.0 - y_w)
 
-        # Strong Confidence:
-        y_w_prob_expanded = y_w.unsqueeze(-1).expand_as(y_s)
-        
-        # 教師のStrong予測自体の確信度
-        # conf_s_frame = torch.where(y_tilde_s > self.cmt_phi_frame, y_s, 1.0 - y_s)
-        conf_s_frame = torch.where(y_s > self.cmt_phi_frame, y_s, 1.0 - y_s) 
-            # y_tilde_sはy_tilde_wでフィルタ済み
-            # 負例を扱うには不適なため,使用しない
-        
-        # 最終的なStrong重み: フレーム単体の確信度 × クリップ全体の確信度(Weak)
-        # Weakが0ならStrongも信頼できないとする場合は y_w_prob_expanded を掛ける
-        # （実装方針によるが、元のコードの意図を汲むならWeak確率を乗算するのが妥当）
+        # --- use neg_sample ---
+        # # Weak Confidence:
+        # c_w = torch.where(y_tilde_w > self.cmt_phi_clip, y_w, 1.0 - y_w)
 
-        c_w_expanded = c_w.unsqueeze(-1).expand_as(y_s)
-        # c_s = conf_s_frame * y_w_prob_expanded
-        c_s = conf_s_frame * c_w_expanded
+        # # Strong Confidence:
+        # y_w_prob_expanded = y_w.unsqueeze(-1).expand_as(y_s)
+        # conf_s_frame = torch.where(y_s > self.cmt_phi_frame, y_s, 1.0 - y_s) 
+    
+        # c_w_expanded = c_w.unsqueeze(-1).expand_as(y_s)
+        # c_s = conf_s_frame * c_w_expanded
 
-        # neg_weight_scale = 0.5  # 0.1~0.5くらいで調整
-        # is_negative = (y_tilde_s < 0.5).float()
-        
-        # scale_factor = is_negative * neg_weight_scale + (1.0 - is_negative) * 1.0
-        # c_s = c_s * scale_factor
-
+        # --- CMT ---
+        c_w = y_w * y_tilde_w
+        y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
+        c_s = y_s * y_w_expanded * y_tilde_s
         return c_w, c_s
 
     def compute_cmt_consistency_loss(self, student_w, student_s, teacher_pseudo_w, teacher_pseudo_s, 
