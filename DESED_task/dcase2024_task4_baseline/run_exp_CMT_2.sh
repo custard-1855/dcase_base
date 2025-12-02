@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 実験設定
-BASE_WANDB_DIR="150/only-cmt_fixMixup_neg_scale"
+BASE_WANDB_DIR="150/only-cmt_fix-mixup_fix-cmt-neg-sample"
 # MIXSTYLE_TYPE="resMix"
 # ATTN_TYPE="default"  # 基本的なattentionタイプを使用
 # ATTN_DEEPEN=2        # デフォルトの深さ
@@ -24,14 +24,14 @@ echo ""
 # only CMT
 
 
-################################################################################
-# 実験1: Nomal
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/Normal \
-    2>&1 | tee ${LOG_DIR}/75${TIMESTAMP}.log
+# ################################################################################
+# # 実験1: Nomal
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/Normal \
+#     2>&1 | tee ${LOG_DIR}/75${TIMESTAMP}.log
 
-echo ""
+# echo ""
 
 ################################################################################
 # 実験2: CMT 150 phi_frame 0.5 warm-up 0
