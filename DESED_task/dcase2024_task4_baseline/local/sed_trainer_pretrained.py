@@ -626,16 +626,13 @@ class SEDTask4(pl.LightningModule):
                     teacher_pseudo_s
                 )
 
-                # # Debug statistics
+                # Debug statistics
                 # pseudo_label_ratio_w = teacher_pseudo_w.mean()
                 # pseudo_label_ratio_s = teacher_pseudo_s.mean()
                 # confidence_w_mean = confidence_w.mean()
                 # confidence_s_mean = confidence_s.mean()
-                # teacher_pred_w_mean = weak_preds_teacher[mask_unlabeled].mean()
-                # teacher_pred_s_mean = strong_preds_teacher[mask_unlabeled].mean()
             
             # Compute CMT consistency loss with confidence weighting
-            # ラベルなしを渡す
             weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
                 weak_preds_student[mask_consistency],
                 strong_preds_student[mask_consistency],
@@ -646,7 +643,6 @@ class SEDTask4(pl.LightningModule):
             )
         else:
             # Original Mean Teacher consistency loss
-            # 一時的にmask_consistencyに戻し,純粋な精度を見る
             strong_self_sup_loss = self.selfsup_loss(
                 strong_preds_student[mask_consistency],
                 strong_preds_teacher.detach()[mask_consistency],
