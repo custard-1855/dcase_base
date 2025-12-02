@@ -510,26 +510,26 @@ class SEDTask4(pl.LightningModule):
                 pretrained_input = audio
 
 
-    def apply_mixup(self, features, embeddings, labels, start_indx, stop_indx):
-        # made a dedicated method as we need to apply mixup only
-        # within each dataset that has the same classes
-        mixup_type = self.hparams["training"].get("mixup")
-        batch_num = features.shape[0]
-        current_mask = torch.zeros(batch_num).to(features).bool()
-        current_mask[start_indx:stop_indx] = 1
-        features[current_mask], labels[current_mask] = mixup(
-            features[current_mask], labels[current_mask], mixup_label_type=mixup_type
-        )
+    # def apply_mixup(self, features, embeddings, labels, start_indx, stop_indx):
+    #     # made a dedicated method as we need to apply mixup only
+    #     # within each dataset that has the same classes
+    #     mixup_type = self.hparams["training"].get("mixup")
+    #     batch_num = features.shape[0]
+    #     current_mask = torch.zeros(batch_num).to(features).bool()
+    #     current_mask[start_indx:stop_indx] = 1
+    #     features[current_mask], labels[current_mask] = mixup(
+    #         features[current_mask], labels[current_mask], mixup_label_type=mixup_type
+    #     )
 
-        if embeddings is not None:
-            # apply mixup also on embeddings
-            embeddings[current_mask], labels[current_mask] = mixup(
-                embeddings[current_mask],
-                labels[current_mask],
-                mixup_label_type=mixup_type,
-            )
+    #     if embeddings is not None:
+    #         # apply mixup also on embeddings
+    #         embeddings[current_mask], labels[current_mask] = mixup(
+    #             embeddings[current_mask],
+    #             labels[current_mask],
+    #             mixup_label_type=mixup_type,
+    #         )
 
-        return features, embeddings, labels
+    #     return features, embeddings, labels
 
     def training_step(self, batch, batch_indx):
         """Apply the training for one batch (a step). Used during trainer.fit
@@ -570,32 +570,32 @@ class SEDTask4(pl.LightningModule):
         # but standard SED baselines often mix features/labels and keep original masks.
         mixup_type = self.hparams["training"].get("mixup")
         if mixup_type is not None and self.hparams["training"]["mixup_prob"] > random.random():
-            features, embeddings, labels = self.apply_mixup(
-                features, embeddings, labels, indx_strong, indx_weak
-            )
-            features, embeddings, labels = self.apply_mixup(
-                features, embeddings, labels, indx_maestro, indx_strong
-            )
-            features, embeddings, labels = self.apply_mixup(
-                features, embeddings, labels, 0, indx_maestro
-            )
-            features, embeddings, labels = self.apply_mixup(
-                features, embeddings, labels, indx_weak, indx_unlabelled
-            )
-
-            # # NOTE: mix only within same dataset !
-            # features, embeddings, labels = self.mixup_augmentor.apply_mixup(
+            # features, embeddings, labels = self.apply_mixup(
             #     features, embeddings, labels, indx_strong, indx_weak
             # )
-            # features, embeddings, labels = self.mixup_augmentor.apply_mixup(
+            # features, embeddings, labels = self.apply_mixup(
             #     features, embeddings, labels, indx_maestro, indx_strong
             # )
-            # features, embeddings, labels = self.mixup_augmentor.apply_mixup(
+            # features, embeddings, labels = self.apply_mixup(
             #     features, embeddings, labels, 0, indx_maestro
             # )
-            # features, embeddings, labels = self.mixup_augmentor.apply_mixup(
+            # features, embeddings, labels = self.apply_mixup(
             #     features, embeddings, labels, indx_weak, indx_unlabelled
             # )
+
+            # NOTE: mix only within same dataset !
+            features, embeddings, labels = self.mixup_augmentor.apply_mixup(
+                features, embeddings, labels, indx_strong, indx_weak
+            )
+            features, embeddings, labels = self.mixup_augmentor.apply_mixup(
+                features, embeddings, labels, indx_maestro, indx_strong
+            )
+            features, embeddings, labels = self.mixup_augmentor.apply_mixup(
+                features, embeddings, labels, 0, indx_maestro
+            )
+            features, embeddings, labels = self.mixup_augmentor.apply_mixup(
+                features, embeddings, labels, indx_weak, indx_unlabelled
+            )
 
 
         # mask labels for invalid datasets classes after mixup.
