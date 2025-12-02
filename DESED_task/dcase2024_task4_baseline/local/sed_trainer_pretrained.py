@@ -733,15 +733,18 @@ class SEDTask4(pl.LightningModule):
         # --- 修正箇所: 負例（0予測）の信頼度も考慮する ---
         
         # Weak Confidence:
-        # 予測が1なら確率はy_w, 予測が0なら確率は(1 - y_w)
+        # 予測>phiなら確率はy_w, 予測<phiなら確率は(1 - y_w)
         # これにより、y_w=0.01 (y_tilde=0) の時、信頼度は 0.99 となる
-        c_w = torch.where(y_tilde_w > 0.5, y_w, 1.0 - y_w)
+        c_w = torch.where(y_tilde_w > self.cmt_phi_clip, y_w, 1.0 - y_w)
 
         # Strong Confidence:
         y_w_prob_expanded = y_w.unsqueeze(-1).expand_as(y_s)
         
         # 教師のStrong予測自体の確信度
-        conf_s_frame = torch.where(y_tilde_s > 0.5, y_s, 1.0 - y_s)
+        # conf_s_frame = torch.where(y_tilde_s > self.cmt_phi_frame, y_s, 1.0 - y_s)
+        conf_s_frame = torch.where(y_s > self.cmt_phi_frame, y_s, 1.0 - y_s) 
+            # y_tilde_sはy_tilde_wでフィルタ済み
+            # 負例を扱うには不適なため,使用しない
         
         # 最終的なStrong重み: フレーム単体の確信度 × クリップ全体の確信度(Weak)
         # Weakが0ならStrongも信頼できないとする場合は y_w_prob_expanded を掛ける
