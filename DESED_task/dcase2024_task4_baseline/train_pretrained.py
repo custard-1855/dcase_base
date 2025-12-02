@@ -826,7 +826,6 @@ def prepare_run(argv=None):
         configs["sat"]["time_mask_max"] = args.time_mask_max
     if args.time_mask_prob is not None:
         configs["sat"]["time_mask_prob"] = args.time_mask_prob
-
     # other
     if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs

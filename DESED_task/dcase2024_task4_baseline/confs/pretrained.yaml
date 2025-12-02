@@ -35,7 +35,6 @@ sat:
 sebbs:
   enabled: false
 
-
 training:  
   # バッチサイズ（論文推奨）
   batch_size: [12, 6, 6, 12, 24]    # [maestro, synth, strong, weak, unlabel]
@@ -165,7 +164,3 @@ net:
   # wandb
   use_wandb: True
   wandb_dir: "any"
-  # for MixStyle
-  attn_type: default
-  attn_deepen: true
-  mixstyle_type: resMix
