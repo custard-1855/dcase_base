@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 実験設定
-BASE_WANDB_DIR="150/only-cmt_fix-mixup_fix-cmt-neg-sample"
+BASE_WANDB_DIR="150/fix-cmt_apply-only-unlabeled"
 # MIXSTYLE_TYPE="resMix"
 # ATTN_TYPE="default"  # 基本的なattentionタイプを使用
 # ATTN_DEEPEN=2        # デフォルトの深さ
@@ -55,49 +55,49 @@ uv run train_pretrained.py \
 echo ""
 
 
-################################################################################
-# 実験4: CMT 150 phi_frame 0.3 warm-up 0
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.3 \
-    --cmt \
-    --phi_frame 0.3 \
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+# ################################################################################
+# # 実験4: CMT 150 phi_frame 0.3 warm-up 0
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.3 \
+#     --cmt \
+#     --phi_frame 0.3 \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
-echo ""
+# echo ""
 
-################################################################################
-# 実験5: CMT 150 phi_frame 0.4 warm-up 0
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.4 \
-    --cmt \
-    --phi_frame 0.4 \
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+# ################################################################################
+# # 実験5: CMT 150 phi_frame 0.4 warm-up 0
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.4 \
+#     --cmt \
+#     --phi_frame 0.4 \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
-echo ""
+# echo ""
 
-################################################################################
-# 実験6: CMT 150 phi_frame 0.6 warm-up 0
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.6 \
-    --cmt \
-    --phi_frame 0.6 \
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+# ################################################################################
+# # 実験6: CMT 150 phi_frame 0.6 warm-up 0
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.6 \
+#     --cmt \
+#     --phi_frame 0.6 \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
-echo ""
+# echo ""
 
-################################################################################
-# 実験7: CMT 150 phi_frame 0.7 warm-up 0
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.7 \
-    --cmt \
-    --phi_frame 0.7 \
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+# ################################################################################
+# # 実験7: CMT 150 phi_frame 0.7 warm-up 0
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.7 \
+#     --cmt \
+#     --phi_frame 0.7 \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
-echo ""
+# echo ""
 
 
 
