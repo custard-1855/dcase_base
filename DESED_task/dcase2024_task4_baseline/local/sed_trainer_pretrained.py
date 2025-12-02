@@ -768,10 +768,11 @@ class SEDTask4(pl.LightningModule):
             c_w = torch.where(y_tilde_w > self.cmt_phi_clip, y_w, 1.0 - y_w)
 
             # Strong Confidence:
-            # y_w_prob_expanded = y_w.unsqueeze(-1).expand_as(y_s)
+            y_w_prob_expanded = y_w.unsqueeze(-1).expand_as(y_s)
             conf_s_frame = torch.where(y_s > self.cmt_phi_frame, y_s, 1.0 - y_s) 
-            c_w_expanded = c_w.unsqueeze(-1).expand_as(y_s)
-            c_s = conf_s_frame * c_w_expanded
+            # c_w_expanded = c_w.unsqueeze(-1).expand_as(y_s)
+            # c_s = conf_s_frame * c_w_expanded
+            c_s = conf_s_frame * y_w_prob_expanded
         else:
             # --- CMT ---
             c_w = y_w * y_tilde_w
