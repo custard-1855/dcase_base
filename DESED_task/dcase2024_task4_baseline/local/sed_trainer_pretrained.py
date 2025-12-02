@@ -148,7 +148,7 @@ class SEDTask4(pl.LightningModule):
         self.cmt_scale = self.hparams.get("cmt", {}).get("scale", False)
         self.cmt_warmup_epochs = int(self.hparams.get("cmt", {}).get("warmup_epochs", 50))
         
-        self.cmt_use_neg_sample = self.hparams.get("cmt", {}).get("use_neg_sample", False) 
+        self.use_neg_sample = self.hparams.get("cmt", {}).get("use_neg_sample", False) 
 
         if self.hparams["pretrained"]["e2e"]:
             self.pretrained_model = pretrained_model
