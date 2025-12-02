@@ -715,7 +715,7 @@ class SEDTask4(pl.LightningModule):
         # y_s_binary: (batch, classes, frames)
         y_s_numpy = y_s_binary.detach().cpu().numpy()
 
-        for i in range(y_s.shape[0]):
+        for i in range(y_s[index_weak:].shape[0]):
             # (classes, frames) -> (frames, classes) に転置してフィルタ適用
             sample = y_s_numpy[i].transpose(1, 0) 
             filtered = self.median_filter(sample) 
