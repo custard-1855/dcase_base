@@ -206,6 +206,8 @@ class SEDTask4(pl.LightningModule):
         self.cmt_scale = self.hparams.get("cmt", {}).get("scale", False)
         self.cmt_warmup_epochs = int(self.hparams.get("cmt", {}).get("warmup_epochs", 50))
 
+        self.use_neg_sample = self.hparams.get("cmt", {}).get("use_neg_sample", False) 
+
 
         # cSEBBs param
         self.sebbs_enabled = self.hparams.get("sebbs", {}).get("enabled", False)
@@ -674,6 +676,7 @@ class SEDTask4(pl.LightningModule):
                 teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
                     weak_preds_teacher[mask_consistency], 
                     strong_preds_teacher[mask_consistency],
+                    index_weak=indx_weak,
                     phi_clip=self.cmt_phi_clip,
                     phi_frame=self.cmt_phi_frame,
                 )
@@ -685,14 +688,6 @@ class SEDTask4(pl.LightningModule):
                     teacher_pseudo_w,
                     teacher_pseudo_s
                 )
-
-                # # Debug statistics
-                # pseudo_label_ratio_w = teacher_pseudo_w.mean()
-                # pseudo_label_ratio_s = teacher_pseudo_s.mean()
-                # confidence_w_mean = confidence_w.mean()
-                # confidence_s_mean = confidence_s.mean()
-                # teacher_pred_w_mean = weak_preds_teacher[mask_unlabeled].mean()
-                # teacher_pred_s_mean = strong_preds_teacher[mask_unlabeled].mean()
             
             # Compute CMT consistency loss with confidence weighting
             weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
@@ -930,37 +925,32 @@ class SEDTask4(pl.LightningModule):
         return tot_loss
 
 
-    def apply_cmt_postprocessing(self, y_w, y_s, phi_clip=0.5, phi_frame=0.5):
+    def apply_cmt_postprocessing(self, y_w, y_s, index_weak, phi_clip=0.5, phi_frame=0.5):
         """
         Apply Confident Mean Teacher postprocessing.
         y_w: (batch, classes)
         y_s: (batch, classes, frames)
         """
-        # Step 1: Clip-level thresholding
-        y_tilde_w = (y_w > phi_clip).float()
+        # Step 1: Clip-level thresholding for unlabeled data
+        y_tilde_w = (y_w[index_weak:] > phi_clip).float()
         
         # Expand weak pseudo-labels to match strong shape: (batch, classes, 1) -> (batch, classes, frames)
-        y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s)
+        y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s[index_weak:])
 
         # Step 2 & 3: Frame-level thresholding with Weak constraint
         # Weakが1かつStrongが閾値を超えた場合のみ1
-        y_s_binary = y_w_expanded * (y_s > phi_frame).float()
+        y_s_binary = y_w_expanded * (y_s[index_weak:] > phi_frame).float()
 
         # Step 4: Median filtering
-        # 注意: GPU->CPU変換はコストがかかるが、scipyフィルタを使うなら必須
         y_tilde_s_list = []
         original_device = y_s.device
 
         # y_s_binary: (batch, classes, frames)
         y_s_numpy = y_s_binary.detach().cpu().numpy()
 
-        for i in range(y_s.shape[0]):
+        for i in range(y_s[index_weak:].shape[0]):
             # (classes, frames) -> (frames, classes) に転置してフィルタ適用
-            # 多くのSED実装では (frames, classes) で処理されることが多い
             sample = y_s_numpy[i].transpose(1, 0) 
-            
-            # self.median_filterの実装に依存するが、
-            # 時間軸(frames)方向のみにフィルタがかかるように注意が必要
             filtered = self.median_filter(sample) 
             y_tilde_s_list.append(filtered)
 
@@ -968,39 +958,37 @@ class SEDTask4(pl.LightningModule):
         y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
         y_tilde_s = y_tilde_s.transpose(1, 2) # -> (batch, classes, frames)
 
-        return y_tilde_w, y_tilde_s
+        y_tilde_w = torch.cat((y_w[:index_weak], y_tilde_w), dim=0)
+        y_tilde_s = torch.cat((y_s[:index_weak], y_tilde_s), dim=0)
 
+        return y_tilde_w, y_tilde_s
     def compute_cmt_confidence_weights(self, y_w, y_s, y_tilde_w, y_tilde_s):
         """
         Compute confidence weights based on teacher's certainty.
         Correction: High confidence for both positive (near 1) and negative (near 0) predictions.
         """
-        # --- 修正箇所: 負例（0予測）の信頼度も考慮する ---
-        
-        # Weak Confidence:
-        # 予測が1なら確率はy_w, 予測が0なら確率は(1 - y_w)
-        # これにより、y_w=0.01 (y_tilde=0) の時、信頼度は 0.99 となる
-        c_w = torch.where(y_tilde_w > 0.5, y_w, 1.0 - y_w)
 
-        # Strong Confidence:
-        y_w_prob_expanded = y_w.unsqueeze(-1).expand_as(y_s)
-        
-        # 教師のStrong予測自体の確信度
-        conf_s_frame = torch.where(y_tilde_s > 0.5, y_s, 1.0 - y_s)
-        
-        # 最終的なStrong重み: フレーム単体の確信度 × クリップ全体の確信度(Weak)
-        # Weakが0ならStrongも信頼できないとする場合は y_w_prob_expanded を掛ける
-        # （実装方針によるが、元のコードの意図を汲むならWeak確率を乗算するのが妥当）
+        if self.use_neg_sample:
+            # --- use neg_sample ---
+            # Weak Confidence:
+            c_w = torch.where(y_tilde_w > self.cmt_phi_clip, y_w, 1.0 - y_w)
 
-        c_w_expanded = c_w.unsqueeze(-1).expand_as(y_s)
-        # c_s = conf_s_frame * y_w_prob_expanded
-        c_s = conf_s_frame * c_w_expanded
-
-        neg_weight_scale = 0.5  # 0.1~0.5くらいで調整
-        is_negative = (y_tilde_s < 0.5).float()
+            # Strong Confidence:
+            y_w_prob_expanded = y_w.unsqueeze(-1).expand_as(y_s)
+            conf_s_frame = torch.where(y_s > self.cmt_phi_frame, y_s, 1.0 - y_s) 
+            # c_w_expanded = c_w.unsqueeze(-1).expand_as(y_s)
+            # c_s = conf_s_frame * c_w_expanded
+            c_s = conf_s_frame * y_w_prob_expanded
+        else:
+            # --- CMT ---
+            c_w = y_w * y_tilde_w
+            y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
+            c_s = y_s * y_w_expanded * y_tilde_s
+        # neg_weight_scale = 0.5  # 0.1~0.5くらいで調整
+        # is_negative = (y_tilde_s < 0.5).float()
         
-        scale_factor = is_negative * neg_weight_scale + (1.0 - is_negative) * 1.0
-        c_s = c_s * scale_factor
+        # scale_factor = is_negative * neg_weight_scale + (1.0 - is_negative) * 1.0
+        # c_s = c_s * scale_factor
 
         return c_w, c_s
 
@@ -1042,57 +1030,6 @@ class SEDTask4(pl.LightningModule):
             self.sed_student,
             self.sed_teacher,
         )
-
-    def evaluate_sat_pseudo_label_quality(self, teacher_preds, ground_truth, adaptive_thresholds, mask=None):
-        eps = 1e-8
-
-        # 1. 疑似ラベルの生成 (B, C, T) or (B, C)
-        pseudo_labels = (teacher_preds > adaptive_thresholds).float()
-
-        # 2. マスクの適用処理
-        valid_element_count = pseudo_labels.numel() # デフォルトは全要素数
-
-        if mask is not None:
-            # maskをground_truthの形状に合わせる
-            if ground_truth.dim() == 3 and mask.dim() == 2:
-                # maskが(B, C)か(B, T)かを判定
-                # ground_truthが(B, C, T)の場合、shape[1]がクラス数
-                if mask.shape[1] == ground_truth.shape[1]:
-                    # (B, C) -> (B, C, 1) -> (B, C, T)
-                    mask_expanded = mask.unsqueeze(2).expand_as(ground_truth)
-                else:
-                    # (B, T) -> (B, 1, T) -> (B, C, T)
-                    mask_expanded = mask.unsqueeze(1).expand_as(ground_truth)
-            elif ground_truth.dim() == 2 and mask.dim() == 1:
-                # (B) -> (B, 1) -> (B, C)
-                mask_expanded = mask.unsqueeze(-1).expand_as(ground_truth)
-            else:
-                # すでに形状が合っている場合
-                mask_expanded = mask
-
-            # maskがbool型でない可能性も考慮し、確実にマスク処理を行う
-            # masked_fill(~mask, 0.0) よりも積算の方が型に対してロバストです
-            pseudo_labels = pseudo_labels * mask_expanded
-            ground_truth = ground_truth * mask_expanded
-            
-            # Adoption Rate計算用の分母（有効な要素数）を計算
-            valid_element_count = mask_expanded.sum()
-
-        # 3. TP, FP, FN の計算
-        # ground_truth も pseudo_labels も 積算でAND計算
-        tp = (pseudo_labels * ground_truth).sum()
-        fp = (pseudo_labels * (1 - ground_truth)).sum()
-        fn = ((1 - pseudo_labels) * ground_truth).sum()
-
-        # 4. 指標の算出
-        precision = tp / (tp + fp + eps)
-        recall = tp / (tp + fn + eps)
-        f1 = 2 * precision * recall / (precision + recall + eps)
-
-        # 有効な領域のみで割合を計算
-        adoption_rate = pseudo_labels.sum() / (valid_element_count + eps)
-
-        return precision, recall, f1, adoption_rate
 
     def validation_step(self, batch, batch_indx):
         """Apply validation to a batch (step). Used during trainer.fit
@@ -1233,72 +1170,6 @@ class SEDTask4(pl.LightningModule):
             self.val_tune_sebbs_teacher.update(
                 scores_unprocessed_teacher_strong
             )
-
-        # # SAT有効時の疑似ラベル品質評価
-        # if self.sat_enabled:
-        #     # 1. 閾値の計算
-        #     # shape: (K,) または (1, K) 
-        #     adaptive_clip_thresholds = (
-        #         self.local_clip_probabilities /
-        #         torch.max(self.local_clip_probabilities) *
-        #         self.global_clip_threshold
-        #     )
-
-        #     # --- Weak Pseudo Label Evaluation ---
-        #     if torch.any(mask_weak):
-        #         weak_preds_desed = weak_preds_teacher[mask_weak][:, :self.K]
-        #         labels_weak_desed = labels_weak[mask_weak][:, :self.K]
-                
-        #         # クラス有効性マスク (B, K)
-        #         current_mask = valid_class_mask[mask_weak][:, :self.K]
-
-        #         precision_w, recall_w, f1_w, adoption_w = self.evaluate_sat_pseudo_label_quality(
-        #             teacher_preds=weak_preds_desed,
-        #             ground_truth=labels_weak_desed,
-        #             adaptive_thresholds=adaptive_clip_thresholds, # (K,) 自動でブロードキャスト
-        #             mask=current_mask
-        #         )
-
-        #         self.log("val/sat/pseudo_label/weak/precision", precision_w)
-        #         self.log("val/sat/pseudo_label/weak/recall", recall_w)
-        #         self.log("val/sat/pseudo_label/weak/f1", f1_w)
-        #         self.log("val/sat/pseudo_label/weak/adoption_rate", adoption_w)
-
-        #     # --- Strong Pseudo Label Evaluation ---
-        #     if torch.any(mask_strong):
-        #             # Shape: (B_strong, K, T)
-        #             strong_preds_desed = strong_preds_teacher[mask_strong][:, :self.K, :]
-        #             labels_strong_desed = labels[mask_strong][:, :self.K, :] # 変数名 labels に注意
-                    
-        #             # Clipレベルの予測を取得 (Gating用) -> Shape: (B_strong, K)
-        #             weak_preds_strong = weak_preds_teacher[mask_strong][:, :self.K]
-                    
-        #             # Clipレベルで閾値を超えているか判定
-        #             is_clip_active = (weak_preds_strong > adaptive_clip_thresholds).float()
-                    
-        #             # Gating処理: ClipがActiveでないクラスのFrame予測を全て0にする
-        #             # (B, K, T) * (B, K, 1)
-        #             filtered_strong_preds = strong_preds_desed * is_clip_active.unsqueeze(2)
-
-        #             # Frame比較用の閾値を成形
-        #             # adaptive_clip_thresholds が (K) でも (1, K) でも (1, K, 1) に安全に変形
-        #             frame_thresholds = adaptive_clip_thresholds.reshape(1, -1, 1)
-                    
-        #             # クラス有効性マスク (B, K)
-        #             current_mask = valid_class_mask[mask_strong][:, :self.K]
-
-        #             precision_s, recall_s, f1_s, adoption_s = self.evaluate_sat_pseudo_label_quality(
-        #                 teacher_preds=filtered_strong_preds,
-        #                 ground_truth=labels_strong_desed,
-        #                 adaptive_thresholds=frame_thresholds,
-        #                 mask=current_mask 
-        #             )
-
-        #             self.log("val/sat/pseudo_label/strong/precision", precision_s)
-        #             self.log("val/sat/pseudo_label/strong/recall", recall_s)
-        #             self.log("val/sat/pseudo_label/strong/f1", f1_s)
-        #             self.log("val/sat/pseudo_label/strong/adoption_rate", adoption_s)
-
         return
 
     def validation_epoch_end(self, outputs):

@@ -681,6 +681,10 @@ def prepare_run(argv=None):
     parser.add_argument(
         "--warmup_epochs", default=0
     )
+    parser.add_argument(
+        "--use_neg_sample", action="store_true", default=False
+    )
+
     # MixStyle
     parser.add_argument(
         "--attn_type", default="default",
@@ -789,6 +793,10 @@ def prepare_run(argv=None):
         configs["cmt"]["phi_frame"] = args.phi_frame
     if args.cmt is not None:
         configs["cmt"]["warmup_epochs"] = args.warmup_epochs
+    if args.cmt is not None:
+        configs["cmt"]["use_neg_sample"] = args.use_neg_sample
+
+
     # MixStyle
     if args.attn_type is not None:
         configs["net"]["attn_type"] = args.attn_type
@@ -796,6 +804,7 @@ def prepare_run(argv=None):
         configs["net"]["attn_deepen"] = args.attn_deepen
     if args.mixstyle_type is not None:
         configs["net"]["mixstyle_type"] = args.mixstyle_type
+
     # sat
     if args.sat is not None:
         configs["sat"]["enabled"] = args.sat
@@ -805,6 +814,7 @@ def prepare_run(argv=None):
         configs["sat"]["cutmix_alpha"] = args.cutmix_alpha
     if args.sat is not None:
         configs["sat"]["cutmix_prob"] = args.cutmix_prob
+
     # Strong augmentation type and parameters
     if args.strong_augment_type is not None:
         configs["sat"]["strong_augment_type"] = args.strong_augment_type
@@ -816,6 +826,7 @@ def prepare_run(argv=None):
         configs["sat"]["time_mask_max"] = args.time_mask_max
     if args.time_mask_prob is not None:
         configs["sat"]["time_mask_prob"] = args.time_mask_prob
+
     # other
     if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs
