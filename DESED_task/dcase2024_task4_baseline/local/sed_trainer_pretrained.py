@@ -707,7 +707,6 @@ class SEDTask4(pl.LightningModule):
         y_s_binary = y_w_expanded * (y_s > phi_frame).float()
 
         # Step 4: Median filtering
-        # 注意: GPU->CPU変換はコストがかかるが、scipyフィルタを使うなら必須
         y_tilde_s_list = []
         original_device = y_s.device
 
@@ -716,11 +715,7 @@ class SEDTask4(pl.LightningModule):
 
         for i in range(y_s.shape[0]):
             # (classes, frames) -> (frames, classes) に転置してフィルタ適用
-            # 多くのSED実装では (frames, classes) で処理されることが多い
             sample = y_s_numpy[i].transpose(1, 0) 
-            
-            # self.median_filterの実装に依存するが、
-            # 時間軸(frames)方向のみにフィルタがかかるように注意が必要
             filtered = self.median_filter(sample) 
             y_tilde_s_list.append(filtered)
 
@@ -756,11 +751,11 @@ class SEDTask4(pl.LightningModule):
         # c_s = conf_s_frame * y_w_prob_expanded
         c_s = conf_s_frame * c_w_expanded
 
-        neg_weight_scale = 0.5  # 0.1~0.5くらいで調整
-        is_negative = (y_tilde_s < 0.5).float()
+        # neg_weight_scale = 0.5  # 0.1~0.5くらいで調整
+        # is_negative = (y_tilde_s < 0.5).float()
         
-        scale_factor = is_negative * neg_weight_scale + (1.0 - is_negative) * 1.0
-        c_s = c_s * scale_factor
+        # scale_factor = is_negative * neg_weight_scale + (1.0 - is_negative) * 1.0
+        # c_s = c_s * scale_factor
 
         return c_w, c_s
 
