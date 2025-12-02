@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 実験設定
-BASE_WANDB_DIR="150"
+BASE_WANDB_DIR="150/cmt_apply-unlabeled/"
 MIXSTYLE_TYPE="resMix"
 ATTN_TYPE="default"  # 基本的なattentionタイプを使用
 ATTN_DEEPEN=2        # デフォルトの深さ
@@ -22,45 +22,67 @@ echo ""
 
 
 # 後で200で回す. 収束の遅さが学習精度低下の原因かもしれない
+# ################################################################################
+# # 実験1: CMT 150 
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/CMT/frame-0.75 \
+#     --cmt \
+#     --phi_frame 0.75 \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+
+# echo ""
+
+# ################################################################################
+# # 実験1: CMT 150 
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/CMT/frame-0.75_warm-up-50 \
+#     --cmt \
+#     --phi_frame 0.75 \
+#     --warmup_epochs 50 \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+
+# echo ""
+
+
+# ################################################################################
+# # 実験1: CMT 150 
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/CMT/frame-0.75 \
+#     --cmt \
+#     --phi_frame 0.75 \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+
+# echo ""
+
 ################################################################################
 # 実験1: CMT 150 
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/CMT/frame-0.75 \
+    --wandb_dir ${BASE_WANDB_DIR}/CMT\
     --cmt \
-    --phi_frame 0.75 \
     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
 echo ""
-
-################################################################################
-# 実験1: CMT 150 
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/CMT/frame-0.75_warm-up-50 \
-    --cmt \
-    --phi_frame 0.75 \
-    --warmup_epochs 50 \
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
-
-echo ""
-
 
 
 ################################################################################
 # 実験2: Nomal
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/Normal \
-    2>&1 | tee ${LOG_DIR}/75${TIMESTAMP}.log
+    --wandb_dir ${BASE_WANDB_DIR}/nomal \
+    2>&1 | tee ${LOG_DIR}${TIMESTAMP}.log
 
 echo ""
 
 ################################################################################
-# 実験3: MixStyle
+# 実験3: CMT + MixStyle
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/MixStyle \
+    --wandb_dir ${BASE_WANDB_DIR}/CMT+MixStyle \
+    --cmt \
     --attn_type ${ATTN_TYPE} \
     --attn_deepen ${ATTN_DEEPEN} \
     --mixstyle_type ${MIXSTYLE_TYPE} \
@@ -72,10 +94,8 @@ echo ""
 # 実験4: CMT + SEBBs
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/CMT_frame-0.5_warm-up-50 + SEBBs \
+    --wandb_dir ${BASE_WANDB_DIR}/CMT+SEBBs \
     --cmt \
-    --phi_frame 0.5 \
-    --warmup_epochs 50 \
     --sebbs \
     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
@@ -83,14 +103,29 @@ echo ""
 
 
 ################################################################################
-# 実験4: SEBBs
+# 実験4: all
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/SEBBs \
+    --wandb_dir ${BASE_WANDB_DIR}/CMT+MixStyle+SEBBs \
+    --cmt \
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
     --sebbs \
     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
 echo ""
+
+
+# ################################################################################
+# # 実験4: SEBBs
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/SEBBs \
+#     --sebbs \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+
+# echo ""
 
 
 
