@@ -59,7 +59,7 @@ echo ""
 # 実験4: CMT 150 phi_frame 0.3 warm-up 0
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.4 \
+    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.3 \
     --cmt \
     --phi_frame 0.3 \
     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
@@ -81,7 +81,7 @@ echo ""
 # 実験6: CMT 150 phi_frame 0.6 warm-up 0
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.4 \
+    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.6 \
     --cmt \
     --phi_frame 0.6 \
     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
@@ -92,7 +92,7 @@ echo ""
 # 実験7: CMT 150 phi_frame 0.7 warm-up 0
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.4 \
+    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.7 \
     --cmt \
     --phi_frame 0.7 \
     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
