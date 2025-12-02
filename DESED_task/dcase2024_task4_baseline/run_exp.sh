@@ -24,22 +24,22 @@ echo ""
 # only CMT
 
 
-################################################################################
-# 実験1: Nomal
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/Mixup_fix \
-    2>&1 | tee ${LOG_DIR}/75${TIMESTAMP}.log
-
-echo ""
-
 # ################################################################################
-# # 実験2: CMT 150 phi_frame 0.5 warm-up 0
+# # 実験1: Nomal
 # ################################################################################
 # uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/warm-up_0 \
-#     --cmt \
-#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+#     --wandb_dir ${BASE_WANDB_DIR}/Mixup_fix \
+#     2>&1 | tee ${LOG_DIR}/75${TIMESTAMP}.log
+
+# echo ""
+
+################################################################################
+# 実験2: CMT 150 phi_frame 0.5 warm-up 0
+################################################################################
+uv run train_pretrained.py \
+    --wandb_dir ${BASE_WANDB_DIR}/warm-up_0 \
+    --cmt \
+    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
 # echo ""
 
