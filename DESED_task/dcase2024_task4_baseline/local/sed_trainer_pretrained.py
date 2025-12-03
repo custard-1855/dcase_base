@@ -1350,6 +1350,40 @@ class SEDTask4(pl.LightningModule):
         print(df.to_string(index=False))
 
 
+    def _save_per_class_mpauc(
+        self,
+        auroc_results_dict,
+        save_path,
+        dataset_name,
+        model_name,
+    ):
+        metrics_list = []
+        for class_name, mpauc_value in auroc_results_dict.items():
+            if class_name == "mean":
+                continue  # 全体平均はスキップ
+            metrics_list.append({
+                "class": class_name,
+                "mpauc": float(mpauc_value),
+                "dataset": dataset_name,
+                "model": model_name,
+            })
+
+        if not metrics_list:
+            print(f"[Warning] No per-class mpAUC found in auroc results")
+            return
+
+        df = pd.DataFrame(metrics_list)
+        # mpAUC降順でソート
+        df = df.sort_values("mpauc", ascending=False)
+
+        # 保存
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        df.to_csv(save_path, index=False, float_format="%.4f")
+
+        print(f"\n[Per-class mpAUC] Saved to: {save_path}")
+        print(df.to_string(index=False))
+
+
     def on_test_epoch_end(self):
         # pub eval dataset
         save_dir = os.path.join(self.exp_dir, "metrics_test")
@@ -1543,12 +1577,6 @@ class SEDTask4(pl.LightningModule):
                 scenario_name="scenario2",
             )
 
-            for class_name, psds_value in psds1_student_per_class.items():
-                print(f"test/desed/student/class/{class_name}/psds_scenario1", psds_value)
-            for class_name, psds_value in psds2_student_per_class.items():
-                print(f"test/desed/student/class/{class_name}/psds_scenario2", psds_value)
-
-
 
             intersection_f1_macro_thres05_student_sed_scores_eval = (
                 sed_scores_eval.intersection_based.fscore(
@@ -1613,11 +1641,6 @@ class SEDTask4(pl.LightningModule):
                 model_name="teacher",
                 scenario_name="scenario2",
             )
-
-            for class_name, psds_value in psds1_teacher_per_class.items():
-                print(f"test/desed/teacher/class/{class_name}/psds_scenario1", psds_value)
-            for class_name, psds_value in psds2_teacher_per_class.items():
-                print(f"test/desed/teacher/class/{class_name}/psds_scenario2", psds_value)
 
             intersection_f1_macro_thres05_teacher_sed_scores_eval = (
                 sed_scores_eval.intersection_based.fscore(
@@ -1718,19 +1741,30 @@ class SEDTask4(pl.LightningModule):
                     segment_length=segment_length,
                 )[0]["macro_average"]
             )
+            
             segment_mauc_student = sed_scores_eval.segment_based.auroc(
                 segment_scores_student,
                 maestro_ground_truth,
                 maestro_audio_durations,
                 segment_length=segment_length,
             )[0]["mean"]
-            segment_mpauc_student = sed_scores_eval.segment_based.auroc(
+
+            segment_mpauc_student_dict = sed_scores_eval.segment_based.auroc(
                 segment_scores_student,
                 maestro_ground_truth,
                 maestro_audio_durations,
                 segment_length=segment_length,
                 max_fpr=0.1,
-            )[0]["mean"]
+            )[0]
+            segment_mpauc_student = segment_mpauc_student_dict["mean"]
+            
+            self._save_per_class_mpauc(
+                segment_mpauc_student_dict,
+                os.path.join(save_dir, "per_class_mpauc_maestro_student.csv"),
+                dataset_name="MAESTRO",
+                model_name="student",
+            )
+
             segment_f1_macro_optthres_teacher = (
                 sed_scores_eval.segment_based.best_fscore(
                     segment_scores_teacher,
@@ -1745,13 +1779,23 @@ class SEDTask4(pl.LightningModule):
                 maestro_audio_durations,
                 segment_length=segment_length,
             )[0]["mean"]
-            segment_mpauc_teacher = sed_scores_eval.segment_based.auroc(
+
+            segment_mpauc_teacher_dict = sed_scores_eval.segment_based.auroc(
                 segment_scores_teacher,
                 maestro_ground_truth,
                 maestro_audio_durations,
                 segment_length=segment_length,
                 max_fpr=0.1,
-            )[0]["mean"]
+            )[0]
+            segment_mpauc_teacher = segment_mpauc_teacher_dict["mean"]
+
+            self._save_per_class_mpauc(
+                segment_mpauc_teacher_dict,
+                os.path.join(save_dir, "per_class_mpauc_maestro_teacher.csv"),
+                dataset_name="MAESTRO",
+                model_name="teacher",
+            )
+
 
             results.update({
                 "test/student/psds1/psds_eval": psds1_student_psds_eval,
