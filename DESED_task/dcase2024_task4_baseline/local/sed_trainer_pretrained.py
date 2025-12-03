@@ -1388,6 +1388,10 @@ class SEDTask4(pl.LightningModule):
         # pub eval dataset
         save_dir = os.path.join(self.exp_dir, "metrics_test")
         print("save_dir", save_dir)
+
+        csv_dir = os.path.join(self._exp_dir, "class-wise-csv")
+        print("csv_dir", csv_dir)
+
         results = {}
         if self.evaluation:
             # only save prediction scores
@@ -1563,7 +1567,7 @@ class SEDTask4(pl.LightningModule):
 
             self._save_per_class_psds(
                 psds1_student_per_class,
-                os.path.join(save_dir, "per_class_psds_desed_student_scenario1.csv"),
+                os.path.join(csv_dir, "per_class_psds_desed_student_scenario1.csv"),
                 dataset_name="DESED",
                 model_name="student",
                 scenario_name="scenario1",
@@ -1571,7 +1575,7 @@ class SEDTask4(pl.LightningModule):
 
             self._save_per_class_psds(
                 psds2_student_per_class,
-                os.path.join(save_dir, "per_class_psds_desed_student_scenario2.csv"),
+                os.path.join(csv_dir, "per_class_psds_desed_student_scenario2.csv"),
                 dataset_name="DESED",
                 model_name="student",
                 scenario_name="scenario2",
@@ -1628,7 +1632,7 @@ class SEDTask4(pl.LightningModule):
 
             self._save_per_class_psds(
                 psds1_teacher_per_class,
-                os.path.join(save_dir, "per_class_psds_desed_teacher_scenario1.csv"),
+                os.path.join(csv_dir, "per_class_psds_desed_teacher_scenario1.csv"),
                 dataset_name="DESED",
                 model_name="teacher",
                 scenario_name="scenario1",
@@ -1636,7 +1640,7 @@ class SEDTask4(pl.LightningModule):
 
             self._save_per_class_psds(
                 psds2_teacher_per_class,
-                os.path.join(save_dir, "per_class_psds_desed_teacher_scenario2.csv"),
+                os.path.join(csv_dir, "per_class_psds_desed_teacher_scenario2.csv"),
                 dataset_name="DESED",
                 model_name="teacher",
                 scenario_name="scenario2",
@@ -1709,7 +1713,7 @@ class SEDTask4(pl.LightningModule):
             )
             sed_scores_eval.io.write_sed_scores(
                 segment_scores_student,
-                os.path.join(save_dir, "student", "maestro", "postprocessed"),
+                os.path.join(csv_dir, "student", "maestro", "postprocessed"),
             )
             segment_scores_teacher = _get_segment_scores_and_overlap_add(
                 frame_scores=maestro_scores_teacher,
@@ -1719,7 +1723,7 @@ class SEDTask4(pl.LightningModule):
             )
             sed_scores_eval.io.write_sed_scores(
                 segment_scores_teacher,
-                os.path.join(save_dir, "teacher", "maestro", "postprocessed"),
+                os.path.join(csv_dir, "teacher", "maestro", "postprocessed"),
             )
 
             event_classes_maestro_eval = sorted(classes_labels_maestro_real_eval)
@@ -1757,10 +1761,10 @@ class SEDTask4(pl.LightningModule):
                 max_fpr=0.1,
             )[0]
             segment_mpauc_student = segment_mpauc_student_dict["mean"]
-            
+
             self._save_per_class_mpauc(
                 segment_mpauc_student_dict,
-                os.path.join(save_dir, "per_class_mpauc_maestro_student.csv"),
+                os.path.join(csv_dir, "per_class_mpauc_maestro_student.csv"),
                 dataset_name="MAESTRO",
                 model_name="student",
             )
@@ -1791,7 +1795,7 @@ class SEDTask4(pl.LightningModule):
 
             self._save_per_class_mpauc(
                 segment_mpauc_teacher_dict,
-                os.path.join(save_dir, "per_class_mpauc_maestro_teacher.csv"),
+                os.path.join(csv_dir, "per_class_mpauc_maestro_teacher.csv"),
                 dataset_name="MAESTRO",
                 model_name="teacher",
             )
