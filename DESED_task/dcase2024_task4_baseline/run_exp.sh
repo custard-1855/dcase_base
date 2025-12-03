@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 実験設定
-BASE_WANDB_DIR="150/"
+BASE_WANDB_DIR="10/"
 # MIXSTYLE_TYPE="resMix"
 # ATTN_TYPE="default"  # 基本的なattentionタイプを使用
 # ATTN_DEEPEN=2        # デフォルトの深さ
