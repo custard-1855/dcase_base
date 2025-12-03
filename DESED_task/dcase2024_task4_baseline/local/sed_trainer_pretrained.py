@@ -1389,7 +1389,11 @@ class SEDTask4(pl.LightningModule):
         save_dir = os.path.join(self.exp_dir, "metrics_test")
         print("save_dir", save_dir)
 
-        csv_dir = os.path.join(self._exp_dir, "class-wise-csv")
+        # wandb runディレクトリ配下にclass-wise-csvを作成
+        if wandb.run is not None:
+            csv_dir = os.path.join(wandb.run.dir, "class-wise-csv")
+        else:
+            csv_dir = os.path.join(self._exp_dir, "class-wise-csv")
         print("csv_dir", csv_dir)
 
         results = {}
