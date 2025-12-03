@@ -1319,6 +1319,37 @@ class SEDTask4(pl.LightningModule):
             [self.test_buffer_detections_thres05_teacher, decoded_teacher_strong[0.5]]
         )
 
+    def _save_per_class_psds(
+        self,
+        single_class_psds_dict,
+        save_path,
+        dataset_name,
+        model_name,
+        scenario_name=None,
+    ):
+        metrics_list = []
+        for class_name, psds_value in single_class_psds_dict.items():
+            metrics_list.append({
+                "class": class_name,
+                "psds": float(psds_value),
+                "dataset": dataset_name,
+                "model": model_name,
+            })
+            if scenario_name is not None:
+                metrics_list[-1]["scenario"] = scenario_name
+
+        df = pd.DataFrame(metrics_list)
+        # PSDS降順でソート
+        df = df.sort_values("psds", ascending=False)
+
+        # 保存
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        df.to_csv(save_path, index=False, float_format="%.4f")
+
+        print(f"\n[Per-class PSDS] Saved to: {save_path}")
+        print(df.to_string(index=False))
+
+
     def on_test_epoch_end(self):
         # pub eval dataset
         save_dir = os.path.join(self.exp_dir, "metrics_test")
@@ -1473,7 +1504,7 @@ class SEDTask4(pl.LightningModule):
                 clip_id: self.test_buffer_sed_scores_eval_student[clip_id][keys]
                 for clip_id in desed_ground_truth.keys()
             }
-            psds1_student_sed_scores_eval = compute_psds_from_scores(
+            psds1_student_sed_scores_eval, psds1_student_per_class = compute_psds_from_scores(
                 desed_scores,
                 desed_ground_truth,
                 desed_audio_durations,
@@ -1484,7 +1515,7 @@ class SEDTask4(pl.LightningModule):
                 alpha_st=1,
                 save_dir=os.path.join(save_dir, "student", "scenario1"),
             )
-            psds2_student_sed_scores_eval = compute_psds_from_scores(
+            psds2_student_sed_scores_eval, psds2_student_per_class = compute_psds_from_scores(
                 desed_scores,
                 desed_ground_truth,
                 desed_audio_durations,
@@ -1495,6 +1526,30 @@ class SEDTask4(pl.LightningModule):
                 alpha_st=1,
                 save_dir=os.path.join(save_dir, "student", "scenario2"),
             )
+
+            self._save_per_class_psds(
+                psds1_student_per_class,
+                os.path.join(save_dir, "per_class_psds_desed_student_scenario1.csv"),
+                dataset_name="DESED",
+                model_name="student",
+                scenario_name="scenario1",
+            )
+
+            self._save_per_class_psds(
+                psds2_student_per_class,
+                os.path.join(save_dir, "per_class_psds_desed_student_scenario2.csv"),
+                dataset_name="DESED",
+                model_name="student",
+                scenario_name="scenario2",
+            )
+
+            for class_name, psds_value in psds1_student_per_class.items():
+                self.log(f"test/desed/student/class/{class_name}/psds_scenario1", psds_value)
+            for class_name, psds_value in psds2_student_per_class.items():
+                self.log(f"test/desed/student/class/{class_name}/psds_scenario2", psds_value)
+
+
+
             intersection_f1_macro_thres05_student_sed_scores_eval = (
                 sed_scores_eval.intersection_based.fscore(
                     desed_scores,
@@ -1519,7 +1574,7 @@ class SEDTask4(pl.LightningModule):
                 clip_id: self.test_buffer_sed_scores_eval_teacher[clip_id][keys]
                 for clip_id in desed_ground_truth.keys()
             }
-            psds1_teacher_sed_scores_eval = compute_psds_from_scores(
+            psds1_teacher_sed_scores_eval, psds1_teacher_per_class = compute_psds_from_scores(
                 desed_scores,
                 desed_ground_truth,
                 desed_audio_durations,
@@ -1530,7 +1585,7 @@ class SEDTask4(pl.LightningModule):
                 alpha_st=1,
                 save_dir=os.path.join(save_dir, "teacher", "scenario1"),
             )
-            psds2_teacher_sed_scores_eval = compute_psds_from_scores(
+            psds2_teacher_sed_scores_eval, psds2_teacher_per_class = compute_psds_from_scores(
                 desed_scores,
                 desed_ground_truth,
                 desed_audio_durations,
@@ -1541,6 +1596,31 @@ class SEDTask4(pl.LightningModule):
                 alpha_st=1,
                 save_dir=os.path.join(save_dir, "teacher", "scenario2"),
             )
+
+
+            self._save_per_class_psds(
+                psds1_teacher_per_class,
+                os.path.join(save_dir, "per_class_psds_desed_teacher_scenario1.csv"),
+                dataset_name="DESED",
+                model_name="teacher",
+                scenario_name="scenario1",
+            )
+
+            self._save_per_class_psds(
+                psds2_teacher_per_class,
+                os.path.join(save_dir, "per_class_psds_desed_teacher_scenario2.csv"),
+                dataset_name="DESED",
+                model_name="teacher",
+                scenario_name="scenario2",
+            )
+
+            for class_name, psds_value in psds1_teacher_per_class.items():
+                self.log(f"test/desed/teacher/class/{class_name}/psds_scenario1", psds_value)
+            for class_name, psds_value in psds2_teacher_per_class.items():
+                self.log(f"test/desed/teacher/class/{class_name}/psds_scenario2", psds_value)
+
+
+
             intersection_f1_macro_thres05_teacher_sed_scores_eval = (
                 sed_scores_eval.intersection_based.fscore(
                     desed_scores,
