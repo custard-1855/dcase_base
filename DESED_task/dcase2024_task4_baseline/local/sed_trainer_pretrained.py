@@ -1388,16 +1388,6 @@ class SEDTask4(pl.LightningModule):
             weak_student_f1_macro.item() + synth_metric + maestro_metric
         )
 
-        # # クラス別の統計を計算
-        # for i, class_name in enumerate(self.encoder.labels):
-        #     precision = 
-        #     recall = 
-        #     f1 = 2 * precision * recall / (precision + recall)
-            
-        #     self.log(f"val/class/{class_name}/precision", precision)
-        #     self.log(f"val/class/{class_name}/recall", recall)
-        #     self.log(f"val/class/{class_name}/f1", f1)
-
         self.log("val/obj_metric", obj_metric, prog_bar=True)
         self.log(
             "val/student/weak_f1_macro_thres05/torchmetrics", weak_student_f1_macro
@@ -1800,10 +1790,84 @@ class SEDTask4(pl.LightningModule):
             [self.test_buffer_detections_thres05_teacher, decoded_teacher_strong[0.5]]
         )
 
+
+    def _save_per_class_psds(
+        self,
+        single_class_psds_dict,
+        save_path,
+        dataset_name,
+        model_name,
+        scenario_name=None,
+    ):
+        metrics_list = []
+        for class_name, psds_value in single_class_psds_dict.items():
+            metrics_list.append({
+                "class": class_name,
+                "psds": float(psds_value),
+                "dataset": dataset_name,
+                "model": model_name,
+            })
+            if scenario_name is not None:
+                metrics_list[-1]["scenario"] = scenario_name
+
+        df = pd.DataFrame(metrics_list)
+        # PSDS降順でソート
+        df = df.sort_values("psds", ascending=False)
+
+        # 保存
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        df.to_csv(save_path, index=False, float_format="%.4f")
+
+        print(f"\n[Per-class PSDS] Saved to: {save_path}")
+        print(df.to_string(index=False))
+
+
+    def _save_per_class_mpauc(
+        self,
+        auroc_results_dict,
+        save_path,
+        dataset_name,
+        model_name,
+    ):
+        metrics_list = []
+        for class_name, mpauc_value in auroc_results_dict.items():
+            if class_name == "mean":
+                continue  # 全体平均はスキップ
+            metrics_list.append({
+                "class": class_name,
+                "mpauc": float(mpauc_value),
+                "dataset": dataset_name,
+                "model": model_name,
+            })
+
+        if not metrics_list:
+            print(f"[Warning] No per-class mpAUC found in auroc results")
+            return
+
+        df = pd.DataFrame(metrics_list)
+        # mpAUC降順でソート
+        df = df.sort_values("mpauc", ascending=False)
+
+        # 保存
+        os.makedirs(os.path.dirname(save_path), exist_ok=True)
+        df.to_csv(save_path, index=False, float_format="%.4f")
+
+        print(f"\n[Per-class mpAUC] Saved to: {save_path}")
+        print(df.to_string(index=False))
+
+
     def on_test_epoch_end(self):
         # pub eval dataset
         save_dir = os.path.join(self.exp_dir, "metrics_test")
         print("save_dir", save_dir)
+
+        # wandb runディレクトリ配下にclass-wise-csvを作成
+        if wandb.run is not None:
+            csv_dir = os.path.join(wandb.run.dir, "class-wise-csv")
+        else:
+            csv_dir = os.path.join(self._exp_dir, "class-wise-csv")
+        print("csv_dir", csv_dir)
+
         results = {}
         if self.evaluation:
             # only save prediction scores
@@ -1954,7 +2018,7 @@ class SEDTask4(pl.LightningModule):
                 clip_id: self.test_buffer_sed_scores_eval_student[clip_id][keys]
                 for clip_id in desed_ground_truth.keys()
             }
-            psds1_student_sed_scores_eval = compute_psds_from_scores(
+            psds1_student_sed_scores_eval, psds1_student_per_class = compute_psds_from_scores(
                 desed_scores,
                 desed_ground_truth,
                 desed_audio_durations,
@@ -1965,7 +2029,7 @@ class SEDTask4(pl.LightningModule):
                 alpha_st=1,
                 save_dir=os.path.join(save_dir, "student", "scenario1"),
             )
-            psds2_student_sed_scores_eval = compute_psds_from_scores(
+            psds2_student_sed_scores_eval, psds2_student_per_class = compute_psds_from_scores(
                 desed_scores,
                 desed_ground_truth,
                 desed_audio_durations,
@@ -1976,6 +2040,26 @@ class SEDTask4(pl.LightningModule):
                 alpha_st=1,
                 save_dir=os.path.join(save_dir, "student", "scenario2"),
             )
+
+
+            self._save_per_class_psds(
+                psds1_student_per_class,
+                os.path.join(csv_dir, "per_class_psds_desed_student_scenario1.csv"),
+                dataset_name="DESED",
+                model_name="student",
+                scenario_name="scenario1",
+            )
+
+            self._save_per_class_psds(
+                psds2_student_per_class,
+                os.path.join(csv_dir, "per_class_psds_desed_student_scenario2.csv"),
+                dataset_name="DESED",
+                model_name="student",
+                scenario_name="scenario2",
+            )
+
+
+
             intersection_f1_macro_thres05_student_sed_scores_eval = (
                 sed_scores_eval.intersection_based.fscore(
                     desed_scores,
@@ -2000,7 +2084,7 @@ class SEDTask4(pl.LightningModule):
                 clip_id: self.test_buffer_sed_scores_eval_teacher[clip_id][keys]
                 for clip_id in desed_ground_truth.keys()
             }
-            psds1_teacher_sed_scores_eval = compute_psds_from_scores(
+            psds1_teacher_sed_scores_eval, psds1_teacher_per_class = compute_psds_from_scores(
                 desed_scores,
                 desed_ground_truth,
                 desed_audio_durations,
@@ -2011,7 +2095,7 @@ class SEDTask4(pl.LightningModule):
                 alpha_st=1,
                 save_dir=os.path.join(save_dir, "teacher", "scenario1"),
             )
-            psds2_teacher_sed_scores_eval = compute_psds_from_scores(
+            psds2_teacher_sed_scores_eval, psds2_teacher_per_class = compute_psds_from_scores(
                 desed_scores,
                 desed_ground_truth,
                 desed_audio_durations,
@@ -2022,6 +2106,24 @@ class SEDTask4(pl.LightningModule):
                 alpha_st=1,
                 save_dir=os.path.join(save_dir, "teacher", "scenario2"),
             )
+
+            self._save_per_class_psds(
+                psds1_teacher_per_class,
+                os.path.join(csv_dir, "per_class_psds_desed_teacher_scenario1.csv"),
+                dataset_name="DESED",
+                model_name="teacher",
+                scenario_name="scenario1",
+            )
+
+            self._save_per_class_psds(
+                psds2_teacher_per_class,
+                os.path.join(csv_dir, "per_class_psds_desed_teacher_scenario2.csv"),
+                dataset_name="DESED",
+                model_name="teacher",
+                scenario_name="scenario2",
+            )
+
+
             intersection_f1_macro_thres05_teacher_sed_scores_eval = (
                 sed_scores_eval.intersection_based.fscore(
                     desed_scores,
@@ -2131,13 +2233,23 @@ class SEDTask4(pl.LightningModule):
                 maestro_audio_durations,
                 segment_length=segment_length,
             )[0]["mean"]
-            segment_mpauc_student = sed_scores_eval.segment_based.auroc(
+
+            segment_mpauc_student_dict = sed_scores_eval.segment_based.auroc(
                 segment_scores_student,
                 maestro_ground_truth,
                 maestro_audio_durations,
                 segment_length=segment_length,
                 max_fpr=0.1,
-            )[0]["mean"]
+            )[0]
+            segment_mpauc_student = segment_mpauc_student_dict["mean"]
+
+            self._save_per_class_mpauc(
+                segment_mpauc_student_dict,
+                os.path.join(csv_dir, "per_class_mpauc_maestro_student.csv"),
+                dataset_name="MAESTRO",
+                model_name="student",
+            )
+
             segment_f1_macro_optthres_teacher = (
                 sed_scores_eval.segment_based.best_fscore(
                     segment_scores_teacher,
@@ -2152,13 +2264,24 @@ class SEDTask4(pl.LightningModule):
                 maestro_audio_durations,
                 segment_length=segment_length,
             )[0]["mean"]
-            segment_mpauc_teacher = sed_scores_eval.segment_based.auroc(
+
+            segment_mpauc_teacher_dict = sed_scores_eval.segment_based.auroc(
                 segment_scores_teacher,
                 maestro_ground_truth,
                 maestro_audio_durations,
                 segment_length=segment_length,
                 max_fpr=0.1,
-            )[0]["mean"]
+            )[0]
+
+            segment_mpauc_teacher = segment_mpauc_teacher_dict["mean"]
+
+            self._save_per_class_mpauc(
+                segment_mpauc_teacher_dict,
+                os.path.join(csv_dir, "per_class_mpauc_maestro_teacher.csv"),
+                dataset_name="MAESTRO",
+                model_name="teacher",
+            )
+
 
             results.update({
                 "test/student/psds1/psds_eval": psds1_student_psds_eval,
