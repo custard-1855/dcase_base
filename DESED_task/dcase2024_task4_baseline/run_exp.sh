@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # 実験設定
-BASE_WANDB_DIR="50/"
+BASE_WANDB_DIR="150/"
 # MIXSTYLE_TYPE="resMix"
 # ATTN_TYPE="default"  # 基本的なattentionタイプを使用
 # ATTN_DEEPEN=2        # デフォルトの深さ
@@ -36,10 +36,10 @@ echo ""
 # ################################################################################
 # # 実験2: CMT 50 phi_frame 0.5 warm-up 0
 # ################################################################################
-# uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/cmt_phi-frame-0.5_warm-up-0 \
-#     --cmt \
-#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+ uv run train_pretrained.py \
+     --wandb_dir ${BASE_WANDB_DIR}/cmt/apply_unlabeled \
+     --cmt \
+     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
 # # echo ""
 
