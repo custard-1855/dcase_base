@@ -85,8 +85,8 @@ def mix_style(content_feature): # ok
         return content_feature
 
     # 周波数とチャネルの統計量を計算. 特徴量を重ねる都合上,チャネルを捨てるのは惜しい
-    content_mean = content_feature.mean(dim=(2), keepdim=True)
-    content_var = content_feature.var(dim=(2), keepdim=True)
+    content_mean = content_feature.mean(dim=(3), keepdim=True)
+    content_var = content_feature.var(dim=(3), keepdim=True)
     content_std = (content_var + 1e-6).sqrt()
 
     content_mean, content_std = content_mean.detach(), content_std.detach()
