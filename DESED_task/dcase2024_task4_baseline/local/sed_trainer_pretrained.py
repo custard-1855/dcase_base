@@ -1544,9 +1544,9 @@ class SEDTask4(pl.LightningModule):
             )
 
             for class_name, psds_value in psds1_student_per_class.items():
-                self.log(f"test/desed/student/class/{class_name}/psds_scenario1", psds_value)
+                print(f"test/desed/student/class/{class_name}/psds_scenario1", psds_value)
             for class_name, psds_value in psds2_student_per_class.items():
-                self.log(f"test/desed/student/class/{class_name}/psds_scenario2", psds_value)
+                print(f"test/desed/student/class/{class_name}/psds_scenario2", psds_value)
 
 
 
