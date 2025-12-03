@@ -1220,7 +1220,7 @@ class SEDTask4(pl.LightningModule):
         }
 
 
-        psds1_sed_scores_eval_student = compute_psds_from_scores(
+        psds1_sed_scores_eval_student, _ = compute_psds_from_scores(
             desed_scores,
             desed_ground_truth,
             desed_audio_durations,
@@ -1253,7 +1253,7 @@ class SEDTask4(pl.LightningModule):
             clip_id: self.val_buffer_sed_scores_eval_teacher[clip_id][keys]
             for clip_id in desed_ground_truth.keys()
         }
-        psds1_sed_scores_eval_teacher = compute_psds_from_scores(
+        psds1_sed_scores_eval_teacher, _ = compute_psds_from_scores(
             desed_scores,
             desed_ground_truth,
             desed_audio_durations,
