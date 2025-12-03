@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # 実験設定
-BASE_WANDB_DIR="50/"
-# MIXSTYLE_TYPE="resMix"
-# ATTN_TYPE="default"  # 基本的なattentionタイプを使用
-# ATTN_DEEPEN=2        # デフォルトの深さ
+BASE_WANDB_DIR="150/MixStyle_freq"
+MIXSTYLE_TYPE="resMix"
+ATTN_TYPE="default"  # 基本的なattentionタイプを使用
+ATTN_DEEPEN=2        # デフォルトの深さ
 
 
 # ログディレクトリの作成
@@ -34,96 +34,74 @@ echo ""
 # echo ""
 
 # ################################################################################
-# # 実験2: CMT 50 phi_frame 0.5 warm-up 0
+# # 実験3: CMT neg
 # ################################################################################
 # uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/cmt_phi-frame-0.5_warm-up-0 \
+#     --wandb_dir ${BASE_WANDB_DIR}/use_neg_sample \
 #     --cmt \
-#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
-
-# # echo ""
-
-# ################################################################################
-# # 実験3: CMT 150 phi_frame 0.5 warm-up 50
-# ################################################################################
-# uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/warm-up_50 \
-#     --cmt \
-#     --warmup_epochs 50 \
+#     --use_neg_sample \
 #     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
 # echo ""
 
 
 ################################################################################
-# 実験3: CMT 150 phi_frame 0.5 warm-up 50
+# 実験1: MixStyle
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/use_neg_sample \
+    --wandb_dir ${BASE_WANDB_DIR}/\
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
+    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+
+echo ""
+
+
+################################################################################
+# 実験2: MixStyle + CMT
+################################################################################
+uv run train_pretrained.py \
+    --wandb_dir ${BASE_WANDB_DIR}/+CMT_neg \
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
     --cmt \
     --use_neg_sample \
     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
 echo ""
 
-# ################################################################################
-# # 実験4: CMT 150 phi_frame 0.3 warm-up 0
-# ################################################################################
-# uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.3 \
-#     --cmt \
-#     --phi_frame 0.3 \
-#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
-# echo ""
+################################################################################
+# 実験2: MixStyle + SEBBs
+################################################################################
+uv run train_pretrained.py \
+    --wandb_dir ${BASE_WANDB_DIR}/+SEBBs \
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
+    --sebbs \
+    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
-# ################################################################################
-# # 実験5: CMT 150 phi_frame 0.4 warm-up 0
-# ################################################################################
-# uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.4 \
-#     --cmt \
-#     --phi_frame 0.4 \
-#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
-
-# echo ""
-
-# ################################################################################
-# # 実験6: CMT 150 phi_frame 0.6 warm-up 0
-# ################################################################################
-# uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.6 \
-#     --cmt \
-#     --phi_frame 0.6 \
-#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
-
-# echo ""
-
-# ################################################################################
-# # 実験7: CMT 150 phi_frame 0.7 warm-up 0
-# ################################################################################
-# uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/warm-up_0/phi_frame_0.7 \
-#     --cmt \
-#     --phi_frame 0.7 \
-#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
-
-# echo ""
+echo ""
 
 
+################################################################################
+# 実験2: MixStyle + CMT + SEBBs
+################################################################################
+uv run train_pretrained.py \
+    --wandb_dir ${BASE_WANDB_DIR}/+CMT_neg+SEBBs \
+    --attn_type ${ATTN_TYPE} \
+    --attn_deepen ${ATTN_DEEPEN} \
+    --mixstyle_type ${MIXSTYLE_TYPE} \
+    --cmt \
+    --use_neg_sample \
+    --sebbs \
+    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
+echo ""
 
-# ################################################################################
-# # 実験3: MixStyle
-# ################################################################################
-# uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/MixStyle \
-#     --attn_type ${ATTN_TYPE} \
-#     --attn_deepen ${ATTN_DEEPEN} \
-#     --mixstyle_type ${MIXSTYLE_TYPE} \
-#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
-
-# echo ""
 
 # ################################################################################
 # # 実験4: CMT + SEBBs
