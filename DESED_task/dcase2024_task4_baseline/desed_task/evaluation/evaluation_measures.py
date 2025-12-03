@@ -301,4 +301,4 @@ def compute_psds_from_scores(
             max_efpr=max_efpr,
             psds=psds,
         )
-    return psds
+    return psds, single_class_psds
