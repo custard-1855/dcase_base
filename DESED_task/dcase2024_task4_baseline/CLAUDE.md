@@ -4,141 +4,237 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-DCASE2024 Task 4 Baseline for Sound Event Detection in domestic environments with heterogeneous training datasets and potentially missing labels. Uses Mean-Teacher semi-supervised learning with pre-trained BEATs embeddings, combining DESED and MAESTRO datasets.
+This is a DCASE 2024 Task 4 baseline system for **Sound Event Detection (SED) in Domestic Environments** with heterogeneous training datasets and potentially missing labels. The system handles two datasets:
+- **DESED**: Domestic environment sounds (10 classes)
+- **MAESTRO**: Crowdsourced annotations with soft labels (17 classes)
 
-## Development Workflow (Japanese)
+The baseline uses a **CRNN** (CNN + Bidirectional GRU) architecture with **BEATs pretrained embeddings** in a late-fusion approach, trained using **Mean Teacher** semi-supervised learning.
 
-**IMPORTANT**: This project follows Japanese workflow conventions defined in `.github/copilot-instructions.md`:
+## Common Commands
 
-- Always respond in **日本語** (Japanese)
-- **調査 (Investigation)**: Document findings in `docs/reports/`
-- **計画 (Planning)**: Write minimal requirements to `docs/tasks.md` (delete previous content first, don't write code)
-- **実装 (Implementation)**: Implement ONLY what is specified in `docs/tasks.md` (no extra implementation, no debugging here)
-- **デバッグ (Debug)**: Show debugging steps only
-
-## Architecture Overview
-### High-Level Flow
-```
-Audio (10s, 16kHz)
-  → Mel-Spectrogram (128 bins)
-  → CNN (7 layers) ────┐
-                       ├→ Concatenate → Bidirectional GRU → Attention Pooling
-  BEATs Embeddings ────┘                                      ↓
-                                                    Strong (frame) + Weak (clip) predictions
-```
-
-### Core Architecture: CRNN with Mean-Teacher
-
-**Student/Teacher Model** (`desed_task/nnet/CRNN.py`):
-- **CNN**: 7-layer ConvNet with filters [16, 32, 64, 128, 128, 128, 128]
-- **Embedding Integration**: BEATs embeddings (768-dim) aggregated via adaptive pooling (pool1d) and concatenated with CNN output
-- **RNN**: Single-layer Bidirectional GRU (192 cells)
-- **Attention**: Class-wise attention pooling for weak predictions
-
-**Mean-Teacher** (`local/sed_trainer_pretrained.py`):
-- Teacher is EMA of student (decay=0.999)
-- Self-supervised loss on unlabeled data using teacher predictions
-- Loss weighting ramps up to const_max=2 over 50 warmup epochs
-
-### Multi-Dataset Handling (Key Innovation)
-
-The baseline handles **two heterogeneous datasets** with partially overlapping classes:
-
-1. **DESED**: 10 domestic sounds (Alarm_bell_ringing, Blender, Cat, Dishes, Dog, Electric_shaver_toothbrush, Frying, Running_water, Speech, Vacuum_cleaner)
-2. **MAESTRO**: 17 environmental sounds (cutlery and dishes, furniture dragging, people talking, children voices, coffee machine, footsteps, vehicles, metro, etc.)
-
-**Total: 27 classes** (10 DESED + 17 MAESTRO)
-
-**Class Mapping** (`local/classes_dict.py`):
-- Some MAESTRO classes map to DESED: "people talking" → "Speech", "cutlery and dishes" → "Dishes", "dog_bark" → "Dog"
-- Mapping applied via `process_tsvs()` in `local/utils.py`
-
-**Missing Label Strategy**:
-- Each dataset may lack annotations for the other's classes
-- `classes_mask` parameter masks invalid classes in:
-  - Loss computation (only compute loss for valid classes)
-  - Attention pooling (cannot attend to missing classes)
-- See `CRNN._get_logits_one_head()` at `desed_task/nnet/CRNN.py:157-183`
-
-**Dataset-Specific Rules**:
-- Mixup performed ONLY within same dataset (no cross-dataset mixing)
-- MAESTRO long-form audio uses overlap-add at logit level over sliding windows
-- See `train_pretrained.py:99-156` for MAESTRO splitting logic
-
-### Training Data Organization
-
-**5 concurrent datasets** with specific batch sizes:
-```python
-batch_sizes = [12, 6, 6, 12, 24]  # [maestro_real, synth, strong, weak, unlabel]
-```
-
-1. **MAESTRO real**: Soft-labeled strong annotations from crowdsourcing
-2. **DESED synthetic**: Synthetic soundscapes with strong labels
-3. **DESED strong**: Audioset strong-labeled real audio
-4. **DESED weak**: Clip-level labels only
-5. **DESED unlabeled**: For semi-supervised learning
-
-Uses `ConcatDatasetBatchSampler` (`desed_task/dataio/sampler.py`) to batch from multiple datasets simultaneously. See `train_pretrained.py:486-493`.
-
-### Encoders and Data Loading
-
-**Two-Dataset Encoder** (`train_pretrained.py:62-82`):
-- `CatManyHotEncoder` wraps two `ManyHotEncoder` instances (one for DESED, one for MAESTRO)
-- Handles multi-hot encoding for 27 classes
-- Frame-level encoding matches CNN output temporal resolution
-
-**Dataset Classes** (`desed_task/dataio/datasets.py`):
-- `StronglyAnnotatedSet`: Frame-level labels
-- `WeakSet`: Clip-level labels only
-- `UnlabeledSet`: No labels (for semi-supervised)
-
-**Safe Data Loading** (`local/sed_trainer_pretrained.py:72-100`):
-- Custom `SafeDataLoader` and `SafeCollate` handle missing audio files gracefully
-- Returns None for missing files, skipped by `_NoneSafeIterator`
-
-## Configuration System
-
-**Main Config**: `confs/pretrained.yaml`
-
-Key sections:
-- `pretrained`: BEATs settings (`e2e: False` means use pre-extracted embeddings)
-- `training`: Batch sizes, learning rates, warmup, mixup settings
-- `data`: Dataset paths (expects `../../data` by default)
-- `net`: CRNN architecture (filters, RNN cells, dropout, attention)
-- `feats`: Mel-spectrogram parameters (n_mels=128, n_fft=2048, hop=256)
-
-### Experimental Features
-
-Command-line arguments for experimental features (`train_pretrained.py:698-752`):
-
-**MixStyle** (domain generalization):
+### Environment Setup
 ```bash
---attn_type default        # Attention mechanism type
---attn_deepen 2            # Attention depth
---mixstyle_type resMix     # MixStyle variant (or "disabled")
+# Create conda environment (run line by line if issues occur)
+bash conda_create_environment.sh
 ```
 
-**CMT** (Confidence-based Mean Teacher):
+### Data Preparation
 ```bash
---cmt                      # Enable CMT
---warmup_epochs 50         # CMT warmup
+# Download full dataset (change basedir as needed)
+python generate_dcase_task4_2024.py --basedir="../../data"
+
+# Download specific parts only
+python generate_dcase_task4_2024.py --only_strong
+python generate_dcase_task4_2024.py --only_real
+python generate_dcase_task4_2024.py --only_synth
+python generate_dcase_task4_2024.py --only_maestro
+
+# Extract BEATs embeddings (required before training)
+python extract_embeddings.py --output_dir ./embeddings
+
+# Extract embeddings for evaluation set
+python extract_embeddings.py --eval_set
 ```
 
-**cSEBBs** (change-point detection post-processing):
+### Training
 ```bash
---sebbs                    # Enable SEBBS post-processing
+# Basic training with default config
+python train_pretrained.py
+
+# Or using uv (as seen in run_exp.sh)
+uv run train_pretrained.py
+
+# Train with custom config
+python train_pretrained.py --conf_file confs/my_config.yaml
+
+# Train on specific GPU (GPU indexes start from 1!)
+python train_pretrained.py --gpus 1
+
+# WARNING: --gpus 0 will use CPU, not GPU 0
+
+# Change log directory
+python train_pretrained.py --log_dir ./exp/my_experiment
+
+# Fast development run (for debugging)
+python train_pretrained.py --fast_dev_run
+
+# Resume from checkpoint
+python train_pretrained.py --resume_from_checkpoint /path/to/file.ckpt
 ```
 
-**WandB Integration**:
+### Evaluation
 ```bash
---wandb_dir /path/to/logs  # WandB logging directory
+# Test from checkpoint
+python train_pretrained.py --test_from_checkpoint /path/to/model.ckpt
+
+# Evaluate on eval set
+python train_pretrained.py --eval_from_checkpoint /path/to/model.ckpt
 ```
+
+### Hyperparameter Tuning
+```bash
+# Run Optuna tuning (n_jobs should match CUDA_VISIBLE_DEVICES)
+python optuna_pretrained.py --log_dir MY_TUNING_EXP --n_jobs X
+
+# GPUs must be in exclusive compute mode: nvidia-smi -c 2
+
+# Tune median filter after finding best config
+python optuna_pretrained.py --log_dir MY_TUNING_EXP_MEDIAN --n_jobs X \
+  --test_from_checkpoint best_checkpoint.ckpt --confs path/to/best.yaml
+```
+
+### Experiment Scripts
+```bash
+# Run experiment with CMT
+bash run_exp_cmt.sh
+
+# Run standard experiment
+bash run_exp.sh
+
+# Run Optuna with GMM
+bash run_optuna_gmm.sh
+```
+
+### Monitoring
+```bash
+# View TensorBoard logs
+tensorboard --logdir=./exp/2024_baseline
+
+# Energy consumption logs are in:
+# ./exp/2024_baseline/version_X/codecarbon/emissions_baseline_training.csv
+# ./exp/2024_baseline/version_X/codecarbon/emissions_baseline_test.csv
+```
+
+## Architecture & Code Structure
+
+### High-Level Architecture
+
+The system implements a **Mean Teacher** semi-supervised learning framework with the following key components:
+
+1. **Feature Extraction**: Log-mel spectrograms (128 mel bins) + BEATs pretrained embeddings (768-dim)
+2. **Model**: CRNN with attention pooling
+3. **Training Strategy**:
+   - Student-teacher architecture with EMA (ρ=0.999)
+   - Supervised loss on labeled data (strong, weak, synthetic)
+   - Self-supervised loss (MSE) on unlabeled data
+   - Ramp-up schedule for consistency loss weight
+
+### Key Design Patterns for Missing Labels
+
+Since DESED and MAESTRO have partially overlapping classes with different annotation procedures, the baseline implements:
+
+1. **Class Mapping** (`local/classes_dict.py`):
+   - Maps certain MAESTRO classes to DESED classes (e.g., "people talking" → "Speech")
+   - See `maestro_desed_alias` dict and `process_tsvs()` function in `train_pretrained.py`
+
+2. **Logit Masking** (`desed_task/nnet/CRNN.py`):
+   - Output logits are masked for classes without annotations in current dataset
+   - Applied in loss computation AND attention pooling layer
+
+3. **Within-Dataset Mixup**:
+   - Mixup augmentation only mixes samples from the same dataset
+   - Prevents mixing incompatible annotations
+
+4. **Long-Form Audio Handling** (`local/sed_trainer_pretrained.py`):
+   - MAESTRO clips are long-form (minutes)
+   - Uses overlap-add at logit level over sliding windows
+
+### Module Organization
+
+```
+desed_task/
+├── dataio/          # Data loading and sampling
+│   ├── datasets.py       # StronglyAnnotatedSet, WeakSet, UnlabeledSet
+│   ├── pre_datasets.py   # Additional dataset classes
+│   └── sampler.py        # ConcatDatasetBatchSampler for multi-dataset batching
+├── nnet/            # Neural network modules
+│   ├── CNN.py            # Convolutional blocks
+│   ├── CRNN.py           # Main model: CNN + RNN + attention + embedding fusion
+│   ├── RNN.py            # Bidirectional GRU
+│   ├── mixstyle.py       # MixStyle augmentation
+│   └── pre_CNN.py        # Pre-processing CNN layers
+├── utils/           # Utilities
+│   ├── encoder.py        # ManyHotEncoder, CatManyHotEncoder for multi-dataset labels
+│   └── schedulers.py     # ExponentialWarmup scheduler
+└── evaluation/      # Evaluation metrics and utilities
+
+local/
+├── sed_trainer_pretrained.py  # Main trainer (SEDTask4) - PyTorch Lightning module
+├── classes_dict.py             # Class definitions and mappings
+├── resample_folder.py          # Audio resampling utilities
+├── utils.py                    # MAC calculation, TSV processing
+└── beats/                      # BEATs embedding extraction code
+```
+
+### Configuration System
+
+All experiments are controlled via YAML config files in `confs/`:
+
+- `pretrained.yaml`: Main configuration file
+- Sections:
+  - `pretrained`: BEATs model settings (frozen, embeddings dir)
+  - `cmt`: Confidence-based Masked Training params
+  - `sat`: Self-Adaptive Training params
+  - `sebbs`: SEBBs feature flag
+  - `training`: Batch sizes, epochs, learning rate schedules, mixup settings
+  - `data`: All dataset paths (44kHz and 16kHz versions)
+  - `feats`: Log-mel spectrogram parameters
+  - `net`: Model architecture (CNN layers, RNN cells, attention, median filters)
+  - `opt`: Optimizer settings
+
+**Important**: Default data paths assume `../../data` structure. Update paths in config YAML if data is elsewhere.
+
+### Custom Features (Beyond Original Baseline)
+
+This repository includes experimental features:
+
+1. **CMT (Confidence-based Masked Training)**:
+   - Enable with `--cmt` flag
+   - Configurable `phi_clip` and `phi_frame` thresholds
+   - Warmup epochs supported
+
+2. **SAT (Self-Adaptive Training)**:
+   - Enable with `--sat` flag
+   - Strong augmentation types: cutmix, frame_shift_time_mask
+   - GMM-based adaptive thresholding
+
+3. **SEBBs**:
+   - Enable with `--sebbs` flag
+   - Additional module in `sebbs/` directory
+
+## Data Pipeline Details
+
+### Automatic Preprocessing
+
+On first run, `train_pretrained.py` automatically:
+1. Resamples all audio from 44kHz → 16kHz (requires write permissions on data folder)
+2. Generates duration TSV files for validation sets
+3. Caches resampled data to avoid repeated processing
+
+### Dataset Types
+
+The system handles 5 different data sources with different batch sizes:
+```yaml
+batch_size: [12, 6, 6, 12, 24]  # [maestro, synth, strong, weak, unlabel]
+```
+
+- **maestro**: MAESTRO real recordings (long-form, soft labels)
+- **synth**: DESED synthetic data (strong labels)
+- **strong**: AudioSet strong labels (10s clips)
+- **weak**: DESED weak labels (clip-level only)
+- **unlabel**: Unlabeled in-domain data (for Mean Teacher)
+
+### Multi-Encoder System
+
+Uses `CatManyHotEncoder` (in `desed_task/utils/encoder.py`) to handle:
+- DESED encoder: 10 classes
+- MAESTRO encoder: 17 classes
+- Combined 27-class output space with selective masking
 
 ## Energy Consumption Tracking
 
-**MANDATORY** for DCASE challenge submissions. Uses CodeCarbon to track GPU/CPU/RAM energy.
+**Mandatory for DCASE submissions**. The system uses CodeCarbon:
 
-Implementation in `local/sed_trainer_pretrained.py`:
 ```python
 from codecarbon import OfflineEmissionsTracker
 tracker = OfflineEmissionsTracker(
@@ -147,73 +243,62 @@ tracker = OfflineEmissionsTracker(
 )
 ```
 
-Results saved to:
-- `./exp/2024_baseline/version_X/codecarbon/emissions_baseline_training.csv`
-- `./exp/2024_baseline/version_X/codecarbon/emissions_baseline_test.csv`
-
-Must submit full CSV files for GPU, CPU, and RAM usage.
+Implementation is in `local/sed_trainer_pretrained.py`. Output CSV files contain GPU/CPU/RAM energy breakdowns.
 
 ## Evaluation Metrics
 
-- **PSDS** (Polyphonic Sound Detection Score): Scenarios 1 and 2 using `sed_scores_eval` library (NOT `psds_eval`)
-- **mAUC**: Segment-based mean Area Under Curve
-- **Energy Consumption**: kWh for training and inference
-- **MACs**: Multiply-accumulate operations for 10s audio (use `calculate_macs()` in `local/utils.py`)
+- **PSDS** (Polyphonic Sound Detection Score) - computed with `sed_scores_eval` library
+- Submissions require **timestamped scores**, not just detected events
+- Multiple scenarios evaluated (PSDS-scenario1, mean pAUC)
+- Median filtering applied post-hoc (per-class filter lengths in config)
 
-**Key**: Submit timestamped scores (not detected events) for accurate PSDS computation.
+## Important Gotchas
 
-## Important Implementation Details
+1. **GPU Indexing**: `--gpus` parameter starts from 1, not 0. Using `--gpus 0` runs on CPU.
 
-1. **GPU Indexing**: GPU indexes start from 1. `--gpus 0` = CPU, `--gpus 1` = GPU 0.
+2. **Data Paths**: Config assumes `../../data` relative to repo. First run creates `*_16k` folders.
 
-2. **First Run Setup**: Creates resampled 16kHz data from 44.1kHz sources. Needs write permissions on data directory.
+3. **Embeddings Required**: Must run `extract_embeddings.py` before training with `use_embeddings: True`.
 
-3. **Embeddings Required**: With `e2e: False` (default), must run `extract_embeddings.py` before training.
+4. **Multi-Dataset Batching**: The `ConcatDatasetBatchSampler` ensures each batch contains samples from all datasets.
 
-4. **Missing Files**: Code includes filtering at `train_pretrained.py:207-212` via `filter_nonexistent_files()`.
+5. **Class Masking**: When modifying model outputs, remember masking is applied in both loss computation AND attention pooling.
 
-5. **Validation Split**: MAESTRO split is deterministic by scene (5 scenes: cafe_restaurant, city_center, grocery_store, metro_station, residential_area) with 90/10 train/val split per scene. See `split_maestro()` at `train_pretrained.py:99-156`.
+6. **Weights & Biases**: Set `use_wandb: True` in config and ensure wandb is configured.
 
-6. **Median Filtering**: Per-class median filter lengths tuned via Optuna. Applied in post-processing. See `net.median_filter` in config.
+7. **Deterministic Training**: Set `deterministic: True` in config for reproducibility, but note this may reduce performance.
 
-7. **Attention Masking**: Attention pooling masks both padding (temporal) and invalid classes. See `CRNN._get_logits_one_head()` at lines 166-171.
+8. **Pre-commit Hooks**: Repository uses pre-commit (see `.pre-commit-config.yaml` if it exists).
 
-8. **Domain Identification Prohibited**: System must not leverage domain information (MAESTRO vs DESED) during inference.
+## Working with This Codebase
 
-## File Organization
+### When Adding New Features
 
-```
-train_pretrained.py              # Main training script
-confs/pretrained.yaml            # Main configuration
+- Configuration changes go in `confs/pretrained.yaml`
+- Model architecture changes go in `desed_task/nnet/CRNN.py`
+- Training logic changes go in `local/sed_trainer_pretrained.py`
+- New augmentations can be added in `desed_task/data_augm.py`
 
-local/                           # Task-specific implementations
-  sed_trainer_pretrained.py      # PyTorch Lightning module (SEDTask4)
-  classes_dict.py                # Class definitions and MAESTRO→DESED mapping
-  utils.py                       # TSV processing, MACs calculation
-  beats/                         # BEATs model implementation
+### When Running Experiments
 
-desed_task/                      # Core SED framework
-  nnet/
-    CRNN.py                      # Main CRNN with embedding integration
-    CNN.py                       # CNN backbone
-    RNN.py                       # Bidirectional GRU
-  dataio/
-    datasets.py                  # Dataset classes (Strong/Weak/Unlabeled)
-    sampler.py                   # ConcatDatasetBatchSampler
-  utils/
-    encoder.py                   # ManyHotEncoder, CatManyHotEncoder
-    scaler.py                    # TorchScaler for feature normalization
-    postprocess.py               # ClassWiseMedianFilter
-  evaluation/
-    evaluation_measures.py       # PSDS and metrics computation
+- Use shell scripts (`run_exp.sh`) for reproducible experiment tracking
+- Log directory structure: `./exp/<experiment_name>/version_X/`
+- Always specify `--wandb_dir` for proper organization
+- Check `docs/reports/` for experiment documentation (in Japanese)
 
-sebbs/                           # cSEBBs post-processing module
-```
+### When Debugging
 
-## Key Entry Points
+- Use `--fast_dev_run` for quick sanity checks
+- Enable progress bar: `enable_progress_bar: True` in config
+- Check TensorBoard for training curves
+- Validation runs every N epochs (configurable via `validation_interval`)
 
-- **Training Loop**: `local/sed_trainer_pretrained.py` → `SEDTask4.training_step()`
-- **Validation**: `SEDTask4.validation_step()` → computes PSDS on both DESED and MAESTRO
-- **Model Forward**: `desed_task/nnet/CRNN.py` → `CRNN.forward(x, embeddings, classes_mask)`
-- **Data Loading**: `train_pretrained.py:414-493` → creates 5 datasets and batch sampler
-- **Loss Computation**: Check `sed_trainer_pretrained.py` for masked loss handling
+## Japanese Language Support
+
+This repository uses Japanese for:
+- Comments in some configuration files
+- Documentation in `docs/` directory
+- Copilot instructions (`.github/copilot-instructions.md`)
+- Some variable naming and logging
+
+When working with Japanese users, respond in Japanese and follow the workflow defined in copilot instructions.
