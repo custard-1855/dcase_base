@@ -1615,11 +1615,9 @@ class SEDTask4(pl.LightningModule):
             )
 
             for class_name, psds_value in psds1_teacher_per_class.items():
-                self.log(f"test/desed/teacher/class/{class_name}/psds_scenario1", psds_value)
+                print(f"test/desed/teacher/class/{class_name}/psds_scenario1", psds_value)
             for class_name, psds_value in psds2_teacher_per_class.items():
-                self.log(f"test/desed/teacher/class/{class_name}/psds_scenario2", psds_value)
-
-
+                print(f"test/desed/teacher/class/{class_name}/psds_scenario2", psds_value)
 
             intersection_f1_macro_thres05_teacher_sed_scores_eval = (
                 sed_scores_eval.intersection_based.fscore(
