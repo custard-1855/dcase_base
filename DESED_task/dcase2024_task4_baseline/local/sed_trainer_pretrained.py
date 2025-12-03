@@ -139,6 +139,59 @@ class SEDTask4(pl.LightningModule):
 
         self.mixup_augmentor = MixupAugmentor(self.hparams["training"])
 
+        # --- SAT-SED (Self-Adaptive Thresholding) Parameters ---
+        self.sat_enabled = self.hparams.get("sat", {}).get("enabled", False)
+        
+        if self.sat_enabled:
+            # desedのクラス数
+            self.K = len(classes_labels_desed)
+            # EMA係数 (lambda)
+            self.sat_lambda = self.hparams.get("sat", {}).get("lambda", 0.999) 
+            # 疑似ラベル損失の重み (w_u)
+            self.sat_w_u = self.hparams.get("sat", {}).get("w_u", 0.5) 
+
+            self.cutmix_alpha = self.hparams.get("sat", {}).get("cutmix_alpha", 1.0)
+
+            # Strong augmentation type selection
+            self.strong_augment_type = self.hparams.get("sat", {}).get("strong_augment_type", "cutmix")
+
+            # Frame Shift + Time Masking parameters
+            self.strong_augment_prob = self.hparams.get("sat", {}).get("strong_augment_prob", 1.0)
+            self.frame_shift_std = self.hparams.get("sat", {}).get("frame_shift_std", 90)
+            self.time_mask_max = self.hparams.get("sat", {}).get("time_mask_max", 5)
+            self.time_mask_prob = self.hparams.get("sat", {}).get("time_mask_prob", 0.5)
+
+            # SACT (Clip) 用バッファ
+            # register_buffer は、モデルの state_dict に含まれるが、optimizerの対象にならない
+            self.register_buffer("global_clip_threshold", torch.tensor(1.0 / self.K)) 
+            self.register_buffer("local_clip_probabilities", torch.full((self.K,), 1.0 / self.K)) 
+            
+            # SAFT (Frame) GMMパラメータ (Eq 7)
+            try:
+                # __init__時点で GMM がインポート可能か確認
+                from sklearn.mixture import GaussianMixture
+                self.gmm_imported = True
+            except ImportError:
+                self.gmm_imported = False
+                # 学習開始時に一度だけ警告
+                warnings.warn("sklearn.mixture.GaussianMixture not found. SAFT (GMM fitting) will be disabled.")
+            
+            self.gmm_n_init = self.hparams.get("sat", {}).get("gmm_n_init", 5)
+            self.gmm_max_iter = self.hparams.get("sat", {}).get("gmm_max_iter", 100)
+            self.gmm_reg_covar = float(self.hparams.get("sat", {}).get("gmm_reg_covar", 1e-6))
+            self.gmm_tol = float(self.hparams.get("sat", {}).get("gmm_tol", 1e-3))
+
+        # CMT parameters
+        self.cmt_enabled = self.hparams.get("cmt", {}).get("enabled", False)
+        self.cmt_phi_clip = float(self.hparams.get("cmt", {}).get("phi_clip", 0.5))
+        self.cmt_phi_frame = float(self.hparams.get("cmt", {}).get("phi_frame", 0.5))
+        self.cmt_scale = self.hparams.get("cmt", {}).get("scale", False)
+        self.cmt_warmup_epochs = int(self.hparams.get("cmt", {}).get("warmup_epochs", 50))
+
+
+        # cSEBBs param
+        self.sebbs_enabled = self.hparams.get("sebbs", {}).get("enabled", False)
+
         if self.hparams["pretrained"]["e2e"]:
             self.pretrained_model = pretrained_model
         # else we use pre-computed embeddings from hdf5
