@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash　-eu
 
 # wandb/new_runs内の全てのcheckpointに対してテストを実行するスクリプト
 
@@ -19,7 +19,7 @@ echo "=========================================="
 echo ""
 
 # wandb/new_runs内の全てのcheckpointファイルを検索
-CHECKPOINT_FILES=$(find ${NEW_RUNS_DIR} -type f -path "run-*/files/checkpoints/*.ckpt" | sort)
+CHECKPOINT_FILES=$(find wandb/new_runs/run-*/files/checkpoints/epoch*.ckpt | sort)
 
 # チェックポイントが見つからない場合
 if [ -z "$CHECKPOINT_FILES" ]; then
@@ -30,7 +30,7 @@ if [ -z "$CHECKPOINT_FILES" ]; then
     echo "No tests to run"
     echo "End Time: $(date)"
     echo "=========================================="
-    exit 0
+    return 1
 fi
 
 # 見つかったチェックポイントの数を表示
