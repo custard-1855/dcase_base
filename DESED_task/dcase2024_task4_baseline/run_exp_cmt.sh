@@ -57,32 +57,33 @@ echo ""
 
 # echo ""
 
+# ################################################################################
+# # 実験1: CMT 150 
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/CMT\
+#     --cmt \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+
+# echo ""
+
+
+# ################################################################################
+# # 実験2: Nomal
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/nomal \
+#     2>&1 | tee ${LOG_DIR}${TIMESTAMP}.log
+
+# echo ""
+
 ################################################################################
-# 実験1: CMT 150 
+# 実験3: CMT(use_neg_sample) + MixStyle
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/CMT\
+    --wandb_dir ${BASE_WANDB_DIR}/CMT-use_neg_sample+MixStyle \
     --cmt \
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
-
-echo ""
-
-
-################################################################################
-# 実験2: Nomal
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/nomal \
-    2>&1 | tee ${LOG_DIR}${TIMESTAMP}.log
-
-echo ""
-
-################################################################################
-# 実験3: CMT + MixStyle
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/CMT+MixStyle \
-    --cmt \
+    --use_neg_sample \
     --attn_type ${ATTN_TYPE} \
     --attn_deepen ${ATTN_DEEPEN} \
     --mixstyle_type ${MIXSTYLE_TYPE} \
@@ -91,11 +92,12 @@ uv run train_pretrained.py \
 echo ""
 
 ################################################################################
-# 実験4: CMT + SEBBs
+# 実験4: CMT(use_neg_sample) + SEBBs
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/CMT+SEBBs \
+    --wandb_dir ${BASE_WANDB_DIR}/CMT-use_neg_sample+SEBBs \
     --cmt \
+    --use_neg_sample \
     --sebbs \
     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
@@ -106,8 +108,9 @@ echo ""
 # 実験4: all
 ################################################################################
 uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/CMT+MixStyle+SEBBs \
+    --wandb_dir ${BASE_WANDB_DIR}/CMT-use_neg_sample+MixStyle+SEBBs \
     --cmt \
+    --use_neg_sample \
     --attn_type ${ATTN_TYPE} \
     --attn_deepen ${ATTN_DEEPEN} \
     --mixstyle_type ${MIXSTYLE_TYPE} \
