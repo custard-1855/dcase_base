@@ -19,7 +19,7 @@ echo "=========================================="
 echo ""
 
 # wandb/new_runs内の全てのcheckpointファイルを検索
-CHECKPOINT_FILES=$(find ${NEW_RUNS_DIR} -type f -path "*/run-*/files/checkpoints/*.ckpt" | sort)
+CHECKPOINT_FILES=$(find ${NEW_RUNS_DIR} -type f -path "run-*/files/checkpoints/*.ckpt" | sort)
 
 # チェックポイントが見つからない場合
 if [ -z "$CHECKPOINT_FILES" ]; then
