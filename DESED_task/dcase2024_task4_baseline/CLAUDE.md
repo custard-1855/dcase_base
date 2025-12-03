@@ -16,6 +16,10 @@ DCASE2024 Task 4 Baseline for Sound Event Detection in domestic environments wit
 - **実装 (Implementation)**: Implement ONLY what is specified in `docs/tasks.md` (no extra implementation, no debugging here)
 - **デバッグ (Debug)**: Show debugging steps only
 
+### use uv
+You should use uv for python.
+
+
 ## Architecture Overview
 ### High-Level Flow
 ```
