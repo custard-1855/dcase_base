@@ -85,9 +85,14 @@ def split_maestro_count(maestro_df: pd.DataFrame, maestro_split: float, seed: in
     return train_files, valid_files
 
 
-def convert_path(config_path: str, base_path: str) -> str:
-    """設定ファイルのパスを実際のパスに変換"""
-    return config_path.replace("/mnt/data/data/dcase/dataset/", f"{base_path}/")
+def convert_path(config_path: str, base_path: str = None) -> str:
+    """設定ファイルのパスを実際のパスに変換（SSH環境ではそのまま返す）"""
+    if base_path is None:
+        # SSH環境: 設定ファイルのパスをそのまま使用
+        return config_path
+    else:
+        # ローカル環境: パスを変換
+        return config_path.replace("/mnt/data/data/dcase/dataset/", f"{base_path}/")
 
 
 def main():
@@ -103,10 +108,15 @@ def main():
         config = yaml.safe_load(f)
 
     # データベースパスを設定
-    base_path = "../../../sed-fl/fl/data/dcase/dataset"
+    # SSH環境: None (設定ファイルのパスをそのまま使用)
+    # ローカル環境: "../../../sed-fl/fl/data/dcase/dataset"
+    base_path = None  # SSH環境用
 
     print(f"\n設定ファイル: {config_path}")
-    print(f"データベースパス: {base_path}")
+    if base_path is None:
+        print(f"環境: SSH (confs/pretrained.yamlのパスをそのまま使用)")
+    else:
+        print(f"環境: ローカル (データベースパス: {base_path})")
     print(f"Weak split: {config['training']['weak_split']}")
     print(f"MAESTRO split: {config['training']['maestro_split']}")
     print(f"Seed: {config['training']['seed']}")
@@ -360,7 +370,10 @@ def main():
         f.write("="*80 + "\n\n")
 
         f.write(f"設定ファイル: {config_path}\n")
-        f.write(f"データベースパス: {base_path}\n")
+        if base_path is None:
+            f.write(f"環境: SSH (confs/pretrained.yamlのパスをそのまま使用)\n")
+        else:
+            f.write(f"環境: ローカル (データベースパス: {base_path})\n")
         f.write(f"Weak split: {config['training']['weak_split']}\n")
         f.write(f"MAESTRO split: {config['training']['maestro_split']}\n")
         f.write(f"Seed: {config['training']['seed']}\n\n")
