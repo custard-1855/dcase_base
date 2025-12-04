@@ -154,7 +154,14 @@ def count_samples_per_class(dataset, encoder, dataset_name):
     valid_count = len(dataset) - skipped_count
     print(f"  有効サンプル: {valid_count} / {len(dataset)} ({skipped_count} skipped)")
 
-    return class_counts, class_to_samples
+    # ログ情報を返す
+    log_info = {
+        "total_samples": len(dataset),
+        "valid_samples": valid_count,
+        "skipped_samples": skipped_count
+    }
+
+    return class_counts, class_to_samples, log_info
 
 
 def sample_fixed_subset(class_to_samples, samples_per_class, seed, class_names):
@@ -165,6 +172,7 @@ def sample_fixed_subset(class_to_samples, samples_per_class, seed, class_names):
     np.random.seed(seed)
     selected_indices = []
     class_distribution = {}
+    sampling_log = []  # サンプリング情報のログ
 
     for class_idx, sample_indices in class_to_samples.items():
         class_name = class_names[class_idx]
@@ -173,10 +181,26 @@ def sample_fixed_subset(class_to_samples, samples_per_class, seed, class_names):
         # データ不足の場合はフォールバック: available // 2
         if available < samples_per_class:
             target = available // 2
-            print(f"  {class_name}: 不足のため {target}/{available} サンプル選択 (目標: {samples_per_class})")
+            msg = f"  {class_name}: 不足のため {target}/{available} サンプル選択 (目標: {samples_per_class})"
+            print(msg)
+            sampling_log.append({
+                "class_name": class_name,
+                "available": available,
+                "target": target,
+                "requested": samples_per_class,
+                "fallback": True
+            })
         else:
             target = samples_per_class
-            print(f"  {class_name}: {target}/{available} サンプル選択")
+            msg = f"  {class_name}: {target}/{available} サンプル選択"
+            print(msg)
+            sampling_log.append({
+                "class_name": class_name,
+                "available": available,
+                "target": target,
+                "requested": samples_per_class,
+                "fallback": False
+            })
 
         # ランダムサンプリング
         if target > 0:
@@ -187,10 +211,10 @@ def sample_fixed_subset(class_to_samples, samples_per_class, seed, class_names):
     # 重複を除去
     selected_indices = sorted(list(set(selected_indices)))
 
-    return selected_indices, class_distribution
+    return selected_indices, class_distribution, sampling_log
 
 
-def generate_reports(result, output_path, samples_per_class):
+def generate_reports(result, output_path, samples_per_class, processing_logs):
     """CSV とMarkdown形式でレポートを生成"""
     output_path = Path(output_path)
     base_name = output_path.stem
@@ -264,7 +288,37 @@ def generate_reports(result, output_path, samples_per_class):
         f.write(f"- サンプル数/クラス: {samples_per_class}\n")
         f.write(f"- ランダムシード: {result['seed']}\n")
         f.write(f"- 生成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-        f.write(f"- 設定ファイル: {result['config_path']}\n\n")
+        f.write(f"- 設定ファイル: {result['config_path']}\n")
+        f.write(f"- 評価対象クラス: {result['total_classes']} (DESED: {len(result['desed_classes'])}, MAESTRO: {len(result['maestro_classes'])})\n\n")
+
+        # 処理ログ
+        f.write("## 処理ログ\n\n")
+
+        for log_entry in processing_logs:
+            dataset_name = log_entry["dataset_name"]
+            f.write(f"### {dataset_name}\n\n")
+
+            # カウント情報
+            if "count_info" in log_entry:
+                count_info = log_entry["count_info"]
+                f.write("**サンプル数のカウント結果:**\n\n")
+                f.write(f"- Total: {count_info['total_samples']}\n")
+                f.write(f"- Valid: {count_info['valid_samples']}\n")
+                f.write(f"- Skipped: {count_info['skipped_samples']}\n\n")
+
+            # サンプリング情報
+            if "sampling_log" in log_entry and log_entry["sampling_log"]:
+                f.write("**クラス別サンプリング:**\n\n")
+                f.write("| Class | Available | Target | Requested | Status |\n")
+                f.write("|-------|-----------|--------|-----------|--------|\n")
+                for item in log_entry["sampling_log"]:
+                    status = "⚠️ Fallback" if item["fallback"] else "✓ OK"
+                    f.write(f"| {item['class_name']} | {item['available']} | {item['target']} | {item['requested']} | {status} |\n")
+                f.write("\n")
+
+            # 選択されたサンプル数
+            if "selected_count" in log_entry:
+                f.write(f"**選択されたサンプル数:** {log_entry['selected_count']}\n\n")
 
         # データセット別サマリー
         f.write("## データセット別サマリー\n\n")
@@ -330,6 +384,22 @@ def generate_reports(result, output_path, samples_per_class):
             fallback = "Yes" if data["fallback"] else "No"
             f.write(f"| {class_name} | {data['maestro_training']} | {data['maestro_validation']} | {total} | {fallback} |\n")
 
+        f.write("\n")
+
+        # 全体のクラス分布
+        f.write("## 全体のクラス分布\n\n")
+        if "overall_class_distribution" in result:
+            overall_dist = result["overall_class_distribution"]
+            f.write("| Class | Total Samples |\n")
+            f.write("|-------|---------------|\n")
+            for class_name in sorted(overall_dist.keys()):
+                f.write(f"| {class_name} | {overall_dist[class_name]} |\n")
+            f.write("\n")
+
+        # 合計サンプル数
+        total_samples = sum(d["total_samples"] for d in result["datasets"].values())
+        f.write(f"**合計サンプル数:** {total_samples}\n")
+
     return csv_path, md_path
 
 
@@ -391,6 +461,9 @@ def main():
         "datasets": {}
     }
 
+    # 処理ログを収集
+    processing_logs = []
+
     # ===== 1. DESED Validation (synth_val) =====
     print("\n" + "="*60)
     print("DESED Validation (synth_val) の処理")
@@ -405,11 +478,11 @@ def main():
         return_filename=True,
     )
 
-    counts, class_samples = count_samples_per_class(synth_val_dataset, encoder, "DESED Validation")
+    counts, class_samples, count_info = count_samples_per_class(synth_val_dataset, encoder, "DESED Validation")
 
     # DESEDクラス（0-9）のみを対象
     desed_class_samples = {k: v for k, v in class_samples.items() if k < 10}
-    selected_indices, class_dist = sample_fixed_subset(
+    selected_indices, class_dist, sampling_log = sample_fixed_subset(
         desed_class_samples, args.samples_per_class, args.seed, all_class_names
     )
 
@@ -421,6 +494,14 @@ def main():
     }
 
     print(f"選択されたサンプル数: {len(selected_indices)}")
+
+    # ログを記録
+    processing_logs.append({
+        "dataset_name": "DESED Validation (synth_val)",
+        "count_info": count_info,
+        "sampling_log": sampling_log,
+        "selected_count": len(selected_indices)
+    })
 
     # ===== 2. DESED Unlabeled =====
     print("\n" + "="*60)
@@ -454,6 +535,17 @@ def main():
 
     print(f"選択されたサンプル数: {len(unlabeled_indices)} / {total_unlabeled}")
 
+    # ログを記録
+    processing_logs.append({
+        "dataset_name": "DESED Unlabeled",
+        "count_info": {
+            "total_samples": total_unlabeled,
+            "valid_samples": total_unlabeled,
+            "skipped_samples": 0
+        },
+        "selected_count": len(unlabeled_indices)
+    })
+
     # ===== 3. MAESTRO Training + Validation =====
     print("\n" + "="*60)
     print("MAESTRO Training + Validation の処理")
@@ -473,7 +565,7 @@ def main():
         return_filename=True,
     )
 
-    counts_train, class_samples_train = count_samples_per_class(
+    counts_train, class_samples_train, count_info_train = count_samples_per_class(
         maestro_train_dataset, encoder, "MAESTRO Training"
     )
 
@@ -487,7 +579,7 @@ def main():
         return_filename=True,
     )
 
-    counts_valid, class_samples_valid = count_samples_per_class(
+    counts_valid, class_samples_valid, count_info_valid = count_samples_per_class(
         maestro_valid_dataset, encoder, "MAESTRO Validation"
     )
 
@@ -501,7 +593,7 @@ def main():
     # 各データセットから samples_per_class ずつサンプリング
     # Training
     maestro_train_class_samples = {k: v for k, v in class_samples_train.items() if k in maestro_class_indices}
-    train_selected_indices, train_class_dist = sample_fixed_subset(
+    train_selected_indices, train_class_dist, train_sampling_log = sample_fixed_subset(
         maestro_train_class_samples, args.samples_per_class, args.seed, all_class_names
     )
 
@@ -512,9 +604,17 @@ def main():
         "class_distribution": train_class_dist
     }
 
+    # ログを記録
+    processing_logs.append({
+        "dataset_name": "MAESTRO Training",
+        "count_info": count_info_train,
+        "sampling_log": train_sampling_log,
+        "selected_count": len(train_selected_indices)
+    })
+
     # Validation
     maestro_valid_class_samples = {k: v for k, v in class_samples_valid.items() if k in maestro_class_indices}
-    valid_selected_indices, valid_class_dist = sample_fixed_subset(
+    valid_selected_indices, valid_class_dist, valid_sampling_log = sample_fixed_subset(
         maestro_valid_class_samples, args.samples_per_class, args.seed + 1, all_class_names
     )
 
@@ -524,6 +624,14 @@ def main():
         "sample_indices": valid_selected_indices,
         "class_distribution": valid_class_dist
     }
+
+    # ログを記録
+    processing_logs.append({
+        "dataset_name": "MAESTRO Validation",
+        "count_info": count_info_valid,
+        "sampling_log": valid_sampling_log,
+        "selected_count": len(valid_selected_indices)
+    })
 
     # 全体のクラス分布を集計
     overall_class_dist = defaultdict(int)
@@ -539,7 +647,7 @@ def main():
         json.dump(result, f, indent=2)
 
     # レポート生成（CSV, Markdown）
-    csv_path, md_path = generate_reports(result, args.output, args.samples_per_class)
+    csv_path, md_path = generate_reports(result, args.output, args.samples_per_class, processing_logs)
 
     print("\n" + "="*60)
     print("完了")
