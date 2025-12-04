@@ -4,6 +4,7 @@
 
 train_pretrained.pyの実際のデータセット構築ロジックに基づいて、
 学習/検証/評価に使用されているデータ数を調査します。
+クラスごとのイベント数も表示します。
 """
 
 import os
@@ -12,6 +13,54 @@ import numpy as np
 import yaml
 from pathlib import Path
 from typing import Dict, List, Tuple
+from collections import OrderedDict, Counter
+
+
+# クラス定義（local/classes_dict.pyから）
+classes_labels_desed = OrderedDict(
+    {
+        "Alarm_bell_ringing": 0,
+        "Blender": 1,
+        "Cat": 2,
+        "Dishes": 3,
+        "Dog": 4,
+        "Electric_shaver_toothbrush": 5,
+        "Frying": 6,
+        "Running_water": 7,
+        "Speech": 8,
+        "Vacuum_cleaner": 9,
+    }
+)
+
+classes_labels_maestro_real = OrderedDict(
+    {
+        "cutlery and dishes": 0,
+        "furniture dragging": 1,
+        "people talking": 2,
+        "children voices": 3,
+        "coffee machine": 4,
+        "footsteps": 5,
+        "large_vehicle": 6,
+        "car": 7,
+        "brakes_squeaking": 8,
+        "cash register beeping": 9,
+        "announcement": 10,
+        "shopping cart": 11,
+        "metro leaving": 12,
+        "metro approaching": 13,
+        "door opens/closes": 14,
+        "wind_blowing": 15,
+        "birds_singing": 16,
+    }
+)
+
+maestro_desed_alias = {
+    "people talking": "Speech",
+    "children voices": "Speech",
+    "announcement": "Speech",
+    "cutlery and dishes": "Dishes",
+    "dog_bark": "Dog",
+}
 
 
 def count_audio_files(folder_path: str) -> int:
@@ -85,6 +134,72 @@ def split_maestro_count(maestro_df: pd.DataFrame, maestro_split: float, seed: in
     return train_files, valid_files
 
 
+def count_class_events(df: pd.DataFrame, dataset_type: str = "desed") -> Dict[str, int]:
+    """
+    TSVのDataFrameからクラスごとのイベント数をカウント
+
+    Args:
+        df: TSV DataFrameデータ（event_labelカラムが必要）
+        dataset_type: "desed", "maestro_real", "maestro_synth"のいずれか
+
+    Returns:
+        クラス名をキー、イベント数を値とする辞書
+    """
+    if df.empty or 'event_label' not in df.columns:
+        return {}
+
+    # event_labelカラムのカウント
+    class_counts = Counter(df['event_label'].dropna())
+
+    # 期待されるクラスリストを取得
+    if dataset_type == "desed":
+        expected_classes = list(classes_labels_desed.keys())
+    elif dataset_type == "maestro_real":
+        expected_classes = list(classes_labels_maestro_real.keys())
+    else:
+        expected_classes = []
+
+    # 期待されるクラスで0のものも含める
+    result = OrderedDict()
+    for cls in expected_classes:
+        result[cls] = class_counts.get(cls, 0)
+
+    # 期待されないクラスも追加
+    for cls, count in class_counts.items():
+        if cls not in result:
+            result[cls] = count
+
+    return result
+
+
+def print_class_statistics(class_counts: Dict[str, int], indent: str = "   ", top_n: int = None):
+    """
+    クラスごとの統計を見やすく表示
+
+    Args:
+        class_counts: クラス名をキー、イベント数を値とする辞書
+        indent: インデント文字列
+        top_n: 上位N個のみ表示（Noneの場合は全て表示）
+    """
+    if not class_counts:
+        print(f"{indent}(データなし)")
+        return
+
+    # カウントでソート
+    sorted_counts = sorted(class_counts.items(), key=lambda x: x[1], reverse=True)
+
+    if top_n:
+        sorted_counts = sorted_counts[:top_n]
+
+    total = sum(class_counts.values())
+    print(f"{indent}Total events: {total}")
+
+    for cls, count in sorted_counts:
+        if count > 0:
+            percentage = (count / total * 100) if total > 0 else 0
+            print(f"{indent}  {cls}: {count} ({percentage:.1f}%)")
+
+
 def convert_path(config_path: str, base_path: str = None) -> str:
     """設定ファイルのパスを実際のパスに変換（SSH環境ではそのまま返す）"""
     if base_path is None:
@@ -136,28 +251,36 @@ def main():
     synth_tsv = convert_path(data_config['synth_tsv'], base_path)
     synth_audio_count = count_audio_files(synth_folder)
     synth_tsv_count, synth_df = count_tsv_unique_files(synth_tsv)
+    synth_class_counts = count_class_events(synth_df, "desed")
     train_info['synth_set'] = {
         'audio_files': synth_audio_count,
         'tsv_entries': synth_tsv_count,
-        'description': 'Synthetic training (index 1 in tot_train_data)'
+        'description': 'Synthetic training (index 1 in tot_train_data)',
+        'class_counts': synth_class_counts
     }
     print(f"\n1. synth_set:")
     print(f"   Audio files: {synth_audio_count}")
     print(f"   TSV entries: {synth_tsv_count}")
+    print(f"   Class distribution (DESED 10 classes):")
+    print_class_statistics(synth_class_counts, indent="     ")
 
     # 2. strong_set (Strong real)
     strong_folder = convert_path(data_config['strong_folder'], base_path)
     strong_tsv = convert_path(data_config['strong_tsv'], base_path)
     strong_audio_count = count_audio_files(strong_folder)
     strong_tsv_count, strong_df = count_tsv_unique_files(strong_tsv)
+    strong_class_counts = count_class_events(strong_df, "desed")
     train_info['strong_set'] = {
         'audio_files': strong_audio_count,
         'tsv_entries': strong_tsv_count,
-        'description': 'Strong real (part of strong_full_set)'
+        'description': 'Strong real (part of strong_full_set)',
+        'class_counts': strong_class_counts
     }
     print(f"\n2. strong_set (Strong real):")
     print(f"   Audio files: {strong_audio_count}")
     print(f"   TSV entries: {strong_tsv_count}")
+    print(f"   Class distribution (DESED 10 classes):")
+    print_class_statistics(strong_class_counts, indent="     ")
 
     # 3. strong_full_set = strong_set + synth_set
     strong_full_count = strong_tsv_count + synth_tsv_count
@@ -174,6 +297,7 @@ def main():
     weak_tsv = convert_path(data_config['weak_tsv'], base_path)
     weak_audio_count = count_audio_files(weak_folder)
     weak_tsv_count, weak_df = count_tsv_unique_files(weak_tsv)
+    weak_class_counts = count_class_events(weak_df, "desed")
 
     # weak_splitを適用
     weak_split = config['training']['weak_split']
@@ -187,13 +311,16 @@ def main():
         'tsv_total': weak_tsv_count,
         'tsv_train': train_weak_count,
         'tsv_valid': valid_weak_count,
-        'description': f'Weak training ({weak_split*100:.0f}% of weak data, index 3 in tot_train_data)'
+        'description': f'Weak training ({weak_split*100:.0f}% of weak data, index 3 in tot_train_data)',
+        'class_counts': weak_class_counts
     }
     print(f"\n4. weak_set (Weak training):")
     print(f"   Total audio files: {weak_audio_count}")
     print(f"   Total TSV entries: {weak_tsv_count}")
     print(f"   Train split ({weak_split*100:.0f}%): {train_weak_count}")
     print(f"   Valid split ({(1-weak_split)*100:.0f}%): {valid_weak_count}")
+    print(f"   Class distribution (DESED 10 classes):")
+    print_class_statistics(weak_class_counts, indent="     ")
 
     # 5. unlabeled_set (Unlabeled)
     unlabeled_folder = convert_path(data_config['unlabeled_folder'], base_path)
@@ -210,6 +337,7 @@ def main():
     maestro_real_tsv = convert_path(data_config['real_maestro_train_tsv'], base_path)
     maestro_real_audio_count = count_audio_files(maestro_real_folder)
     maestro_real_tsv_count, maestro_real_df = count_tsv_unique_files(maestro_real_tsv)
+    maestro_class_counts = count_class_events(maestro_real_df, "maestro_real")
 
     # maestro_splitを適用
     maestro_split = config['training']['maestro_split']
@@ -224,13 +352,16 @@ def main():
         'tsv_total': maestro_real_tsv_count,
         'tsv_train': maestro_train_files,
         'tsv_valid': maestro_valid_files,
-        'description': f'MAESTRO real training ({maestro_split*100:.0f}% split, index 0 in tot_train_data)'
+        'description': f'MAESTRO real training ({maestro_split*100:.0f}% split, index 0 in tot_train_data)',
+        'class_counts': maestro_class_counts
     }
     print(f"\n6. maestro_real_train (MAESTRO real):")
     print(f"   Total audio files: {maestro_real_audio_count}")
     print(f"   Total TSV entries: {maestro_real_tsv_count}")
     print(f"   Train split ({maestro_split*100:.0f}%): {maestro_train_files}")
     print(f"   Valid split ({(1-maestro_split)*100:.0f}%): {maestro_valid_files}")
+    print(f"   Class distribution (MAESTRO Real 17 classes):")
+    print_class_statistics(maestro_class_counts, indent="     ")
 
     # === Validation データの調査 ===
     print("\n" + "="*80)
@@ -244,15 +375,19 @@ def main():
     synth_val_folder = convert_path(data_config['synth_val_folder'], base_path)
     synth_val_tsv = convert_path(data_config['synth_val_tsv'], base_path)
     synth_val_audio_count = count_audio_files(synth_val_folder)
-    synth_val_tsv_count, _ = count_tsv_unique_files(synth_val_tsv)
+    synth_val_tsv_count, synth_val_df = count_tsv_unique_files(synth_val_tsv)
+    synth_val_class_counts = count_class_events(synth_val_df, "desed")
     valid_info['synth_val'] = {
         'audio_files': synth_val_audio_count,
         'tsv_entries': synth_val_tsv_count,
-        'description': 'Synthetic validation'
+        'description': 'Synthetic validation',
+        'class_counts': synth_val_class_counts
     }
     print(f"\n1. synth_val:")
     print(f"   Audio files: {synth_val_audio_count}")
     print(f"   TSV entries: {synth_val_tsv_count}")
+    print(f"   Class distribution (DESED 10 classes):")
+    print_class_statistics(synth_val_class_counts, indent="     ")
 
     # 2. weak_val (from weak_set valid split)
     valid_info['weak_val'] = {
@@ -284,29 +419,37 @@ def main():
     test_folder = convert_path(data_config['test_folder'], base_path)
     test_tsv = convert_path(data_config['test_tsv'], base_path)
     test_audio_count = count_audio_files(test_folder)
-    test_tsv_count, _ = count_tsv_unique_files(test_tsv)
+    test_tsv_count, test_df = count_tsv_unique_files(test_tsv)
+    test_class_counts = count_class_events(test_df, "desed")
     test_info['desed_devtest'] = {
         'audio_files': test_audio_count,
         'tsv_entries': test_tsv_count,
-        'description': 'DESED test/validation'
+        'description': 'DESED test/validation',
+        'class_counts': test_class_counts
     }
     print(f"\n1. desed_devtest_dataset:")
     print(f"   Audio files: {test_audio_count}")
     print(f"   TSV entries: {test_tsv_count}")
+    print(f"   Class distribution (DESED 10 classes):")
+    print_class_statistics(test_class_counts, indent="     ")
 
     # 2. maestro_real_devtest (MAESTRO real validation - 全体)
     maestro_val_folder = convert_path(data_config['real_maestro_val_folder'], base_path)
     maestro_val_tsv = convert_path(data_config['real_maestro_val_tsv'], base_path)
     maestro_val_audio_count = count_audio_files(maestro_val_folder)
-    maestro_val_tsv_count, _ = count_tsv_unique_files(maestro_val_tsv)
+    maestro_val_tsv_count, maestro_val_df = count_tsv_unique_files(maestro_val_tsv)
+    maestro_val_class_counts = count_class_events(maestro_val_df, "maestro_real")
     test_info['maestro_real_devtest'] = {
         'audio_files': maestro_val_audio_count,
         'tsv_entries': maestro_val_tsv_count,
-        'description': 'MAESTRO real validation (full)'
+        'description': 'MAESTRO real validation (full)',
+        'class_counts': maestro_val_class_counts
     }
     print(f"\n2. maestro_real_devtest:")
     print(f"   Audio files: {maestro_val_audio_count}")
     print(f"   TSV entries: {maestro_val_tsv_count}")
+    print(f"   Class distribution (MAESTRO Real 17 classes):")
+    print_class_statistics(maestro_val_class_counts, indent="     ")
 
     # === Evaluation データの調査 ===
     print("\n" + "="*80)
@@ -382,19 +525,37 @@ def main():
         for key, info in train_info.items():
             f.write(f"\n{key}:\n")
             for k, v in info.items():
-                f.write(f"  {k}: {v}\n")
+                if k == 'class_counts' and v:
+                    f.write(f"  {k}:\n")
+                    for cls, count in v.items():
+                        if count > 0:
+                            f.write(f"    {cls}: {count}\n")
+                else:
+                    f.write(f"  {k}: {v}\n")
 
         f.write("\n【VALIDATION データ】\n")
         for key, info in valid_info.items():
             f.write(f"\n{key}:\n")
             for k, v in info.items():
-                f.write(f"  {k}: {v}\n")
+                if k == 'class_counts' and v:
+                    f.write(f"  {k}:\n")
+                    for cls, count in v.items():
+                        if count > 0:
+                            f.write(f"    {cls}: {count}\n")
+                else:
+                    f.write(f"  {k}: {v}\n")
 
         f.write("\n【TEST データ】\n")
         for key, info in test_info.items():
             f.write(f"\n{key}:\n")
             for k, v in info.items():
-                f.write(f"  {k}: {v}\n")
+                if k == 'class_counts' and v:
+                    f.write(f"  {k}:\n")
+                    for cls, count in v.items():
+                        if count > 0:
+                            f.write(f"    {cls}: {count}\n")
+                else:
+                    f.write(f"  {k}: {v}\n")
 
         f.write("\n【EVALUATION データ】\n")
         for key, info in eval_info.items():
