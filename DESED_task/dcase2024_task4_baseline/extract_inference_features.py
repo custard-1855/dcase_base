@@ -344,6 +344,7 @@ def main():
         config,
         encoder=encoder,
         sed_student=sed_student,
+        pretrained_model=None,  # 推論時は事前計算された埋め込みを使用
         opt=None,
         train_data=None,
         valid_data=None,
