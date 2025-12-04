@@ -33,11 +33,39 @@ echo ""
 
 # echo ""
 
+################################################################################
+# 実験3: CMT neg
+################################################################################
+uv run train_pretrained.py \
+    --wandb_dir ${BASE_WANDB_DIR}/use_neg_sample \
+    --cmt \
+    --use_neg_sample \
+    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+
+echo ""
+
+
 # ################################################################################
-# # 実験3: CMT neg
+# # 実験1: MixStyle
 # ################################################################################
 # uv run train_pretrained.py \
-#     --wandb_dir ${BASE_WANDB_DIR}/use_neg_sample \
+#     --wandb_dir ${BASE_WANDB_DIR}/\
+#     --attn_type ${ATTN_TYPE} \
+#     --attn_deepen ${ATTN_DEEPEN} \
+#     --mixstyle_type ${MIXSTYLE_TYPE} \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+
+# echo ""
+
+
+# ################################################################################
+# # 実験2: MixStyle + CMT
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/+CMT_neg \
+#     --attn_type ${ATTN_TYPE} \
+#     --attn_deepen ${ATTN_DEEPEN} \
+#     --mixstyle_type ${MIXSTYLE_TYPE} \
 #     --cmt \
 #     --use_neg_sample \
 #     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
@@ -45,62 +73,34 @@ echo ""
 # echo ""
 
 
-################################################################################
-# 実験1: MixStyle
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/\
-    --attn_type ${ATTN_TYPE} \
-    --attn_deepen ${ATTN_DEEPEN} \
-    --mixstyle_type ${MIXSTYLE_TYPE} \
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+# ################################################################################
+# # 実験2: MixStyle + SEBBs
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/+SEBBs \
+#     --attn_type ${ATTN_TYPE} \
+#     --attn_deepen ${ATTN_DEEPEN} \
+#     --mixstyle_type ${MIXSTYLE_TYPE} \
+#     --sebbs \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
-echo ""
-
-
-################################################################################
-# 実験2: MixStyle + CMT
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/+CMT_neg \
-    --attn_type ${ATTN_TYPE} \
-    --attn_deepen ${ATTN_DEEPEN} \
-    --mixstyle_type ${MIXSTYLE_TYPE} \
-    --cmt \
-    --use_neg_sample \
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
-
-echo ""
+# echo ""
 
 
-################################################################################
-# 実験2: MixStyle + SEBBs
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/+SEBBs \
-    --attn_type ${ATTN_TYPE} \
-    --attn_deepen ${ATTN_DEEPEN} \
-    --mixstyle_type ${MIXSTYLE_TYPE} \
-    --sebbs \
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
+# ################################################################################
+# # 実験2: MixStyle + CMT + SEBBs
+# ################################################################################
+# uv run train_pretrained.py \
+#     --wandb_dir ${BASE_WANDB_DIR}/+CMT_neg+SEBBs \
+#     --attn_type ${ATTN_TYPE} \
+#     --attn_deepen ${ATTN_DEEPEN} \
+#     --mixstyle_type ${MIXSTYLE_TYPE} \
+#     --cmt \
+#     --use_neg_sample \
+#     --sebbs \
+#     2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
 
-echo ""
-
-
-################################################################################
-# 実験2: MixStyle + CMT + SEBBs
-################################################################################
-uv run train_pretrained.py \
-    --wandb_dir ${BASE_WANDB_DIR}/+CMT_neg+SEBBs \
-    --attn_type ${ATTN_TYPE} \
-    --attn_deepen ${ATTN_DEEPEN} \
-    --mixstyle_type ${MIXSTYLE_TYPE} \
-    --cmt \
-    --use_neg_sample \
-    --sebbs \
-    2>&1 | tee ${LOG_DIR}/${TIMESTAMP}.log
-
-echo ""
+# echo ""
 
 
 # ################################################################################
