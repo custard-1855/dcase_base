@@ -194,71 +194,82 @@ def compute_gradcam(
     if audio.dim() == 1:
         audio = audio.unsqueeze(0)  # (1, n_samples)
 
-    # Mel spectrogram計算
-    mels = model.mel_spec(audio)
-    mels_preprocessed = model.scaler(model.take_log(mels))
-
     # 使用するモデルを選択
     sed_model = model.sed_teacher if use_teacher else model.sed_student
 
-    # CNN部分の特徴マップを取得
-    mels_preprocessed.requires_grad = True
+    # Grad-CAM計算のため、一時的にトレーニングモードに切り替え
+    # （RNNのbackwardにはtraining modeが必要）
+    was_training = sed_model.training
+    sed_model.train()
 
-    x = mels_preprocessed.transpose(1, 2).unsqueeze(1)  # (B, 1, T, F)
+    try:
+        # Mel spectrogram計算
+        mels = model.mel_spec(audio)
+        mels_preprocessed = model.scaler(model.take_log(mels))
 
-    # CNNのforward（特徴マップを取得）
-    cnn_out = sed_model.cnn(x)  # (B, C, T', F')
+        # CNN部分の特徴マップを取得
+        mels_preprocessed.requires_grad = True
 
-    # プーリングとRNN
-    bs, chan, frames, freq = cnn_out.size()
+        x = mels_preprocessed.transpose(1, 2).unsqueeze(1)  # (B, 1, T, F)
 
-    if freq != 1:
-        x = cnn_out.permute(0, 2, 1, 3)
-        x = x.contiguous().view(bs, frames, chan * freq)
-    else:
-        x = cnn_out.squeeze(-1)
-        x = x.permute(0, 2, 1)
+        # CNNのforward（特徴マップを取得）
+        cnn_out = sed_model.cnn(x)  # (B, C, T', F')
 
-    # RNN
-    x = sed_model.rnn(x)[0]
+        # プーリングとRNN
+        bs, chan, frames, freq = cnn_out.size()
 
-    # Attention pooling（弱予測）
-    # 簡略化のため、時間方向の平均
-    weak_pred = sed_model.dropout(x)
-    weak_pred = sed_model.dense(weak_pred)
-    weak_pred = weak_pred.mean(dim=1)  # (B, n_classes)
+        if freq != 1:
+            x = cnn_out.permute(0, 2, 1, 3)
+            x = x.contiguous().view(bs, frames, chan * freq)
+        else:
+            x = cnn_out.squeeze(-1)
+            x = x.permute(0, 2, 1)
 
-    # ターゲットクラスのスコア
-    # weak_predの形状を確認してから適切にインデックス
-    if weak_pred.dim() == 2:
-        target_score = weak_pred[0, target_class]
-    else:
-        # バッチサイズが1でsqueezeされた場合
-        target_score = weak_pred[target_class]
+        # RNN (training modeで実行)
+        x = sed_model.rnn(x)[0]
 
-    # 勾配計算
-    sed_model.zero_grad()
-    target_score.backward()
+        # Attention pooling（弱予測）
+        # dropoutは無効化（推論時の挙動にする）
+        x_no_dropout = x  # dropoutをスキップ
+        weak_pred = sed_model.dense(x_no_dropout)
+        weak_pred = weak_pred.mean(dim=1)  # (B, n_classes)
 
-    # CNN最終層の勾配を取得
-    gradients = mels_preprocessed.grad.data  # (B, F, T)
+        # ターゲットクラスのスコア
+        # weak_predの形状を確認してから適切にインデックス
+        if weak_pred.dim() == 2:
+            target_score = weak_pred[0, target_class]
+        else:
+            # バッチサイズが1でsqueezeされた場合
+            target_score = weak_pred[target_class]
 
-    # 勾配の絶対値を使用（positive influence）
-    gradients = torch.abs(gradients)
+        # 勾配計算
+        sed_model.zero_grad()
+        target_score.backward()
 
-    # チャンネル方向（周波数方向）で平均
-    if gradients.dim() == 3:
-        cam = gradients.squeeze(0).cpu().numpy()  # (F, T)
-    else:
-        # 既に2次元の場合
-        cam = gradients.cpu().numpy()  # (F, T)
+        # CNN最終層の勾配を取得
+        gradients = mels_preprocessed.grad.data  # (B, F, T)
 
-    # 正規化
-    cam = cam - cam.min()
-    if cam.max() > 0:
-        cam = cam / cam.max()
+        # 勾配の絶対値を使用（positive influence）
+        gradients = torch.abs(gradients)
 
-    return cam.T  # (T, F) に転置
+        # チャンネル方向（周波数方向）で平均
+        if gradients.dim() == 3:
+            cam = gradients.squeeze(0).cpu().numpy()  # (F, T)
+        else:
+            # 既に2次元の場合
+            cam = gradients.cpu().numpy()  # (F, T)
+
+        # 正規化
+        cam = cam - cam.min()
+        if cam.max() > 0:
+            cam = cam / cam.max()
+
+        return cam.T  # (T, F) に転置
+
+    finally:
+        # 元のモードに戻す
+        if not was_training:
+            sed_model.eval()
 
 
 def find_boundary_cases(
