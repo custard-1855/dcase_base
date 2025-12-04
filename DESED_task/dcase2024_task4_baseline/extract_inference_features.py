@@ -29,6 +29,7 @@ from local.classes_dict import (
 from local.sed_trainer_pretrained import SEDTask4
 from local.utils import process_tsvs
 from desed_task.dataio.datasets import StronglyAnnotatedSet, UnlabeledSet
+from desed_task.nnet.CRNN import CRNN
 from desed_task.utils.encoder import CatManyHotEncoder, ManyHotEncoder
 
 
@@ -317,38 +318,47 @@ def main():
     with open(args.dataset_config, "r") as f:
         dataset_config = json.load(f)
 
-    # 設定ファイルの読み込み
+    # Checkpointからハイパーパラメータとstate_dictを抽出
+    print("\nCheckpointをロード中...")
+    checkpoint = torch.load(args.checkpoint, weights_only=False, map_location=args.device)
+    config = checkpoint["hyper_parameters"]
+    state_dict = checkpoint["state_dict"]
+    print(f"Checkpoint情報: epoch={checkpoint.get('epoch', 'N/A')}")
+
+    # データパス情報を上書き (dataset_config["config_path"]から)
     config_path = dataset_config["config_path"]
     with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
-
-
-
-    # NumPy 2.0+ などの新しい環境
-    from numpy._core.multiarray import scalar
-
-    # Context Managerでラップして読み込む
-    with torch.serialization.safe_globals([scalar]):
-        model = SEDTask4.load_from_checkpoint(
-            args.checkpoint,
-            map_location=args.device
-            # weights_only=False は不要（効かないため削除してOK）
-        )
-
-
-    # モデルのロード
-    #print("\nモデルをロード中...")
-    #model = SEDTask4.load_from_checkpoint(
-    #    args.checkpoint,
-    #    map_location=args.device,
-    #    weights_only=False
-    #)
-    model.to(args.device)
-    model.eval()
-    print("モデルのロード完了")
+        data_config = yaml.safe_load(f)
+    config["data"] = data_config["data"]
+    print(f"データパス設定を {config_path} から読み込み")
 
     # Encoderの準備
     encoder = get_encoder(config)
+
+    # モデルインスタンスを作成
+    print("\nモデルを作成中...")
+    sed_student = CRNN(**config["net"])
+
+    # SEDTask4インスタンスを作成
+    model = SEDTask4(
+        config,
+        encoder=encoder,
+        sed_student=sed_student,
+        opt=None,
+        train_data=None,
+        valid_data=None,
+        test_data=None,
+        train_sampler=None,
+        scheduler=None,
+        fast_dev_run=False,
+        evaluation=True  # 推論モード
+    )
+
+    # State dictをロード
+    model.load_state_dict(state_dict)
+    model.to(args.device)
+    model.eval()
+    print("モデルのロード完了")
 
     # データセットの作成
     print("\nデータセットを作成中...")
