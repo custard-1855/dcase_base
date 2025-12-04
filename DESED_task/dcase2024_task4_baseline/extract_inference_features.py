@@ -299,7 +299,7 @@ def main():
     )
     parser.add_argument(
         "--device",
-        default="cuda" if torch.cuda.is_available() else "cpu",
+        default=str("cuda" if torch.cuda.is_available() else "cpu"),
         help="デバイス (cuda/cpu)"
     )
     args = parser.parse_args()
@@ -322,12 +322,27 @@ def main():
     with open(config_path, "r") as f:
         config = yaml.safe_load(f)
 
+
+
+    # NumPy 2.0+ などの新しい環境
+    from numpy._core.multiarray import scalar
+
+    # Context Managerでラップして読み込む
+    with torch.serialization.safe_globals([scalar]):
+        model = SEDTask4.load_from_checkpoint(
+            args.checkpoint,
+            map_location=args.device
+            # weights_only=False は不要（効かないため削除してOK）
+        )
+
+
     # モデルのロード
-    print("\nモデルをロード中...")
-    model = SEDTask4.load_from_checkpoint(
-        args.checkpoint,
-        map_location=args.device
-    )
+    #print("\nモデルをロード中...")
+    #model = SEDTask4.load_from_checkpoint(
+    #    args.checkpoint,
+    #    map_location=args.device,
+    #    weights_only=False
+    #)
     model.to(args.device)
     model.eval()
     print("モデルのロード完了")
