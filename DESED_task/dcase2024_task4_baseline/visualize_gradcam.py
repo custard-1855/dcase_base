@@ -183,14 +183,16 @@ def compute_gradcam(
 
     Args:
         model: SEDTask4モデル
-        audio: (1, n_samples) 音声テンソル
+        audio: (n_samples,) 音声テンソル
         target_class: 注目するクラスのインデックス
         use_teacher: Teacherモデルを使用するか
 
     Returns:
         gradcam: (time, freq) Grad-CAMヒートマップ
     """
-    audio = audio.unsqueeze(0)  # (1, 1, n_samples)
+    # 音声の次元を確認して適切に整形
+    if audio.dim() == 1:
+        audio = audio.unsqueeze(0)  # (1, n_samples)
 
     # Mel spectrogram計算
     mels = model.mel_spec(audio)
@@ -199,8 +201,7 @@ def compute_gradcam(
     # 使用するモデルを選択
     sed_model = model.sed_teacher if use_teacher else model.sed_student
 
-    # CNN部分の最終層の特徴マップを取得
-    # CNNのforward処理を手動で実行
+    # CNN部分の特徴マップを取得
     mels_preprocessed.requires_grad = True
 
     x = mels_preprocessed.transpose(1, 2).unsqueeze(1)  # (B, 1, T, F)
@@ -228,7 +229,12 @@ def compute_gradcam(
     weak_pred = weak_pred.mean(dim=1)  # (B, n_classes)
 
     # ターゲットクラスのスコア
-    target_score = weak_pred[0, target_class]
+    # weak_predの形状を確認してから適切にインデックス
+    if weak_pred.dim() == 2:
+        target_score = weak_pred[0, target_class]
+    else:
+        # バッチサイズが1でsqueezeされた場合
+        target_score = weak_pred[target_class]
 
     # 勾配計算
     sed_model.zero_grad()
@@ -241,7 +247,11 @@ def compute_gradcam(
     gradients = torch.abs(gradients)
 
     # チャンネル方向（周波数方向）で平均
-    cam = gradients.squeeze(0).cpu().numpy()  # (F, T)
+    if gradients.dim() == 3:
+        cam = gradients.squeeze(0).cpu().numpy()  # (F, T)
+    else:
+        # 既に2次元の場合
+        cam = gradients.cpu().numpy()  # (F, T)
 
     # 正規化
     cam = cam - cam.min()
