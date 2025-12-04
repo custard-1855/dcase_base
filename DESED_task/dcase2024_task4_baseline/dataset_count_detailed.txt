@@ -1,0 +1,80 @@
+================================================================================
+DCASE 2024 Task 4 データセット詳細情報
+train_pretrained.pyのロジックに基づく実際の使用データ数
+================================================================================
+
+設定ファイル: confs/pretrained.yaml
+データベースパス: ../../../sed-fl/fl/data/dcase/dataset
+Weak split: 0.9
+MAESTRO split: 0.9
+Seed: 42
+
+【TRAINING データ】
+
+synth_set:
+  audio_files: 0
+  tsv_entries: 10000
+  description: Synthetic training (index 1 in tot_train_data)
+
+strong_set:
+  audio_files: 1613
+  tsv_entries: 3470
+  description: Strong real (part of strong_full_set)
+
+strong_full_set:
+  audio_files: 1613
+  tsv_entries: 13470
+  description: strong_set + synth_set (index 2 in tot_train_data)
+
+weak_set:
+  audio_files: 1317
+  tsv_total: 1578
+  tsv_train: 1420
+  tsv_valid: 158
+  description: Weak training (90% of weak data, index 3 in tot_train_data)
+
+unlabeled_set:
+  audio_files: 69
+  description: Unlabeled (index 4 in tot_train_data)
+
+maestro_real_train:
+  audio_files: 1467
+  tsv_total: 7503
+  tsv_train: 28
+  tsv_valid: 5
+  description: MAESTRO real training (90% split, index 0 in tot_train_data)
+
+【VALIDATION データ】
+
+synth_val:
+  audio_files: 0
+  tsv_entries: 2500
+  description: Synthetic validation
+
+weak_val:
+  audio_files: 1317
+  tsv_entries: 158
+  description: Weak validation (10% of weak data)
+
+maestro_real_valid:
+  audio_files: 1467
+  tsv_entries: 5
+  description: MAESTRO real validation (10% split)
+
+【TEST データ】
+
+desed_devtest:
+  audio_files: 958
+  tsv_entries: 1168
+  description: DESED test/validation
+
+maestro_real_devtest:
+  audio_files: 718
+  tsv_entries: 718
+  description: MAESTRO real validation (full)
+
+【EVALUATION データ】
+
+eval:
+  audio_files: 2200
+  description: Evaluation set (unlabeled)
