@@ -223,7 +223,7 @@ class CRNN(nn.Module):
 
         return x
 
-    def forward(self, x, pad_mask=None, embeddings=None, classes_mask=None):
+    def forward(self, x, pad_mask=None, embeddings=None, classes_mask=None, return_features=False):
 
         # input x: batch, time, freq?
         x = self.apply_specaugment(x)
@@ -349,8 +349,18 @@ class CRNN(nn.Module):
                 x = self.dropout(x)
 
         x = self.rnn(x)
-        x = self.dropout(x)
 
+        if return_features:
+            features = x.clone()  # RNN出力を保存 (batch, frames, 384)
+            x = self.dropout(x)
+            strong, weak = self._get_logits(x, pad_mask, classes_mask)
+            return {
+                'strong_probs': strong,
+                'weak_probs': weak,
+                'features': features
+            }
+
+        x = self.dropout(x)
         return self._get_logits(x, pad_mask, classes_mask)
 
     def train(self, mode=True):
