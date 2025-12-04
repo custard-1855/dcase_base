@@ -114,15 +114,25 @@ def split_maestro(config, maestro_dev_df):
 
 
 def count_samples_per_class(dataset, encoder, dataset_name):
-    """データセット内の各クラスのサンプル数をカウント"""
+    """データセット内の各クラスのサンプル数をカウント
+
+    Noneサンプル（欠損ファイル）は自動的にスキップされる
+    """
     class_counts = defaultdict(int)
     class_to_samples = defaultdict(list)
+    skipped_count = 0
 
     print(f"\n[{dataset_name}] サンプル数のカウント中... (total: {len(dataset)})")
 
     for idx in range(len(dataset)):
         try:
             sample = dataset[idx]
+
+            # 明示的なNoneチェック（欠損ファイル対応）
+            if sample is None:
+                skipped_count += 1
+                continue
+
             # labels shape: (27, frames) or (27,)
             labels = sample[1]  # (mixture, labels, padded_indx, filename, ...)
 
@@ -137,7 +147,12 @@ def count_samples_per_class(dataset, encoder, dataset_name):
                     class_to_samples[class_idx].append(idx)
         except Exception as e:
             print(f"Warning: Error processing index {idx}: {e}")
+            skipped_count += 1
             continue
+
+    # スキップ情報を表示
+    valid_count = len(dataset) - skipped_count
+    print(f"  有効サンプル: {valid_count} / {len(dataset)} ({skipped_count} skipped)")
 
     return class_counts, class_to_samples
 
