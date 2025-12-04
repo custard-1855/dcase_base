@@ -25,7 +25,7 @@ run_phase1() {
     # 1. UMAP可視化
     echo ""
     echo "[1/3] UMAP可視化を実行中..."
-    python visualize_umap.py \
+    uv run visualize_umap.py \
         --input_dirs ${INPUT_DIRS} \
         --output_dir ${OUTPUT_DIR}/umap \
         --feature_type both
@@ -33,7 +33,7 @@ run_phase1() {
     # 2. Reliability Diagram
     echo ""
     echo "[2/3] Reliability Diagramを実行中..."
-    python visualize_reliability.py \
+    uv run visualize_reliability.py \
         --input_dirs ${INPUT_DIRS} \
         --output_dir ${OUTPUT_DIR}/reliability \
         --pred_type both
@@ -41,7 +41,7 @@ run_phase1() {
     # 3. 統合レポート
     echo ""
     echo "[3/3] 統合レポートを生成中..."
-    python generate_analysis_report.py \
+    uv run generate_analysis_report.py \
         --input_dirs ${INPUT_DIRS} \
         --output ${OUTPUT_DIR}/analysis_report.md
 
@@ -60,8 +60,8 @@ run_phase2() {
     echo ""
     echo "チェックポイントパスを取得中..."
 
-    BASELINE_CKPT=$(python -c "import json; print(json.load(open('inference_outputs/baseline/inference_metadata.json'))['checkpoint'])")
-    CMT_NORMAL_CKPT=$(python -c "import json; print(json.load(open('inference_outputs/cmt_normal/inference_metadata.json'))['checkpoint'])")
+    BASELINE_CKPT=$(uv run python -c "import json; print(json.load(open('inference_outputs/baseline/inference_metadata.json'))['checkpoint'])")
+    CMT_NORMAL_CKPT=$(uv run python -c "import json; print(json.load(open('inference_outputs/cmt_normal/inference_metadata.json'))['checkpoint'])")
 
     echo "  Baseline: ${BASELINE_CKPT}"
     echo "  CMT Normal: ${CMT_NORMAL_CKPT}"
@@ -80,7 +80,7 @@ run_phase2() {
     # Grad-CAM実行
     echo ""
     echo "Grad-CAMを実行中..."
-    python visualize_gradcam.py \
+    uv run visualize_gradcam.py \
         --input_dirs inference_outputs/baseline inference_outputs/cmt_normal \
         --checkpoints "${BASELINE_CKPT}" "${CMT_NORMAL_CKPT}" \
         --config confs/pretrained.yaml \
