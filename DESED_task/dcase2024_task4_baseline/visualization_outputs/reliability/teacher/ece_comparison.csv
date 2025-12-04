@@ -1,0 +1,10 @@
+model,dataset,pred_type,ece
+baseline,desed_validation,teacher,0.01778482258831438
+baseline,maestro_training,teacher,0.03615919695075964
+baseline,maestro_validation,teacher,0.02644791562584245
+cmt_normal,desed_validation,teacher,0.009336234045010067
+cmt_normal,maestro_training,teacher,0.03531878488594048
+cmt_normal,maestro_validation,teacher,0.025369641651756227
+cmt_neg,desed_validation,teacher,0.021168672380780254
+cmt_neg,maestro_training,teacher,0.03669961749640024
+cmt_neg,maestro_validation,teacher,0.025942307431544454
