@@ -14,9 +14,11 @@
 """
 
 import argparse
+import csv
 import json
 import os
 from collections import defaultdict
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -141,7 +143,10 @@ def count_samples_per_class(dataset, encoder, dataset_name):
 
 
 def sample_fixed_subset(class_to_samples, samples_per_class, seed, class_names):
-    """各クラスから固定数のサンプルをランダムサンプリング"""
+    """各クラスから固定数のサンプルをランダムサンプリング
+
+    データが不足する場合は、利用可能数の半分を取得（フォールバック）
+    """
     np.random.seed(seed)
     selected_indices = []
     class_distribution = {}
@@ -149,19 +154,168 @@ def sample_fixed_subset(class_to_samples, samples_per_class, seed, class_names):
     for class_idx, sample_indices in class_to_samples.items():
         class_name = class_names[class_idx]
         available = len(sample_indices)
-        target = min(samples_per_class, available)
+
+        # データ不足の場合はフォールバック: available // 2
+        if available < samples_per_class:
+            target = available // 2
+            print(f"  {class_name}: 不足のため {target}/{available} サンプル選択 (目標: {samples_per_class})")
+        else:
+            target = samples_per_class
+            print(f"  {class_name}: {target}/{available} サンプル選択")
 
         # ランダムサンプリング
-        sampled = np.random.choice(sample_indices, size=target, replace=False)
-        selected_indices.extend(sampled.tolist())
-        class_distribution[class_name] = target
-
-        print(f"  {class_name}: {target}/{available} サンプル選択")
+        if target > 0:
+            sampled = np.random.choice(sample_indices, size=target, replace=False)
+            selected_indices.extend(sampled.tolist())
+            class_distribution[class_name] = target
 
     # 重複を除去
     selected_indices = sorted(list(set(selected_indices)))
 
     return selected_indices, class_distribution
+
+
+def generate_reports(result, output_path, samples_per_class):
+    """CSV とMarkdown形式でレポートを生成"""
+    output_path = Path(output_path)
+    base_name = output_path.stem
+    output_dir = output_path.parent
+
+    csv_path = output_dir / f"{base_name}_report.csv"
+    md_path = output_dir / f"{base_name}_report.md"
+
+    # クラス名リスト
+    desed_classes = result["desed_classes"]
+    maestro_classes = result["maestro_classes"]
+    all_classes = desed_classes + maestro_classes
+
+    # データセット情報の取得
+    datasets = result["datasets"]
+
+    # クラス別データの集計
+    class_data = {}
+    for class_name in all_classes:
+        class_data[class_name] = {
+            "desed_validation": 0,
+            "desed_unlabeled": 0,
+            "maestro_training": 0,
+            "maestro_validation": 0,
+            "fallback": False
+        }
+
+    # 各データセットからクラス分布を集計
+    for dataset_name, dataset_info in datasets.items():
+        if "class_distribution" in dataset_info:
+            for class_name, count in dataset_info["class_distribution"].items():
+                if class_name in class_data:
+                    class_data[class_name][dataset_name] = count
+                    # フォールバック判定（目標数に達していない）
+                    if count < samples_per_class:
+                        class_data[class_name]["fallback"] = True
+
+    # ===== CSV生成 =====
+    with open(csv_path, "w", newline="") as f:
+        writer = csv.writer(f)
+        writer.writerow([
+            "class_name",
+            "desed_validation",
+            "desed_unlabeled",
+            "maestro_training",
+            "maestro_validation",
+            "total",
+            "fallback"
+        ])
+
+        for class_name in all_classes:
+            data = class_data[class_name]
+            total = (data["desed_validation"] + data["desed_unlabeled"] +
+                    data["maestro_training"] + data["maestro_validation"])
+            writer.writerow([
+                class_name,
+                data["desed_validation"] if data["desed_validation"] > 0 else "",
+                data["desed_unlabeled"] if data["desed_unlabeled"] > 0 else "",
+                data["maestro_training"] if data["maestro_training"] > 0 else "",
+                data["maestro_validation"] if data["maestro_validation"] > 0 else "",
+                total,
+                "Yes" if data["fallback"] else "No"
+            ])
+
+    # ===== Markdown生成 =====
+    with open(md_path, "w") as f:
+        f.write("# データセット固定化レポート\n\n")
+
+        # 設定情報
+        f.write("## 設定\n\n")
+        f.write(f"- サンプル数/クラス: {samples_per_class}\n")
+        f.write(f"- ランダムシード: {result['seed']}\n")
+        f.write(f"- 生成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"- 設定ファイル: {result['config_path']}\n\n")
+
+        # データセット別サマリー
+        f.write("## データセット別サマリー\n\n")
+        f.write("| Dataset | Total Samples | Target per Class | Classes |\n")
+        f.write("|---------|--------------|------------------|--------|\n")
+
+        total_samples_all = 0
+        for dataset_name in ["desed_validation", "desed_unlabeled", "maestro_training", "maestro_validation"]:
+            if dataset_name in datasets:
+                dataset_info = datasets[dataset_name]
+                total_samples = dataset_info["total_samples"]
+                total_samples_all += total_samples
+
+                display_name = dataset_name.replace("_", " ").title()
+                num_classes = len(desed_classes) if "desed" in dataset_name else len(maestro_classes)
+
+                # フォールバックがあるか確認
+                has_fallback = any(
+                    count < samples_per_class
+                    for count in dataset_info.get("class_distribution", {}).values()
+                )
+                target_note = f"{samples_per_class}" + (" (with fallback)" if has_fallback else "")
+
+                f.write(f"| {display_name} | {total_samples} | {target_note} | {num_classes} |\n")
+
+        f.write(f"| **Total** | **{total_samples_all}** | - | **{len(all_classes)}** |\n\n")
+
+        # フォールバック発生クラス
+        fallback_classes = [(name, data) for name, data in class_data.items() if data["fallback"]]
+        if fallback_classes:
+            f.write("## フォールバック発生クラス\n\n")
+            f.write("| Class | Dataset | Target | Actual |\n")
+            f.write("|-------|---------|--------|--------|\n")
+
+            for class_name, data in fallback_classes:
+                for ds_name in ["desed_validation", "desed_unlabeled", "maestro_training", "maestro_validation"]:
+                    if data[ds_name] > 0 and data[ds_name] < samples_per_class:
+                        display_ds = ds_name.replace("_", " ").title()
+                        f.write(f"| {class_name} | {display_ds} | {samples_per_class} | {data[ds_name]} |\n")
+            f.write("\n")
+
+        # DESED詳細
+        f.write("## クラス別詳細\n\n")
+        f.write("### DESED (10 classes)\n\n")
+        f.write("| Class | Validation | Unlabeled | Total |\n")
+        f.write("|-------|-----------|-----------|-------|\n")
+
+        for class_name in desed_classes:
+            data = class_data[class_name]
+            total = data["desed_validation"] + data["desed_unlabeled"]
+            f.write(f"| {class_name} | {data['desed_validation']} | {data['desed_unlabeled']} | {total} |\n")
+
+        f.write("\n")
+
+        # MAESTRO詳細
+        f.write("### MAESTRO (11 classes)\n\n")
+        f.write("| Class | Training | Validation | Total | Fallback |\n")
+        f.write("|-------|----------|-----------|-------|----------|\n")
+
+        for class_name in maestro_classes:
+            data = class_data[class_name]
+            total = data["maestro_training"] + data["maestro_validation"]
+            fallback = "Yes" if data["fallback"] else "No"
+            f.write(f"| {class_name} | {data['maestro_training']} | {data['maestro_validation']} | {total} | {fallback} |\n")
+
+    return csv_path, md_path
 
 
 def main():
@@ -329,14 +483,11 @@ def main():
             class_idx = 10 + classes_labels_maestro_real[class_name]  # offset 10
             maestro_class_indices.append(class_idx)
 
-    # Training + Validationからサンプリング（各250ずつで合計500）
-    train_samples_per_class = args.samples_per_class // 2
-    valid_samples_per_class = args.samples_per_class - train_samples_per_class
-
+    # 各データセットから samples_per_class ずつサンプリング
     # Training
     maestro_train_class_samples = {k: v for k, v in class_samples_train.items() if k in maestro_class_indices}
     train_selected_indices, train_class_dist = sample_fixed_subset(
-        maestro_train_class_samples, train_samples_per_class, args.seed, all_class_names
+        maestro_train_class_samples, args.samples_per_class, args.seed, all_class_names
     )
 
     result["datasets"]["maestro_training"] = {
@@ -349,7 +500,7 @@ def main():
     # Validation
     maestro_valid_class_samples = {k: v for k, v in class_samples_valid.items() if k in maestro_class_indices}
     valid_selected_indices, valid_class_dist = sample_fixed_subset(
-        maestro_valid_class_samples, valid_samples_per_class, args.seed + 1, all_class_names
+        maestro_valid_class_samples, args.samples_per_class, args.seed + 1, all_class_names
     )
 
     result["datasets"]["maestro_validation"] = {
@@ -372,10 +523,15 @@ def main():
     with open(args.output, "w") as f:
         json.dump(result, f, indent=2)
 
+    # レポート生成（CSV, Markdown）
+    csv_path, md_path = generate_reports(result, args.output, args.samples_per_class)
+
     print("\n" + "="*60)
     print("完了")
     print("="*60)
     print(f"出力ファイル: {args.output}")
+    print(f"レポート (CSV): {csv_path}")
+    print(f"レポート (MD): {md_path}")
     print(f"\n全体のクラス分布:")
     for class_name, count in sorted(overall_class_dist.items()):
         print(f"  {class_name}: {count}")
