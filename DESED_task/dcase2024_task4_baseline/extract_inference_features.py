@@ -33,6 +33,20 @@ from desed_task.nnet.CRNN import CRNN
 from desed_task.utils.encoder import CatManyHotEncoder, ManyHotEncoder
 
 
+def get_embeddings_name(config, name):
+    """埋め込みファイルのパスを取得"""
+    embeddings_path = (
+        None
+        if config.get("pretrained", {}).get("e2e", False)
+        else os.path.join(
+            config["pretrained"]["extracted_embeddings_dir"],
+            config["pretrained"]["model"],
+            f"{name}.hdf5",
+        )
+    )
+    return embeddings_path
+
+
 def get_encoder(config):
     """CatManyHotEncoderを作成"""
     desed_encoder = ManyHotEncoder(
@@ -113,6 +127,12 @@ def create_datasets(config, encoder, dataset_config):
     """JSON定義に基づいてデータセットを作成"""
     datasets = {}
 
+    # クラスマスクの準備
+    mask_events_desed = set(classes_labels_desed.keys())
+    mask_events_maestro_real = set(classes_labels_maestro_real.keys()).union(
+        set(["Speech", "Dog", "Dishes"])
+    )
+
     # ===== DESED Validation =====
     synth_df_val = pd.read_csv(config["data"]["synth_val_tsv"], sep="\t")
     synth_val_full = StronglyAnnotatedSet(
@@ -121,6 +141,9 @@ def create_datasets(config, encoder, dataset_config):
         encoder,
         pad_to=config["data"]["audio_max_len"],
         return_filename=True,
+        embeddings_hdf5_file=get_embeddings_name(config, "synth_val"),
+        embedding_type=config["net"]["embedding_type"],
+        mask_events_other_than=mask_events_desed,
     )
 
     indices = dataset_config["datasets"]["desed_validation"]["sample_indices"]
@@ -132,6 +155,10 @@ def create_datasets(config, encoder, dataset_config):
         config["data"]["unlabeled_folder"],
         encoder,
         pad_to=config["data"]["audio_max_len"],
+        return_filename=True,
+        embeddings_hdf5_file=get_embeddings_name(config, "unlabeled"),
+        embedding_type=config["net"]["embedding_type"],
+        mask_events_other_than=mask_events_desed,
     )
 
     indices = dataset_config["datasets"]["desed_unlabeled"]["sample_indices"]
@@ -150,6 +177,9 @@ def create_datasets(config, encoder, dataset_config):
         encoder,
         pad_to=config["data"]["audio_max_len"],
         return_filename=True,
+        embeddings_hdf5_file=get_embeddings_name(config, "maestro_real_train"),
+        embedding_type=config["net"]["embedding_type"],
+        mask_events_other_than=mask_events_maestro_real,
     )
 
     indices = dataset_config["datasets"]["maestro_training"]["sample_indices"]
@@ -163,6 +193,9 @@ def create_datasets(config, encoder, dataset_config):
         encoder,
         pad_to=config["data"]["audio_max_len"],
         return_filename=True,
+        embeddings_hdf5_file=get_embeddings_name(config, "maestro_real_train"),
+        embedding_type=config["net"]["embedding_type"],
+        mask_events_other_than=mask_events_maestro_real,
     )
 
     indices = dataset_config["datasets"]["maestro_validation"]["sample_indices"]
@@ -200,11 +233,13 @@ def extract_features_from_dataset(
     with torch.no_grad():
         for batch in tqdm(dataloader, desc=f"推論中 [{dataset_name}]"):
             # バッチのアンパック
+            # 構造: [audio, labels, padded_indx, filename, embeddings, valid_class_mask]
             audio = batch[0].to(device)
             labels = batch[1] if has_targets else None
-            filenames = batch[3] if len(batch) > 3 else None
-            embeddings = batch[4] if len(batch) > 4 else None
-            mask = batch[5] if len(batch) > 5 else None
+            padded_indx = batch[2]  # 使用しないが、インデックスを維持するため取得
+            filenames = batch[3]  # return_filename=True なので常に存在
+            embeddings = batch[4]  # embeddings_hdf5_file が設定されているため常に存在
+            mask = batch[5]  # mask_events_other_than が設定されているため常に存在
 
             # Mel spectrogram計算
             mels = model.mel_spec(audio)
@@ -212,8 +247,9 @@ def extract_features_from_dataset(
             # 前処理
             mels_preprocessed = model.scaler(model.take_log(mels))
 
-            if embeddings is not None:
-                embeddings = embeddings.to(device)
+            # GPU/CPUに転送
+            embeddings = embeddings.to(device)
+            mask = mask.to(device)
 
             # Student推論
             out_student = model.sed_student(
