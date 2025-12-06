@@ -618,15 +618,11 @@ def single_run(
             if isinstance(cb, ModelCheckpoint):
                 best_path = cb.best_model_path
                 break
-       # best_path = trainer.checkpoint_callback.best_model_path
-        print(f"best model: {best_path}")# ModelCheckpointのインスタンスからbest_model_pathを取得
+        print(f"best model: {best_path}")s
         torch.serialization.add_safe_globals([np._core.multiarray.scalar])
-        # False以外の解決策が欲しい
         test_state_dict = torch.load(best_path, weights_only=False)["state_dict"]
 
     desed_training.load_state_dict(test_state_dict)
-
-    #test_loader = SafeDataLoader(test_dataset)
     results = trainer.test(desed_training)[0]
 
     if "test/teacher/psds1/sed_scores_eval" in results:
@@ -697,86 +693,14 @@ def prepare_run(argv=None):
         "--mixstyle_type", default="disabled",
     )
 
-    # sat
-    parser.add_argument(
-        "--sat", action="store_true", default=False
-    )
-    # parser.add_argument(
-    #     "--gmm", action="store_true", default=False
-    # )
-    parser.add_argument(
-        "--cutmix_alpha", default=1.0
-    )
-    parser.add_argument(
-        "--cutmix_prob", default=1.0
-    )
-
-    # Strong augmentation type selection
-    parser.add_argument(
-        "--strong_augment_type",
-        type=str,
-        default=None,
-        choices=["cutmix", "frame_shift_time_mask", "none"],
-        help="Type of strong augmentation for SAT (default: cutmix)"
-    )
-    # Frame Shift + Time Masking parameters
-    parser.add_argument(
-        "--strong_augment_prob",
-        type=float,
-        default=None,
-        help="Probability of applying Frame Shift + Time Masking"
-    )
-    parser.add_argument(
-        "--frame_shift_std",
-        type=float,
-        default=None,
-        help="Standard deviation for Gaussian frame shift"
-    )
-    parser.add_argument(
-        "--time_mask_max",
-        type=int,
-        default=None,
-        help="Maximum length of time mask"
-    )
-    parser.add_argument(
-        "--time_mask_prob",
-        type=float,
-        default=None,
-        help="Probability of applying time masking"
-    )
-
-
+    # SEBBs
     parser.add_argument(
         "--sebbs", action="store_true", default=False
     )
+
+    #wandb
     parser.add_argument(
         "--wandb_dir"
-    )
-
-    # GMM parameters
-    parser.add_argument(
-        "--gmm_n_init",
-        type=int,
-        default=None,
-        help="Number of initializations for GMM (default: 3)"
-    )
-    parser.add_argument(
-        "--gmm_max_iter",
-        type=int,
-        default=None,
-        help="Maximum iterations for GMM convergence (default: 30)"
-    )
-    parser.add_argument(
-        "--gmm_reg_covar",
-        type=float,
-        default=None,
-        help="Regularization for GMM covariance (default: 1e-6)"
-    )
-    parser.add_argument(
-        "--gmm_tol",
-        type=float,
-        default=None,
-        help="Convergence tolerance for GMM (default: 1e-3)"
     )
 
     args = parser.parse_args(argv)
@@ -805,45 +729,13 @@ def prepare_run(argv=None):
     if args.mixstyle_type is not None:
         configs["net"]["mixstyle_type"] = args.mixstyle_type
 
-    # sat
-    if args.sat is not None:
-        configs["sat"]["enabled"] = args.sat
-    # if args.sat is not None:
-    #     configs["sat"]["gmm_fixed"] = args.gmm
-    if args.sat is not None:
-        configs["sat"]["cutmix_alpha"] = args.cutmix_alpha
-    if args.sat is not None:
-        configs["sat"]["cutmix_prob"] = args.cutmix_prob
-
-    # Strong augmentation type and parameters
-    if args.strong_augment_type is not None:
-        configs["sat"]["strong_augment_type"] = args.strong_augment_type
-    if args.strong_augment_prob is not None:
-        configs["sat"]["strong_augment_prob"] = args.strong_augment_prob
-    if args.frame_shift_std is not None:
-        configs["sat"]["frame_shift_std"] = args.frame_shift_std
-    if args.time_mask_max is not None:
-        configs["sat"]["time_mask_max"] = args.time_mask_max
-    if args.time_mask_prob is not None:
-        configs["sat"]["time_mask_prob"] = args.time_mask_prob
-    # other
+    # SEBBs
     if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs
+
+    #wandb
     if args.wandb_dir is not None:
         configs["net"]["wandb_dir"] = args.wandb_dir
-
-    # GMM parameters
-    if "sat" not in configs:
-        configs["sat"] = {}
-    if args.gmm_n_init is not None:
-        configs["sat"]["gmm_n_init"] = args.gmm_n_init
-    if args.gmm_max_iter is not None:
-        configs["sat"]["gmm_max_iter"] = args.gmm_max_iter
-    if args.gmm_reg_covar is not None:
-        configs["sat"]["gmm_reg_covar"] = args.gmm_reg_covar
-    if args.gmm_tol is not None:
-        configs["sat"]["gmm_tol"] = args.gmm_tol
-
 
 
     evaluation = False

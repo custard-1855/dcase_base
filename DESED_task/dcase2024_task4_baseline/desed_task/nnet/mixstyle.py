@@ -79,12 +79,10 @@ def mix_style(content_feature): # ok
         Tensor: スタイルが適用された新しい特徴量
     """
 
-    # MixStyleの適用は確率的に行う
     p = 0.5
     if torch.rand(1).item() > p:
         return content_feature
 
-    # チャネルはdeltaを扱う際は要検討
     # 試験的に周波数で混合
     content_mean = content_feature.mean(dim=(3), keepdim=True)
     content_var = content_feature.var(dim=(3), keepdim=True)
@@ -95,7 +93,7 @@ def mix_style(content_feature): # ok
 
     # x_styleを内部で用意
     B = content_feature.size(0)
-    perm = torch.randperm(B, device=content_feature.device) # ランダムにシャッフル
+    perm = torch.randperm(B, device=content_feature.device)
 
     mu2, sig2 = content_mean[perm], content_std[perm]
 
@@ -251,10 +249,7 @@ class FrequencyAttentionMixStyle(nn.Module):
         Args:
             x_content (Tensor): スタイル適用対象の特徴量 (Batch, Channels, Frame, Frequency)
         """
-        # common
-        # MixStyleを適用
         x_mixed = mix_style(x_content)
-        # print("[DEBUG]", x_mixed.size()) # [DEBUG] torch.Size([59, 1, 626, 128])
 
         # 時間方向の平均をとり、周波数の静的な特徴を取得
         x_avg = x_mixed.mean(dim=2) # 実際に使用するMixedの周波数で重要度を得る
@@ -264,12 +259,8 @@ class FrequencyAttentionMixStyle(nn.Module):
         attn_logits = self.attention_network(x_avg)
 
         # Sigmoid関数で重みを0〜1の範囲に正規化
-        # 各周波数が独立して重要かどうかを判断するため、SoftmaxよりSigmoidが適している?
         # (B, C, F) -> (B, C, 1, F) に変形してブロードキャスト可能に
         attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
 
-        if self.mixstyle_type == "resMix":
-            output = attn_weights * x_mixed + (1-attn_weights) * x_content # 残差接続的らしい. 情報損失を防ぐ?
-        else:
-            output = x_mixed # attentionなし
+        output = attn_weights * x_mixed + (1-attn_weights) * x_content
         return output
