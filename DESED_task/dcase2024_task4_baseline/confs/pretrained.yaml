@@ -11,32 +11,10 @@ cmt:
   warmup_epochs: 0
   use_neg_sample: False
 
-sat:
-  enabled: False
-  lambda: 0.999
-  w_u: 0.5
-  sat_start_epoch: 20
-  # Strong augmentation type selection
-  strong_augment_type: "cutmix"   # Options: "cutmix", "frame_shift_time_mask", "none"
-  # CutMix strong augmentation for SAT
-  cutmix_alpha: 1.0       # Beta distribution parameter for CutMix
-  cutmix_prob: 1.0 #0.5        # Probability of applying CutMix (1.0 = always apply)
-  # Frame Shift + Time Masking parameters
-  strong_augment_prob: 1.0  # Probability of applying Frame Shift + Time Masking
-  frame_shift_std: 90       # Standard deviation for Gaussian frame shift
-  time_mask_max: 5          # Maximum length of time mask
-  # gmm_fixed: False
-  # GMM parameters for adaptive threshold calculation (Eq 7-9)
-  gmm_n_init: 5             # Number of GMM initializations (higher = more stable but slower)
-  gmm_max_iter: 100          # Maximum EM iterations for GMM convergence
-  gmm_reg_covar: 1e-6     # Covariance regularization (higher = more stable, lower = more flexible)
-  gmm_tol: 1e-3             # Convergence tolerance (lower = stricter convergence)
-
 sebbs:
   enabled: false
 
 training:  
-  # バッチサイズ（論文推奨）
   batch_size: [12, 6, 6, 12, 24]    # [maestro, synth, strong, weak, unlabel]
   batch_size_val: 24
   
@@ -45,8 +23,8 @@ training:
   self_sup_loss: mse
   
   # 損失重み調整
-  const_max: 2                 # 自己教師学習最大重み
-  n_epochs_warmup: 50               # ウォームアップ期間
+  const_max: 2
+  n_epochs_warmup: 50
   epoch_decay: 100
   
   # 訓練制御
@@ -147,8 +125,6 @@ net:
   padding: [1, 1, 1, 1, 1, 1, 1]
   stride: [1, 1, 1, 1, 1, 1, 1]
   nb_filters: [ 16, 32, 64, 128, 128, 128, 128 ]
-  # MFCCは40, log melは128
-  # pooling: [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 5 ], [ 1, 1 ], [ 1, 1 ], [ 1, 1 ] ] # for MFCC
   pooling:  [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ] ] # for log mel
   dropstep_recurrent: 0.3
   dropstep_recurrent_len: 16
@@ -164,7 +140,7 @@ net:
   # for MixStyle
   attn_type: default
   attn_deepen: 2
-  mixstyle_type: resMix
+  mixstyle_type: disable
   # wandb
-  use_wandb: True
-  wandb_dir: "any"
+  use_wandb: False
+  wandb_dir: "None"
