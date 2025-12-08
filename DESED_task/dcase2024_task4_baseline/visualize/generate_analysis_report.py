@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-統合分析レポート生成スクリプト（リファクタリング版）
+"""統合分析レポート生成スクリプト（リファクタリング版）
 
 複数モデルの推論結果から定量的な比較分析を行い、Markdownレポートを生成する。
 
@@ -21,14 +20,21 @@ from typing import Dict, List, Optional, Tuple, Union
 import numpy as np
 import pandas as pd
 from sklearn.metrics import (
-    accuracy_score, f1_score, precision_score,
-    recall_score, average_precision_score, roc_auc_score
+    accuracy_score,
+    average_precision_score,
+    f1_score,
+    precision_score,
+    recall_score,
+    roc_auc_score,
 )
 
 # 共通ユーティリティをインポート
 from visualization_utils import (
-    DESED_CLASSES, MAESTRO_REAL_ALL, ALL_CLASSES_27,
-    USED_CLASS_INDICES, USED_CLASSES_21
+    ALL_CLASSES_27,
+    DESED_CLASSES,
+    MAESTRO_REAL_ALL,
+    USED_CLASS_INDICES,
+    USED_CLASSES_21,
 )
 
 
@@ -36,26 +42,32 @@ from visualization_utils import (
 @dataclass
 class AnalysisConfig:
     """分析レポート設定パラメータ"""
+
     threshold: float = 0.5
     n_ece_bins: int = 10
     top_k_classes: int = 10
     generate_csv: bool = True
-    metrics_to_compute: List[str] = None
+    metrics_to_compute: list[str] = None
 
     def __post_init__(self):
         if self.metrics_to_compute is None:
             self.metrics_to_compute = [
-                'accuracy', 'precision', 'recall', 'f1', 'mAP', 'ece'
+                "accuracy",
+                "precision",
+                "recall",
+                "f1",
+                "mAP",
+                "ece",
             ]
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """辞書形式に変換"""
         return {
-            'threshold': self.threshold,
-            'n_ece_bins': self.n_ece_bins,
-            'top_k_classes': self.top_k_classes,
-            'generate_csv': self.generate_csv,
-            'metrics_to_compute': self.metrics_to_compute
+            "threshold": self.threshold,
+            "n_ece_bins": self.n_ece_bins,
+            "top_k_classes": self.top_k_classes,
+            "generate_csv": self.generate_csv,
+            "metrics_to_compute": self.metrics_to_compute,
         }
 
 
@@ -65,11 +77,10 @@ class InferenceDataLoader:
 
     @staticmethod
     def load_inference_data(
-        model_dir: Union[str, Path],
-        verbose: bool = True
-    ) -> Tuple[Dict[str, Dict[str, np.ndarray]], Dict]:
-        """
-        推論結果とメタデータを読み込む
+        model_dir: str | Path,
+        verbose: bool = True,
+    ) -> tuple[dict[str, dict[str, np.ndarray]], dict]:
+        """推論結果とメタデータを読み込む
 
         Args:
             model_dir: モデルディレクトリ
@@ -78,6 +89,7 @@ class InferenceDataLoader:
         Returns:
             datasets: データセット辞書
             metadata: メタデータ辞書
+
         """
         model_dir = Path(model_dir)
 
@@ -96,13 +108,13 @@ class InferenceDataLoader:
                 data = np.load(npz_file, allow_pickle=True)
 
                 datasets[dataset_name] = {
-                    'probs_student': data['probs_student'],
-                    'probs_teacher': data['probs_teacher'],
-                    'filenames': data['filenames'],
+                    "probs_student": data["probs_student"],
+                    "probs_teacher": data["probs_teacher"],
+                    "filenames": data["filenames"],
                 }
 
-                if 'targets' in data:
-                    datasets[dataset_name]['targets'] = data['targets']
+                if "targets" in data:
+                    datasets[dataset_name]["targets"] = data["targets"]
 
             except Exception as e:
                 if verbose:
@@ -110,10 +122,10 @@ class InferenceDataLoader:
                 continue
 
         # メタデータの読み込み
-        metadata_path = model_dir / 'inference_metadata.json'
+        metadata_path = model_dir / "inference_metadata.json"
         if metadata_path.exists():
             try:
-                with open(metadata_path, 'r') as f:
+                with open(metadata_path) as f:
                     metadata = json.load(f)
             except Exception as e:
                 metadata = {}
@@ -129,10 +141,10 @@ class InferenceDataLoader:
 class MetricsCalculator:
     """各種メトリクスの計算を管理"""
 
-    def __init__(self, config: Optional[AnalysisConfig] = None):
-        """
-        Args:
-            config: 分析設定
+    def __init__(self, config: AnalysisConfig | None = None):
+        """Args:
+        config: 分析設定
+
         """
         self.config = config or AnalysisConfig()
 
@@ -140,10 +152,9 @@ class MetricsCalculator:
         self,
         probs: np.ndarray,
         targets: np.ndarray,
-        threshold: Optional[float] = None
-    ) -> Dict[str, float]:
-        """
-        マルチラベル分類の各種メトリクスを計算
+        threshold: float | None = None,
+    ) -> dict[str, float]:
+        """マルチラベル分類の各種メトリクスを計算
 
         Args:
             probs: (N, C) 予測確率
@@ -152,6 +163,7 @@ class MetricsCalculator:
 
         Returns:
             各種メトリクスの辞書
+
         """
         threshold = threshold or self.config.threshold
 
@@ -165,43 +177,49 @@ class MetricsCalculator:
         metrics = {}
 
         # 基本メトリクス
-        if 'accuracy' in self.config.metrics_to_compute:
-            metrics['accuracy'] = accuracy_score(
-                targets_binary.flatten(), preds.flatten()
+        if "accuracy" in self.config.metrics_to_compute:
+            metrics["accuracy"] = accuracy_score(
+                targets_binary.flatten(),
+                preds.flatten(),
             )
 
-        if 'precision' in self.config.metrics_to_compute:
-            metrics['precision'] = precision_score(
-                targets_binary.flatten(), preds.flatten(), zero_division=0
+        if "precision" in self.config.metrics_to_compute:
+            metrics["precision"] = precision_score(
+                targets_binary.flatten(),
+                preds.flatten(),
+                zero_division=0,
             )
 
-        if 'recall' in self.config.metrics_to_compute:
-            metrics['recall'] = recall_score(
-                targets_binary.flatten(), preds.flatten(), zero_division=0
+        if "recall" in self.config.metrics_to_compute:
+            metrics["recall"] = recall_score(
+                targets_binary.flatten(),
+                preds.flatten(),
+                zero_division=0,
             )
 
-        if 'f1' in self.config.metrics_to_compute:
-            metrics['f1'] = f1_score(
-                targets_binary.flatten(), preds.flatten(), zero_division=0
+        if "f1" in self.config.metrics_to_compute:
+            metrics["f1"] = f1_score(
+                targets_binary.flatten(),
+                preds.flatten(),
+                zero_division=0,
             )
 
         # mAP (mean Average Precision)
-        if 'mAP' in self.config.metrics_to_compute:
-            metrics['mAP'] = self._compute_map(probs, targets_binary)
+        if "mAP" in self.config.metrics_to_compute:
+            metrics["mAP"] = self._compute_map(probs, targets_binary)
 
         # ECE
-        if 'ece' in self.config.metrics_to_compute:
-            metrics['ece'] = self.compute_ece(probs, targets)
+        if "ece" in self.config.metrics_to_compute:
+            metrics["ece"] = self.compute_ece(probs, targets)
 
         return metrics
 
     def _compute_map(
         self,
         probs: np.ndarray,
-        targets_binary: np.ndarray
+        targets_binary: np.ndarray,
     ) -> float:
-        """
-        mean Average Precisionを計算
+        """Mean Average Precisionを計算
 
         Args:
             probs: 予測確率
@@ -209,13 +227,15 @@ class MetricsCalculator:
 
         Returns:
             mAP値
+
         """
         try:
             aps = []
             for i in range(targets_binary.shape[1]):
                 if targets_binary[:, i].sum() > 0:  # 正例が存在する場合のみ
                     ap = average_precision_score(
-                        targets_binary[:, i], probs[:, i]
+                        targets_binary[:, i],
+                        probs[:, i],
                     )
                     aps.append(ap)
             return np.mean(aps) if aps else 0.0
@@ -226,10 +246,9 @@ class MetricsCalculator:
         self,
         probs: np.ndarray,
         targets: np.ndarray,
-        n_bins: Optional[int] = None
+        n_bins: int | None = None,
     ) -> float:
-        """
-        Expected Calibration Error (ECE) を計算
+        """Expected Calibration Error (ECE) を計算
 
         Args:
             probs: 予測確率
@@ -238,6 +257,7 @@ class MetricsCalculator:
 
         Returns:
             ECE値
+
         """
         n_bins = n_bins or self.config.n_ece_bins
 
@@ -265,10 +285,9 @@ class MetricsCalculator:
         self,
         probs: np.ndarray,
         targets: np.ndarray,
-        threshold: Optional[float] = None
+        threshold: float | None = None,
     ) -> pd.DataFrame:
-        """
-        クラス別のメトリクスを計算
+        """クラス別のメトリクスを計算
 
         Args:
             probs: 予測確率
@@ -277,6 +296,7 @@ class MetricsCalculator:
 
         Returns:
             クラス別メトリクスのDataFrame
+
         """
         threshold = threshold or self.config.threshold
 
@@ -309,14 +329,16 @@ class MetricsCalculator:
             except Exception:
                 ap = 0.0
 
-            records.append({
-                'class': class_name,
-                'n_positive': int(n_positive),
-                'precision': precision,
-                'recall': recall,
-                'f1': f1,
-                'AP': ap
-            })
+            records.append(
+                {
+                    "class": class_name,
+                    "n_positive": int(n_positive),
+                    "precision": precision,
+                    "recall": recall,
+                    "f1": f1,
+                    "AP": ap,
+                }
+            )
 
         return pd.DataFrame(records)
 
@@ -327,28 +349,28 @@ class ReportGenerator:
 
     def __init__(
         self,
-        config: Optional[AnalysisConfig] = None,
-        calculator: Optional[MetricsCalculator] = None
+        config: AnalysisConfig | None = None,
+        calculator: MetricsCalculator | None = None,
     ):
-        """
-        Args:
-            config: 分析設定
-            calculator: メトリクス計算インスタンス
+        """Args:
+        config: 分析設定
+        calculator: メトリクス計算インスタンス
+
         """
         self.config = config or AnalysisConfig()
         self.calculator = calculator or MetricsCalculator(self.config)
 
     def generate_markdown_report(
         self,
-        models_results: Dict[str, Dict],
-        output_path: Union[str, Path]
+        models_results: dict[str, dict],
+        output_path: str | Path,
     ) -> None:
-        """
-        Markdownレポートを生成
+        """Markdownレポートを生成
 
         Args:
             models_results: モデル結果の辞書
             output_path: 出力ファイルパス
+
         """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -371,7 +393,7 @@ class ReportGenerator:
         self._add_class_analysis(lines, models_results)
 
         # 5. モデル改善の分析
-        if 'baseline' in models_results:
+        if "baseline" in models_results:
             self._add_improvement_analysis(lines, models_results)
 
         # 6. サマリーと考察
@@ -381,71 +403,77 @@ class ReportGenerator:
         self._add_footer(lines)
 
         # ファイルに書き込み
-        with open(output_path, 'w', encoding='utf-8') as f:
-            f.write('\n'.join(lines))
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines))
 
         print(f"  ✓ レポート保存: {output_path}")
 
-    def _add_header(self, lines: List[str]) -> None:
+    def _add_header(self, lines: list[str]) -> None:
         """ヘッダーを追加"""
-        lines.extend([
-            "# 音響イベント検出モデル 統合分析レポート",
-            "",
-            f"生成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-            "",
-            "---",
-            ""
-        ])
+        lines.extend(
+            [
+                "# 音響イベント検出モデル 統合分析レポート",
+                "",
+                f"生成日時: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
+                "",
+                "---",
+                "",
+            ]
+        )
 
     def _add_model_overview(
         self,
-        lines: List[str],
-        models_results: Dict[str, Dict]
+        lines: list[str],
+        models_results: dict[str, dict],
     ) -> None:
         """モデル概要セクションを追加"""
         lines.extend(["## 1. モデル概要", ""])
 
         for model_name, results in models_results.items():
-            metadata = results.get('metadata', {})
-            lines.extend([
-                f"### {model_name}",
-                "",
-                f"- **チェックポイント**: `{metadata.get('checkpoint', 'N/A')}`",
-                f"- **設定ファイル**: `{metadata.get('config_path', 'N/A')}`",
-                f"- **推論時刻**: {metadata.get('timestamp', 'N/A')}",
-                f"- **デバイス**: {metadata.get('device', 'N/A')}",
-                ""
-            ])
+            metadata = results.get("metadata", {})
+            lines.extend(
+                [
+                    f"### {model_name}",
+                    "",
+                    f"- **チェックポイント**: `{metadata.get('checkpoint', 'N/A')}`",
+                    f"- **設定ファイル**: `{metadata.get('config_path', 'N/A')}`",
+                    f"- **推論時刻**: {metadata.get('timestamp', 'N/A')}",
+                    f"- **デバイス**: {metadata.get('device', 'N/A')}",
+                    "",
+                ]
+            )
 
         lines.extend(["---", ""])
 
     def _add_overall_performance(
         self,
-        lines: List[str],
-        models_results: Dict[str, Dict]
+        lines: list[str],
+        models_results: dict[str, dict],
     ) -> None:
         """全体的な性能比較セクションを追加"""
         lines.extend(["## 2. 全体的な性能比較", ""])
 
-        for pred_type in ['student', 'teacher']:
+        for pred_type in ["student", "teacher"]:
             lines.extend([f"### {pred_type.capitalize()} モデル", ""])
 
             comparison_data = []
             for model_name, results in models_results.items():
-                if pred_type not in results.get('overall_metrics', {}):
+                if pred_type not in results.get("overall_metrics", {}):
                     continue
 
-                for dataset_name, metrics in results['overall_metrics'][pred_type].items():
-                    comparison_data.append({
-                        'Model': model_name,
-                        'Dataset': dataset_name,
-                        'Accuracy': f"{metrics.get('accuracy', 0):.4f}",
-                        'Precision': f"{metrics.get('precision', 0):.4f}",
-                        'Recall': f"{metrics.get('recall', 0):.4f}",
-                        'F1': f"{metrics.get('f1', 0):.4f}",
-                        'mAP': f"{metrics.get('mAP', 0):.4f}",
-                        'ECE': f"{metrics.get('ece', 0):.4f}"
-                    })
+                for dataset_name, metrics in results["overall_metrics"][pred_type].items():
+                    comparison_data.append(
+                        {
+                            "Model": model_name,
+                            "Dataset": dataset_name,
+                            "Accuracy": f"{metrics.get('accuracy', 0):.4f}",
+                            "Precision": f"{metrics.get('precision', 0):.4f}",
+                            "Recall": f"{metrics.get('recall', 0):.4f}",
+                            "F1": f"{metrics.get('f1', 0):.4f}",
+                            "mAP": f"{metrics.get('mAP', 0):.4f}",
+                            "ECE": f"{metrics.get('ece', 0):.4f}",
+                        }
+                    )
 
             if comparison_data:
                 df = pd.DataFrame(comparison_data)
@@ -456,8 +484,8 @@ class ReportGenerator:
 
     def _add_dataset_analysis(
         self,
-        lines: List[str],
-        models_results: Dict[str, Dict]
+        lines: list[str],
+        models_results: dict[str, dict],
     ) -> None:
         """データセット別分析セクションを追加"""
         lines.extend(["## 3. データセット別の詳細分析", ""])
@@ -465,26 +493,28 @@ class ReportGenerator:
         # データセット名を取得
         datasets = set()
         for results in models_results.values():
-            if 'overall_metrics' in results and 'student' in results['overall_metrics']:
-                datasets.update(results['overall_metrics']['student'].keys())
+            if "overall_metrics" in results and "student" in results["overall_metrics"]:
+                datasets.update(results["overall_metrics"]["student"].keys())
 
         for dataset_name in sorted(datasets):
             lines.extend([f"### {dataset_name}", ""])
 
             comparison = []
             for model_name, results in models_results.items():
-                if 'overall_metrics' not in results:
+                if "overall_metrics" not in results:
                     continue
-                if 'student' not in results['overall_metrics']:
+                if "student" not in results["overall_metrics"]:
                     continue
-                if dataset_name not in results['overall_metrics']['student']:
+                if dataset_name not in results["overall_metrics"]["student"]:
                     continue
 
-                metrics = results['overall_metrics']['student'][dataset_name]
-                comparison.append({
-                    'Model': model_name,
-                    **{k: f"{v:.4f}" for k, v in metrics.items()}
-                })
+                metrics = results["overall_metrics"]["student"][dataset_name]
+                comparison.append(
+                    {
+                        "Model": model_name,
+                        **{k: f"{v:.4f}" for k, v in metrics.items()},
+                    }
+                )
 
             if comparison:
                 df = pd.DataFrame(comparison)
@@ -495,8 +525,8 @@ class ReportGenerator:
 
     def _add_class_analysis(
         self,
-        lines: List[str],
-        models_results: Dict[str, Dict]
+        lines: list[str],
+        models_results: dict[str, dict],
     ) -> None:
         """クラス別分析セクションを追加"""
         lines.extend(["## 4. クラス別性能分析 (Student)", ""])
@@ -504,37 +534,39 @@ class ReportGenerator:
         # データセット名を取得
         datasets = set()
         for results in models_results.values():
-            if 'per_class_metrics' in results and 'student' in results['per_class_metrics']:
-                datasets.update(results['per_class_metrics']['student'].keys())
+            if "per_class_metrics" in results and "student" in results["per_class_metrics"]:
+                datasets.update(results["per_class_metrics"]["student"].keys())
 
         first_model = list(models_results.keys())[0] if models_results else None
 
         for dataset_name in sorted(datasets):
             lines.extend([f"### {dataset_name}", ""])
 
-            if first_model and 'per_class_metrics' in models_results[first_model]:
-                per_class_data = models_results[first_model]['per_class_metrics']
-                if 'student' in per_class_data and dataset_name in per_class_data['student']:
-                    per_class_df = per_class_data['student'][dataset_name]
+            if first_model and "per_class_metrics" in models_results[first_model]:
+                per_class_data = models_results[first_model]["per_class_metrics"]
+                if "student" in per_class_data and dataset_name in per_class_data["student"]:
+                    per_class_df = per_class_data["student"][dataset_name]
 
                     if not per_class_df.empty:
                         # 上位クラス（F1スコア順）
                         top_k = min(self.config.top_k_classes, len(per_class_df))
-                        if 'f1' in per_class_df.columns:
-                            top_classes = per_class_df.nlargest(top_k, 'f1')
-                            lines.extend([
-                                f"#### Top {top_k} Classes (by F1 score)",
-                                "",
-                                top_classes.to_markdown(index=False),
-                                ""
-                            ])
+                        if "f1" in per_class_df.columns:
+                            top_classes = per_class_df.nlargest(top_k, "f1")
+                            lines.extend(
+                                [
+                                    f"#### Top {top_k} Classes (by F1 score)",
+                                    "",
+                                    top_classes.to_markdown(index=False),
+                                    "",
+                                ]
+                            )
 
         lines.extend(["---", ""])
 
     def _add_improvement_analysis(
         self,
-        lines: List[str],
-        models_results: Dict[str, Dict]
+        lines: list[str],
+        models_results: dict[str, dict],
     ) -> None:
         """モデル改善分析セクションを追加"""
         if len(models_results) <= 1:
@@ -542,12 +574,12 @@ class ReportGenerator:
 
         lines.extend(["## 5. モデル改善の分析", ""])
 
-        baseline_results = models_results.get('baseline', {})
+        baseline_results = models_results.get("baseline", {})
         if not baseline_results:
             return
 
         for model_name, results in models_results.items():
-            if model_name == 'baseline':
+            if model_name == "baseline":
                 continue
 
             lines.extend([f"### {model_name} vs baseline", ""])
@@ -556,47 +588,53 @@ class ReportGenerator:
             datasets = set()
 
             # 両モデルに共通するデータセットを取得
-            if 'overall_metrics' in baseline_results and 'overall_metrics' in results:
-                baseline_datasets = set(baseline_results['overall_metrics'].get('student', {}).keys())
-                current_datasets = set(results['overall_metrics'].get('student', {}).keys())
+            if "overall_metrics" in baseline_results and "overall_metrics" in results:
+                baseline_datasets = set(
+                    baseline_results["overall_metrics"].get("student", {}).keys()
+                )
+                current_datasets = set(results["overall_metrics"].get("student", {}).keys())
                 datasets = baseline_datasets.intersection(current_datasets)
 
             for dataset_name in sorted(datasets):
-                baseline_metrics = baseline_results['overall_metrics']['student'][dataset_name]
-                current_metrics = results['overall_metrics']['student'][dataset_name]
+                baseline_metrics = baseline_results["overall_metrics"]["student"][dataset_name]
+                current_metrics = results["overall_metrics"]["student"][dataset_name]
 
                 improvement = {
-                    'Dataset': dataset_name,
-                    'ΔAccuracy': f"{(current_metrics.get('accuracy', 0) - baseline_metrics.get('accuracy', 0)):.4f}",
-                    'ΔF1': f"{(current_metrics.get('f1', 0) - baseline_metrics.get('f1', 0)):.4f}",
-                    'ΔmAP': f"{(current_metrics.get('mAP', 0) - baseline_metrics.get('mAP', 0)):.4f}",
-                    'ΔECE': f"{(current_metrics.get('ece', 0) - baseline_metrics.get('ece', 0)):.4f}",
+                    "Dataset": dataset_name,
+                    "ΔAccuracy": f"{(current_metrics.get('accuracy', 0) - baseline_metrics.get('accuracy', 0)):.4f}",
+                    "ΔF1": f"{(current_metrics.get('f1', 0) - baseline_metrics.get('f1', 0)):.4f}",
+                    "ΔmAP": f"{(current_metrics.get('mAP', 0) - baseline_metrics.get('mAP', 0)):.4f}",
+                    "ΔECE": f"{(current_metrics.get('ece', 0) - baseline_metrics.get('ece', 0)):.4f}",
                 }
                 improvements.append(improvement)
 
             if improvements:
                 df = pd.DataFrame(improvements)
-                lines.extend([
-                    df.to_markdown(index=False),
-                    "",
-                    "*Note: 正の値は改善、負の値は悪化を示す（ECEは例外：負の値が改善）*",
-                    ""
-                ])
+                lines.extend(
+                    [
+                        df.to_markdown(index=False),
+                        "",
+                        "*Note: 正の値は改善、負の値は悪化を示す（ECEは例外：負の値が改善）*",
+                        "",
+                    ]
+                )
 
         lines.extend(["---", ""])
 
     def _add_summary(
         self,
-        lines: List[str],
-        models_results: Dict[str, Dict]
+        lines: list[str],
+        models_results: dict[str, dict],
     ) -> None:
         """サマリーセクションを追加"""
-        lines.extend([
-            "## 6. サマリーと考察",
-            "",
-            "### 主な発見",
-            ""
-        ])
+        lines.extend(
+            [
+                "## 6. サマリーと考察",
+                "",
+                "### 主な発見",
+                "",
+            ]
+        )
 
         # 最高性能モデルを特定
         best_models = self._find_best_models(models_results)
@@ -611,13 +649,13 @@ class ReportGenerator:
 
     def _find_best_models(
         self,
-        models_results: Dict[str, Dict]
-    ) -> Dict[str, Tuple[str, float]]:
+        models_results: dict[str, dict],
+    ) -> dict[str, tuple[str, float]]:
         """各データセットの最高性能モデルを特定"""
         datasets = set()
         for results in models_results.values():
-            if 'overall_metrics' in results and 'student' in results['overall_metrics']:
-                datasets.update(results['overall_metrics']['student'].keys())
+            if "overall_metrics" in results and "student" in results["overall_metrics"]:
+                datasets.update(results["overall_metrics"]["student"].keys())
 
         best_models = {}
         for dataset_name in datasets:
@@ -625,14 +663,14 @@ class ReportGenerator:
             best_model = None
 
             for model_name, results in models_results.items():
-                if 'overall_metrics' not in results:
+                if "overall_metrics" not in results:
                     continue
-                if 'student' not in results['overall_metrics']:
+                if "student" not in results["overall_metrics"]:
                     continue
-                if dataset_name not in results['overall_metrics']['student']:
+                if dataset_name not in results["overall_metrics"]["student"]:
                     continue
 
-                f1 = results['overall_metrics']['student'][dataset_name].get('f1', 0)
+                f1 = results["overall_metrics"]["student"][dataset_name].get("f1", 0)
                 if f1 > best_f1:
                     best_f1 = f1
                     best_model = model_name
@@ -642,21 +680,21 @@ class ReportGenerator:
 
         return best_models
 
-    def _add_footer(self, lines: List[str]) -> None:
+    def _add_footer(self, lines: list[str]) -> None:
         """フッターを追加"""
         lines.append("*このレポートは `generate_analysis_report.py` により自動生成されました。*")
 
     def generate_csv_outputs(
         self,
-        models_results: Dict[str, Dict],
-        output_dir: Union[str, Path]
+        models_results: dict[str, dict],
+        output_dir: str | Path,
     ) -> None:
-        """
-        CSV形式の出力を生成
+        """CSV形式の出力を生成
 
         Args:
             models_results: モデル結果
             output_dir: 出力ディレクトリ
+
         """
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -669,67 +707,67 @@ class ReportGenerator:
 
     def _save_overall_metrics_csv(
         self,
-        models_results: Dict[str, Dict],
-        output_dir: Path
+        models_results: dict[str, dict],
+        output_dir: Path,
     ) -> None:
         """全体メトリクスをCSVとして保存"""
         all_records = []
 
         for model_name, results in models_results.items():
-            if 'overall_metrics' not in results:
+            if "overall_metrics" not in results:
                 continue
 
-            for pred_type in ['student', 'teacher']:
-                if pred_type not in results['overall_metrics']:
+            for pred_type in ["student", "teacher"]:
+                if pred_type not in results["overall_metrics"]:
                     continue
 
-                for dataset_name, metrics in results['overall_metrics'][pred_type].items():
+                for dataset_name, metrics in results["overall_metrics"][pred_type].items():
                     record = {
-                        'model': model_name,
-                        'pred_type': pred_type,
-                        'dataset': dataset_name,
-                        **metrics
+                        "model": model_name,
+                        "pred_type": pred_type,
+                        "dataset": dataset_name,
+                        **metrics,
                     }
                     all_records.append(record)
 
         if all_records:
             df = pd.DataFrame(all_records)
-            output_path = output_dir / 'overall_metrics.csv'
+            output_path = output_dir / "overall_metrics.csv"
             df.to_csv(output_path, index=False)
             print(f"  ✓ 保存: {output_path}")
 
     def _save_per_class_metrics_csv(
         self,
-        models_results: Dict[str, Dict],
-        output_dir: Path
+        models_results: dict[str, dict],
+        output_dir: Path,
     ) -> None:
         """クラス別メトリクスをCSVとして保存"""
         # データセットとpred_typeの組み合わせを収集
         combinations = set()
         for results in models_results.values():
-            if 'per_class_metrics' in results:
-                for pred_type in results['per_class_metrics']:
-                    for dataset_name in results['per_class_metrics'][pred_type]:
+            if "per_class_metrics" in results:
+                for pred_type in results["per_class_metrics"]:
+                    for dataset_name in results["per_class_metrics"][pred_type]:
                         combinations.add((pred_type, dataset_name))
 
         for pred_type, dataset_name in combinations:
             all_class_records = []
 
             for model_name, results in models_results.items():
-                if 'per_class_metrics' not in results:
+                if "per_class_metrics" not in results:
                     continue
-                if pred_type not in results['per_class_metrics']:
+                if pred_type not in results["per_class_metrics"]:
                     continue
-                if dataset_name not in results['per_class_metrics'][pred_type]:
+                if dataset_name not in results["per_class_metrics"][pred_type]:
                     continue
 
-                per_class_df = results['per_class_metrics'][pred_type][dataset_name].copy()
-                per_class_df['model'] = model_name
+                per_class_df = results["per_class_metrics"][pred_type][dataset_name].copy()
+                per_class_df["model"] = model_name
                 all_class_records.append(per_class_df)
 
             if all_class_records:
                 df = pd.concat(all_class_records, ignore_index=True)
-                output_path = output_dir / f'per_class_{pred_type}_{dataset_name}.csv'
+                output_path = output_dir / f"per_class_{pred_type}_{dataset_name}.csv"
                 df.to_csv(output_path, index=False)
                 print(f"  ✓ 保存: {output_path}")
 
@@ -750,7 +788,7 @@ def parse_arguments() -> argparse.Namespace:
 
   # CSVなしで高速生成
   python generate_analysis_report.py --input_dirs outputs/baseline --output report.md --no_csv
-        """
+        """,
     )
 
     # 必須引数
@@ -758,12 +796,12 @@ def parse_arguments() -> argparse.Namespace:
         "--input_dirs",
         nargs="+",
         required=True,
-        help="推論結果ディレクトリ（複数指定可）"
+        help="推論結果ディレクトリ（複数指定可）",
     )
     parser.add_argument(
         "--output",
         required=True,
-        help="出力レポートファイル (.md)"
+        help="出力レポートファイル (.md)",
     )
 
     # オプション引数
@@ -771,29 +809,29 @@ def parse_arguments() -> argparse.Namespace:
         "--threshold",
         type=float,
         default=0.5,
-        help="予測の閾値 (default: 0.5)"
+        help="予測の閾値 (default: 0.5)",
     )
     parser.add_argument(
         "--n_ece_bins",
         type=int,
         default=10,
-        help="ECE計算のビン数 (default: 10)"
+        help="ECE計算のビン数 (default: 10)",
     )
     parser.add_argument(
         "--top_k_classes",
         type=int,
         default=10,
-        help="表示する上位クラス数 (default: 10)"
+        help="表示する上位クラス数 (default: 10)",
     )
     parser.add_argument(
         "--no_csv",
         action="store_true",
-        help="CSV出力を生成しない"
+        help="CSV出力を生成しない",
     )
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="詳細出力を有効化"
+        help="詳細出力を有効化",
     )
 
     return parser.parse_args()
@@ -803,16 +841,16 @@ def main():
     """メイン処理"""
     args = parse_arguments()
 
-    print("="*60)
+    print("=" * 60)
     print("統合分析レポート生成スクリプト")
-    print("="*60)
+    print("=" * 60)
 
     # 設定の作成
     config = AnalysisConfig(
         threshold=args.threshold,
         n_ece_bins=args.n_ece_bins,
         top_k_classes=args.top_k_classes,
-        generate_csv=not args.no_csv
+        generate_csv=not args.no_csv,
     )
 
     # 各種インスタンスの初期化
@@ -837,20 +875,20 @@ def main():
             datasets, metadata = loader.load_inference_data(input_path, verbose=args.verbose)
 
             # メトリクス計算
-            overall_metrics = {'student': {}, 'teacher': {}}
-            per_class_metrics = {'student': {}, 'teacher': {}}
+            overall_metrics = {"student": {}, "teacher": {}}
+            per_class_metrics = {"student": {}, "teacher": {}}
 
             for dataset_name, data in datasets.items():
                 # ラベル付きデータのみ処理
-                if 'targets' not in data:
+                if "targets" not in data:
                     if args.verbose:
                         print(f"    {dataset_name}: ラベルなし、スキップ")
                     continue
 
-                targets = data['targets']
+                targets = data["targets"]
 
-                for pred_type in ['student', 'teacher']:
-                    probs = data[f'probs_{pred_type}']
+                for pred_type in ["student", "teacher"]:
+                    probs = data[f"probs_{pred_type}"]
 
                     # 全体のメトリクス
                     metrics = calculator.compute_metrics(probs, targets)
@@ -861,9 +899,9 @@ def main():
                     per_class_metrics[pred_type][dataset_name] = per_class_df
 
             models_results[model_name] = {
-                'metadata': metadata,
-                'overall_metrics': overall_metrics,
-                'per_class_metrics': per_class_metrics
+                "metadata": metadata,
+                "overall_metrics": overall_metrics,
+                "per_class_metrics": per_class_metrics,
             }
 
         except Exception as e:
@@ -882,23 +920,23 @@ def main():
     # CSV出力
     if config.generate_csv:
         print("\n[3/3] CSV出力作成中...")
-        csv_dir = output_path.parent / 'csv_outputs'
+        csv_dir = output_path.parent / "csv_outputs"
         generator.generate_csv_outputs(models_results, csv_dir)
     else:
         print("\n[3/3] CSV出力をスキップ")
 
     # 設定の保存
-    config_path = output_path.parent / 'report_config.json'
-    with open(config_path, 'w') as f:
+    config_path = output_path.parent / "report_config.json"
+    with open(config_path, "w") as f:
         json.dump(config.to_dict(), f, indent=2)
     print(f"\n  ✓ 設定保存: {config_path}")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("完了！")
     print(f"レポート: {output_path}")
     if config.generate_csv:
         print(f"CSV出力: {output_path.parent / 'csv_outputs'}")
-    print("="*60)
+    print("=" * 60)
 
 
 if __name__ == "__main__":

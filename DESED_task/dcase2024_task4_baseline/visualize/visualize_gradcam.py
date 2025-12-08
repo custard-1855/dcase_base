@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-Grad-CAM可視化スクリプト（リファクタリング版）
+"""Grad-CAM可視化スクリプト（リファクタリング版）
 
 境界事例や誤予測サンプルに対してGrad-CAMを適用し、
 モデルがどの時間-周波数領域に注目しているかを可視化
@@ -19,7 +18,7 @@ import json
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Tuple, Optional, Union
+from typing import Dict, List, Optional, Tuple, Union
 
 import librosa
 import matplotlib.pyplot as plt
@@ -27,21 +26,20 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import yaml
-from tqdm import tqdm
-
 from desed_task.nnet.CRNN import CRNN
 from desed_task.utils.encoder import CatManyHotEncoder, ManyHotEncoder
-from local.classes_dict import (
-    classes_labels_desed,
-    classes_labels_maestro_real
-)
+from local.classes_dict import classes_labels_desed, classes_labels_maestro_real
 from local.sed_trainer_pretrained import SEDTask4
+from tqdm import tqdm
 
 # 共通ユーティリティをインポート
 from visualization_utils import (
-    DESED_CLASSES, MAESTRO_REAL_ALL, ALL_CLASSES_27,
-    USED_CLASS_INDICES, USED_CLASSES_21,
-    load_inference_data
+    ALL_CLASSES_27,
+    DESED_CLASSES,
+    MAESTRO_REAL_ALL,
+    USED_CLASS_INDICES,
+    USED_CLASSES_21,
+    load_inference_data,
 )
 
 
@@ -49,29 +47,30 @@ from visualization_utils import (
 @dataclass
 class GradCAMConfig:
     """Grad-CAM設定パラメータ"""
+
     target_layer: str = "attention"  # 注目する層
     use_cuda: bool = True
     batch_size: int = 1
-    confidence_range: Tuple[float, float] = (0.4, 0.6)  # 境界事例の閾値範囲
+    confidence_range: tuple[float, float] = (0.4, 0.6)  # 境界事例の閾値範囲
     misclass_threshold: float = 0.5
     n_samples: int = 10
 
     # プロット設定
-    figsize: Tuple[int, int] = (18, 5)
+    figsize: tuple[int, int] = (18, 5)
     dpi: int = 200
-    colormap_spec: str = 'viridis'
-    colormap_gradcam: str = 'jet'
+    colormap_spec: str = "viridis"
+    colormap_gradcam: str = "jet"
     overlay_alpha: float = 0.5
 
-    def to_dict(self) -> Dict:
+    def to_dict(self) -> dict:
         """辞書形式に変換"""
         return {
-            'target_layer': self.target_layer,
-            'use_cuda': self.use_cuda,
-            'batch_size': self.batch_size,
-            'confidence_range': list(self.confidence_range),
-            'misclass_threshold': self.misclass_threshold,
-            'n_samples': self.n_samples
+            "target_layer": self.target_layer,
+            "use_cuda": self.use_cuda,
+            "batch_size": self.batch_size,
+            "confidence_range": list(self.confidence_range),
+            "misclass_threshold": self.misclass_threshold,
+            "n_samples": self.n_samples,
         }
 
 
@@ -79,11 +78,11 @@ class GradCAMConfig:
 class ModelLoader:
     """モデルローディングを管理するクラス"""
 
-    def __init__(self, config: Dict, device: str = 'cpu'):
-        """
-        Args:
-            config: モデル設定辞書
-            device: 使用デバイス
+    def __init__(self, config: dict, device: str = "cpu"):
+        """Args:
+        config: モデル設定辞書
+        device: 使用デバイス
+
         """
         self.config = config
         self.device = device
@@ -109,9 +108,8 @@ class ModelLoader:
         )
         return CatManyHotEncoder((desed_encoder, maestro_real_encoder))
 
-    def load_model(self, checkpoint_path: Union[str, Path]) -> SEDTask4:
-        """
-        モデルをロード
+    def load_model(self, checkpoint_path: str | Path) -> SEDTask4:
+        """モデルをロード
 
         Args:
             checkpoint_path: チェックポイントファイルパス
@@ -121,6 +119,7 @@ class ModelLoader:
 
         Raises:
             FileNotFoundError: チェックポイントファイルが見つからない場合
+
         """
         checkpoint_path = Path(checkpoint_path)
 
@@ -149,7 +148,7 @@ class ModelLoader:
             train_sampler=None,
             scheduler=None,
             fast_dev_run=False,
-            evaluation=True
+            evaluation=True,
         )
 
         # State dictをロード
@@ -164,10 +163,10 @@ class ModelLoader:
 class GradCAMComputer:
     """Grad-CAM計算を管理するクラス"""
 
-    def __init__(self, config: Optional[GradCAMConfig] = None):
-        """
-        Args:
-            config: Grad-CAM設定
+    def __init__(self, config: GradCAMConfig | None = None):
+        """Args:
+        config: Grad-CAM設定
+
         """
         self.config = config or GradCAMConfig()
 
@@ -176,10 +175,9 @@ class GradCAMComputer:
         model: SEDTask4,
         audio: torch.Tensor,
         target_class: int,
-        use_teacher: bool = False
+        use_teacher: bool = False,
     ) -> np.ndarray:
-        """
-        Grad-CAMを計算
+        """Grad-CAMを計算
 
         Args:
             model: SEDTask4モデル
@@ -189,6 +187,7 @@ class GradCAMComputer:
 
         Returns:
             gradcam: (time, freq) Grad-CAMヒートマップ
+
         """
         # 音声の次元を確認して適切に整形
         if audio.dim() == 1:
@@ -273,11 +272,10 @@ class GradCAMComputer:
         probs: np.ndarray,
         targets: np.ndarray,
         filenames: np.ndarray,
-        confidence_range: Optional[Tuple[float, float]] = None,
-        n_samples: Optional[int] = None
-    ) -> List[Dict]:
-        """
-        境界事例（予測確率が中間的なサンプル）を抽出
+        confidence_range: tuple[float, float] | None = None,
+        n_samples: int | None = None,
+    ) -> list[dict]:
+        """境界事例（予測確率が中間的なサンプル）を抽出
 
         Args:
             probs: (N, C) 予測確率
@@ -288,6 +286,7 @@ class GradCAMComputer:
 
         Returns:
             境界事例のリスト
+
         """
         confidence_range = confidence_range or self.config.confidence_range
         n_samples = n_samples or self.config.n_samples
@@ -301,20 +300,25 @@ class GradCAMComputer:
 
                 # 境界条件: 予測確率が指定範囲内
                 if confidence_range[0] < prob < confidence_range[1]:
-                    class_name = (ALL_CLASSES_27[class_idx] if class_idx < len(ALL_CLASSES_27)
-                                else f'class_{class_idx}')
+                    class_name = (
+                        ALL_CLASSES_27[class_idx]
+                        if class_idx < len(ALL_CLASSES_27)
+                        else f"class_{class_idx}"
+                    )
 
-                    boundary_cases.append({
-                        'filename': str(filenames[sample_idx]),
-                        'class_idx': class_idx,
-                        'class_name': class_name,
-                        'prob': float(prob),
-                        'target': float(target),
-                        'sample_idx': sample_idx
-                    })
+                    boundary_cases.append(
+                        {
+                            "filename": str(filenames[sample_idx]),
+                            "class_idx": class_idx,
+                            "class_name": class_name,
+                            "prob": float(prob),
+                            "target": float(target),
+                            "sample_idx": sample_idx,
+                        }
+                    )
 
         # 予測確率が0.5に近い順にソート
-        boundary_cases.sort(key=lambda x: abs(x['prob'] - 0.5))
+        boundary_cases.sort(key=lambda x: abs(x["prob"] - 0.5))
 
         return boundary_cases[:n_samples]
 
@@ -323,11 +327,10 @@ class GradCAMComputer:
         probs: np.ndarray,
         targets: np.ndarray,
         filenames: np.ndarray,
-        threshold: Optional[float] = None,
-        n_samples: Optional[int] = None
-    ) -> List[Dict]:
-        """
-        誤予測サンプルを抽出
+        threshold: float | None = None,
+        n_samples: int | None = None,
+    ) -> list[dict]:
+        """誤予測サンプルを抽出
 
         Args:
             probs: (N, C) 予測確率
@@ -338,6 +341,7 @@ class GradCAMComputer:
 
         Returns:
             誤予測サンプルのリスト
+
         """
         threshold = threshold or self.config.misclass_threshold
         n_samples = n_samples or self.config.n_samples
@@ -352,23 +356,31 @@ class GradCAMComputer:
             if len(true_classes) > 0 and pred_class not in true_classes:
                 pred_prob = probs[sample_idx, pred_class]
 
-                pred_name = (ALL_CLASSES_27[pred_class] if pred_class < len(ALL_CLASSES_27)
-                           else f'class_{pred_class}')
-                true_name = (ALL_CLASSES_27[true_classes[0]] if true_classes[0] < len(ALL_CLASSES_27)
-                           else f'class_{true_classes[0]}')
+                pred_name = (
+                    ALL_CLASSES_27[pred_class]
+                    if pred_class < len(ALL_CLASSES_27)
+                    else f"class_{pred_class}"
+                )
+                true_name = (
+                    ALL_CLASSES_27[true_classes[0]]
+                    if true_classes[0] < len(ALL_CLASSES_27)
+                    else f"class_{true_classes[0]}"
+                )
 
-                misclassified_cases.append({
-                    'filename': str(filenames[sample_idx]),
-                    'predicted_class_idx': int(pred_class),
-                    'predicted_class_name': pred_name,
-                    'true_class_idx': int(true_classes[0]),
-                    'true_class_name': true_name,
-                    'predicted_prob': float(pred_prob),
-                    'sample_idx': sample_idx
-                })
+                misclassified_cases.append(
+                    {
+                        "filename": str(filenames[sample_idx]),
+                        "predicted_class_idx": int(pred_class),
+                        "predicted_class_name": pred_name,
+                        "true_class_idx": int(true_classes[0]),
+                        "true_class_name": true_name,
+                        "predicted_prob": float(pred_prob),
+                        "sample_idx": sample_idx,
+                    }
+                )
 
         # 予測確率が高い順（確信を持った誤予測）
-        misclassified_cases.sort(key=lambda x: x['predicted_prob'], reverse=True)
+        misclassified_cases.sort(key=lambda x: x["predicted_prob"], reverse=True)
 
         return misclassified_cases[:n_samples]
 
@@ -379,13 +391,13 @@ class GradCAMVisualizer:
 
     def __init__(
         self,
-        config: Optional[GradCAMConfig] = None,
-        computer: Optional[GradCAMComputer] = None
+        config: GradCAMConfig | None = None,
+        computer: GradCAMComputer | None = None,
     ):
-        """
-        Args:
-            config: Grad-CAM設定
-            computer: Grad-CAM計算インスタンス
+        """Args:
+        config: Grad-CAM設定
+        computer: Grad-CAM計算インスタンス
+
         """
         self.config = config or GradCAMConfig()
         self.computer = computer or GradCAMComputer(self.config)
@@ -394,13 +406,12 @@ class GradCAMVisualizer:
         self,
         mel_spec: np.ndarray,
         gradcam: np.ndarray,
-        output_path: Union[str, Path],
+        output_path: str | Path,
         title: str = "Grad-CAM",
         class_name: str = "",
-        prob: Optional[float] = None
+        prob: float | None = None,
     ) -> None:
-        """
-        メルスペクトログラムとGrad-CAMを重ねて表示
+        """メルスペクトログラムとGrad-CAMを重ねて表示
 
         Args:
             mel_spec: (time, freq) メルスペクトログラム
@@ -409,6 +420,7 @@ class GradCAMVisualizer:
             title: タイトル
             class_name: クラス名
             prob: 予測確率
+
         """
         output_path = Path(output_path)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -418,78 +430,77 @@ class GradCAMVisualizer:
         # 1. メルスペクトログラム
         im1 = axes[0].imshow(
             mel_spec.T,
-            aspect='auto',
-            origin='lower',
+            aspect="auto",
+            origin="lower",
             cmap=self.config.colormap_spec,
-            interpolation='nearest'
+            interpolation="nearest",
         )
-        axes[0].set_title('Mel Spectrogram', fontsize=12)
-        axes[0].set_xlabel('Time')
-        axes[0].set_ylabel('Frequency (Mel bins)')
+        axes[0].set_title("Mel Spectrogram", fontsize=12)
+        axes[0].set_xlabel("Time")
+        axes[0].set_ylabel("Frequency (Mel bins)")
         plt.colorbar(im1, ax=axes[0])
 
         # 2. Grad-CAM
         im2 = axes[1].imshow(
             gradcam.T,
-            aspect='auto',
-            origin='lower',
+            aspect="auto",
+            origin="lower",
             cmap=self.config.colormap_gradcam,
-            interpolation='bilinear',
-            alpha=0.8
+            interpolation="bilinear",
+            alpha=0.8,
         )
-        axes[1].set_title('Grad-CAM', fontsize=12)
-        axes[1].set_xlabel('Time')
-        axes[1].set_ylabel('Frequency (Mel bins)')
+        axes[1].set_title("Grad-CAM", fontsize=12)
+        axes[1].set_xlabel("Time")
+        axes[1].set_ylabel("Frequency (Mel bins)")
         plt.colorbar(im2, ax=axes[1])
 
         # 3. オーバーレイ
         axes[2].imshow(
             mel_spec.T,
-            aspect='auto',
-            origin='lower',
-            cmap='gray',
-            interpolation='nearest',
-            alpha=0.6
+            aspect="auto",
+            origin="lower",
+            cmap="gray",
+            interpolation="nearest",
+            alpha=0.6,
         )
         im3 = axes[2].imshow(
             gradcam.T,
-            aspect='auto',
-            origin='lower',
+            aspect="auto",
+            origin="lower",
             cmap=self.config.colormap_gradcam,
-            interpolation='bilinear',
-            alpha=self.config.overlay_alpha
+            interpolation="bilinear",
+            alpha=self.config.overlay_alpha,
         )
-        axes[2].set_title('Overlay', fontsize=12)
-        axes[2].set_xlabel('Time')
-        axes[2].set_ylabel('Frequency (Mel bins)')
+        axes[2].set_title("Overlay", fontsize=12)
+        axes[2].set_xlabel("Time")
+        axes[2].set_ylabel("Frequency (Mel bins)")
         plt.colorbar(im3, ax=axes[2])
 
         # 全体タイトル
-        title_str = f'{title}'
+        title_str = f"{title}"
         if class_name:
-            title_str += f' - {class_name}'
+            title_str += f" - {class_name}"
         if prob is not None:
-            title_str += f' (prob: {prob:.3f})'
+            title_str += f" (prob: {prob:.3f})"
 
-        fig.suptitle(title_str, fontsize=14, fontweight='bold')
+        fig.suptitle(title_str, fontsize=14, fontweight="bold")
 
         plt.tight_layout()
-        plt.savefig(output_path, dpi=self.config.dpi, bbox_inches='tight')
+        plt.savefig(output_path, dpi=self.config.dpi, bbox_inches="tight")
         plt.close()
 
         print(f"  ✓ 保存: {output_path}")
 
     def process_samples(
         self,
-        cases: List[Dict],
-        models: Dict[str, SEDTask4],
-        model_config: Dict,
+        cases: list[dict],
+        models: dict[str, SEDTask4],
+        model_config: dict,
         output_dir: Path,
         case_type: str,
-        pred_type: str = 'student'
+        pred_type: str = "student",
     ) -> None:
-        """
-        サンプルを処理してGrad-CAMを生成
+        """サンプルを処理してGrad-CAMを生成
 
         Args:
             cases: 処理するケースのリスト
@@ -498,19 +509,20 @@ class GradCAMVisualizer:
             output_dir: 出力ディレクトリ
             case_type: ケースタイプ（'boundary' or 'misclassified'）
             pred_type: 使用するモデルタイプ
+
         """
         output_dir.mkdir(parents=True, exist_ok=True)
 
         for i, case in enumerate(tqdm(cases, desc=f"{case_type}のGrad-CAM計算")):
             # 音声ファイルのパスを解決
-            audio_path = Path(case['filename'])
+            audio_path = Path(case["filename"])
             if not audio_path.exists():
                 warnings.warn(f"ファイルが見つかりません: {audio_path}")
                 continue
 
             try:
                 # 音声読み込み
-                audio, sr = librosa.load(audio_path, sr=model_config['data']['fs'], mono=True)
+                audio, sr = librosa.load(audio_path, sr=model_config["data"]["fs"], mono=True)
 
                 # デバイスを取得
                 device = next(iter(models.values())).device
@@ -520,30 +532,32 @@ class GradCAMVisualizer:
                 mel_spec = librosa.feature.melspectrogram(
                     y=audio,
                     sr=sr,
-                    n_fft=model_config['feats']['n_window'],
-                    hop_length=model_config['feats']['hop_length'],
-                    n_mels=model_config['feats']['n_filters']
+                    n_fft=model_config["feats"]["n_window"],
+                    hop_length=model_config["feats"]["hop_length"],
+                    n_mels=model_config["feats"]["n_filters"],
                 )
                 mel_spec_db = librosa.power_to_db(mel_spec, ref=np.max)
 
                 # 各モデルでGrad-CAM計算
                 for model_name, model in models.items():
-                    if case_type == 'boundary':
-                        target_class = case['class_idx']
-                        class_info = case['class_name']
-                        prob_info = case['prob']
+                    if case_type == "boundary":
+                        target_class = case["class_idx"]
+                        class_info = case["class_name"]
+                        prob_info = case["prob"]
                         filename_suffix = f"_{case['class_name']}_prob{case['prob']:.2f}"
                     else:  # misclassified
-                        target_class = case['predicted_class_idx']
+                        target_class = case["predicted_class_idx"]
                         class_info = f"Pred: {case['predicted_class_name']} / True: {case['true_class_name']}"
-                        prob_info = case['predicted_prob']
-                        filename_suffix = f"_pred{case['predicted_class_name']}_true{case['true_class_name']}"
+                        prob_info = case["predicted_prob"]
+                        filename_suffix = (
+                            f"_pred{case['predicted_class_name']}_true{case['true_class_name']}"
+                        )
 
                     gradcam = self.computer.compute_gradcam(
                         model,
                         audio_tensor,
                         target_class,
-                        use_teacher=(pred_type == 'teacher')
+                        use_teacher=(pred_type == "teacher"),
                     )
 
                     # プロット
@@ -554,7 +568,7 @@ class GradCAMVisualizer:
                         output_path,
                         title=f"{model_name} - {case_type.title()} Case",
                         class_name=class_info,
-                        prob=prob_info
+                        prob=prob_info,
                     )
 
             except Exception as e:
@@ -577,7 +591,7 @@ def parse_arguments() -> argparse.Namespace:
 
   # サンプル数とデバイスを指定
   python visualize_gradcam.py --input_dirs outputs/baseline --checkpoints baseline.ckpt --config confs/pretrained.yaml --output_dir outputs --n_samples 20 --device cpu
-        """
+        """,
     )
 
     # 必須引数
@@ -585,23 +599,23 @@ def parse_arguments() -> argparse.Namespace:
         "--input_dirs",
         nargs="+",
         required=True,
-        help="推論結果ディレクトリ（複数指定可）"
+        help="推論結果ディレクトリ（複数指定可）",
     )
     parser.add_argument(
         "--checkpoints",
         nargs="+",
         required=True,
-        help="モデルチェックポイント（input_dirsと同じ順序）"
+        help="モデルチェックポイント（input_dirsと同じ順序）",
     )
     parser.add_argument(
         "--config",
         required=True,
-        help="モデル設定ファイル (YAML)"
+        help="モデル設定ファイル (YAML)",
     )
     parser.add_argument(
         "--output_dir",
         required=True,
-        help="出力ディレクトリ"
+        help="出力ディレクトリ",
     )
 
     # オプション引数
@@ -609,30 +623,30 @@ def parse_arguments() -> argparse.Namespace:
         "--n_samples",
         type=int,
         default=10,
-        help="可視化するサンプル数 (default: 10)"
+        help="可視化するサンプル数 (default: 10)",
     )
     parser.add_argument(
         "--device",
         default="cuda" if torch.cuda.is_available() else "cpu",
-        help="使用デバイス (default: cuda if available else cpu)"
+        help="使用デバイス (default: cuda if available else cpu)",
     )
     parser.add_argument(
         "--pred_type",
-        choices=['student', 'teacher'],
-        default='student',
-        help="使用するモデル (default: student)"
+        choices=["student", "teacher"],
+        default="student",
+        help="使用するモデル (default: student)",
     )
     parser.add_argument(
         "--confidence_range",
         nargs=2,
         type=float,
         default=[0.4, 0.6],
-        help="境界事例の確率範囲 (default: 0.4 0.6)"
+        help="境界事例の確率範囲 (default: 0.4 0.6)",
     )
     parser.add_argument(
         "--verbose",
         action="store_true",
-        help="詳細出力を有効化"
+        help="詳細出力を有効化",
     )
 
     return parser.parse_args()
@@ -649,20 +663,20 @@ def main():
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    print("="*60)
+    print("=" * 60)
     print("Grad-CAM可視化スクリプト")
-    print("="*60)
+    print("=" * 60)
 
     # 設定読み込み
     print("\n[1/4] 設定読み込み中...")
-    with open(args.config, 'r') as f:
+    with open(args.config) as f:
         model_config = yaml.safe_load(f)
 
     # Grad-CAM設定の作成
     gradcam_config = GradCAMConfig(
         confidence_range=tuple(args.confidence_range),
         n_samples=args.n_samples,
-        use_cuda=(args.device == 'cuda')
+        use_cuda=(args.device == "cuda"),
     )
 
     # ビジュアライザーとコンピュータの初期化
@@ -712,62 +726,66 @@ def main():
     for dataset_name, data in models_data[first_model].items():
         print(f"\n処理中: {dataset_name}")
 
-        if f'probs_{args.pred_type}' not in data or 'targets' not in data:
-            print(f"  警告: 必要なデータがありません。スキップします。")
+        if f"probs_{args.pred_type}" not in data or "targets" not in data:
+            print("  警告: 必要なデータがありません。スキップします。")
             continue
 
-        probs = data[f'probs_{args.pred_type}']
-        targets = data['targets']
-        filenames = data['filenames']
+        probs = data[f"probs_{args.pred_type}"]
+        targets = data["targets"]
+        filenames = data["filenames"]
 
         # 境界事例
         boundary_cases = computer.find_boundary_cases(
-            probs, targets, filenames,
+            probs,
+            targets,
+            filenames,
             confidence_range=tuple(args.confidence_range),
-            n_samples=args.n_samples
+            n_samples=args.n_samples,
         )
         print(f"  境界事例: {len(boundary_cases)}個")
 
         # 誤予測
         misclassified_cases = computer.find_misclassified_cases(
-            probs, targets, filenames,
-            n_samples=args.n_samples
+            probs,
+            targets,
+            filenames,
+            n_samples=args.n_samples,
         )
         print(f"  誤予測: {len(misclassified_cases)}個")
 
         # 境界事例のGrad-CAM生成
         if boundary_cases:
-            boundary_dir = output_dir / 'boundary_cases' / dataset_name
+            boundary_dir = output_dir / "boundary_cases" / dataset_name
             visualizer.process_samples(
                 boundary_cases,
                 models,
                 model_config,
                 boundary_dir,
-                'boundary',
-                args.pred_type
+                "boundary",
+                args.pred_type,
             )
 
         # 誤予測のGrad-CAM生成
         if misclassified_cases:
-            misclass_dir = output_dir / 'misclassified' / dataset_name
+            misclass_dir = output_dir / "misclassified" / dataset_name
             visualizer.process_samples(
                 misclassified_cases,
                 models,
                 model_config,
                 misclass_dir,
-                'misclassified',
-                args.pred_type
+                "misclassified",
+                args.pred_type,
             )
 
     # 設定の保存
-    with open(output_dir / 'config.json', 'w') as f:
+    with open(output_dir / "config.json", "w") as f:
         json.dump(gradcam_config.to_dict(), f, indent=2)
     print(f"\n  ✓ 設定保存: {output_dir / 'config.json'}")
 
-    print("\n" + "="*60)
+    print("\n" + "=" * 60)
     print("完了！")
     print(f"出力ディレクトリ: {output_dir}")
-    print("="*60)
+    print("=" * 60)
 
 
 if __name__ == "__main__":
