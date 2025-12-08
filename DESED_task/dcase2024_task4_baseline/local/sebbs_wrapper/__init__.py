@@ -58,19 +58,19 @@ from .types import (
 __version__ = "0.1.0"
 
 __all__ = [
+    # Types
+    "SEBB",
+    "AudioDurations",
+    "Detection",
+    "DetectionList",
+    "EvaluationConfig",
+    "GroundTruth",
+    "PredictorConfig",
+    "SEBBList",
+    "SEBBsEvaluator",
     # Main classes
     "SEBBsPredictor",
     "SEBBsTuner",
-    "SEBBsEvaluator",
-    # Types
-    "SEBB",
-    "Detection",
-    "SEBBList",
-    "DetectionList",
     "Scores",
-    "GroundTruth",
-    "AudioDurations",
-    "PredictorConfig",
     "TuningConfig",
-    "EvaluationConfig",
 ]

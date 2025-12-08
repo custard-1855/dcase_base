@@ -4,7 +4,7 @@ This module provides strong typing for the SEBBs prediction and evaluation pipel
 """
 
 from pathlib import Path
-from typing import Dict, List, Protocol, Tuple, TypedDict, Union
+from typing import Protocol, TypeAlias, TypedDict
 
 import numpy as np
 import pandas as pd
@@ -17,20 +17,20 @@ SEBBList = list[SEBB]
 DetectionList = list[Detection]
 
 # Score data types
-ScoreDataFrame = pd.DataFrame
-Scores = dict[str, ScoreDataFrame]
+ScoreDataFrame: TypeAlias = pd.DataFrame
+Scores: TypeAlias = dict[str, ScoreDataFrame]
 GroundTruth = dict[str, list[Detection]]
 AudioDurations = dict[str, float]
 
 # Path types
-PathLike = Union[str, Path]
-ScoresInput = Union[PathLike, Scores]
-GroundTruthInput = Union[PathLike, GroundTruth]
-AudioDurationsInput = Union[PathLike, AudioDurations]
+PathLike: TypeAlias = str | Path
+ScoresInput: TypeAlias = PathLike | Scores
+GroundTruthInput: TypeAlias = PathLike | GroundTruth
+AudioDurationsInput: TypeAlias = PathLike | AudioDurations
 
 # Parameter types
-ClasswiseParam = Union[float, dict[str, float]]
-OptionalClasswiseParam = Union[float, dict[str, float], None]
+ClasswiseParam: TypeAlias = float | dict[str, float]
+OptionalClasswiseParam: TypeAlias = float | dict[str, float] | None
 
 
 class PredictorConfig(TypedDict, total=False):

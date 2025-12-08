@@ -1,16 +1,20 @@
 """Tests for SEBBsPredictor wrapper."""
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 from local.sebbs_wrapper import SEBBsPredictor
-from local.sebbs_wrapper.types import PredictorConfig
 from sed_scores_eval.base_modules.scores import create_score_dataframe
+
+if TYPE_CHECKING:
+    from local.sebbs_wrapper.types import PredictorConfig
 
 
 class TestSEBBsPredictor:
     """Test suite for SEBBsPredictor class."""
 
-    def test_initialization_with_defaults(self):
+    def test_initialization_with_defaults(self) -> None:
         """Test predictor initialization with default parameters."""
         predictor = SEBBsPredictor()
 
@@ -20,7 +24,7 @@ class TestSEBBsPredictor:
         assert predictor.detection_threshold is None
         assert predictor.sound_classes is None
 
-    def test_initialization_with_custom_params(self):
+    def test_initialization_with_custom_params(self) -> None:
         """Test predictor initialization with custom parameters."""
         predictor = SEBBsPredictor(
             step_filter_length=0.7,
@@ -36,7 +40,7 @@ class TestSEBBsPredictor:
         assert predictor.detection_threshold == 0.3
         assert predictor.sound_classes == ["Speech", "Music"]
 
-    def test_from_config(self):
+    def test_from_config(self) -> None:
         """Test predictor creation from configuration dict."""
         config: PredictorConfig = {
             "step_filter_length": 0.6,
@@ -52,7 +56,7 @@ class TestSEBBsPredictor:
         assert predictor.merge_threshold_rel == 1.8
         assert predictor.sound_classes == ["Cat", "Dog"]
 
-    def test_predict_simple_case(self):
+    def test_predict_simple_case(self) -> None:
         """Test basic prediction functionality with simple synthetic data."""
         # Create simple synthetic scores (from SEBBs paper example)
         cos = (1 - np.cos(np.linspace(0, 2 * np.pi, 270))) / 2
@@ -86,7 +90,7 @@ class TestSEBBsPredictor:
             assert isinstance(confidence, (int, float))
             assert onset < offset
 
-    def test_detect_with_threshold(self):
+    def test_detect_with_threshold(self) -> None:
         """Test detection thresholding functionality."""
         # Create simple synthetic scores
         y = np.array([0.0] * 100 + [0.8] * 100 + [0.0] * 100)
@@ -115,7 +119,7 @@ class TestSEBBsPredictor:
             assert isinstance(offset, (int, float))
             assert isinstance(class_label, str)
 
-    def test_copy(self):
+    def test_copy(self) -> None:
         """Test predictor copying functionality."""
         predictor1 = SEBBsPredictor(
             step_filter_length=0.7,
@@ -132,7 +136,7 @@ class TestSEBBsPredictor:
         assert predictor1 is not predictor2
         assert predictor1._predictor is not predictor2._predictor
 
-    def test_repr(self):
+    def test_repr(self) -> None:
         """Test string representation of predictor."""
         predictor = SEBBsPredictor(
             step_filter_length=0.5,
