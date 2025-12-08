@@ -2,9 +2,8 @@
 
 import numpy as np
 import pytest
-from sed_scores_eval.base_modules.scores import create_score_dataframe
-
 from local.sebbs_wrapper import SEBBsEvaluator
+from sed_scores_eval.base_modules.scores import create_score_dataframe
 
 
 class TestSEBBsEvaluator:
@@ -33,34 +32,34 @@ class TestSEBBsEvaluator:
         timestamps1 = np.linspace(0.0, 4.0, len(y1) + 1)
 
         scores = {
-            'audio_0': create_score_dataframe(
-                y0[:, None], timestamps0, event_classes=['test_class']
+            "audio_0": create_score_dataframe(
+                y0[:, None], timestamps0, event_classes=["test_class"],
             ),
-            'audio_1': create_score_dataframe(
-                y1[:, None], timestamps1, event_classes=['test_class']
+            "audio_1": create_score_dataframe(
+                y1[:, None], timestamps1, event_classes=["test_class"],
             ),
         }
 
         # Ground truth events
         ground_truth = {
-            'audio_0': [
-                (1.0, 3.0, 'test_class'),
+            "audio_0": [
+                (1.0, 3.0, "test_class"),
             ],
-            'audio_1': [
-                (0.5, 2.0, 'test_class'),
-                (2.5, 4.0, 'test_class'),
+            "audio_1": [
+                (0.5, 2.0, "test_class"),
+                (2.5, 4.0, "test_class"),
             ],
         }
 
         # Audio durations
         audio_durations = {
-            'audio_0': 4.0,
-            'audio_1': 4.0,
+            "audio_0": 4.0,
+            "audio_1": 4.0,
         }
 
         return scores, ground_truth, audio_durations
 
-    def test_evaluate_psds_basic(self, synthetic_data):
+    def test_evaluate_psds_basic(self, synthetic_data) -> None:
         """Test basic PSDS evaluation functionality."""
         scores, ground_truth, audio_durations = synthetic_data
 
@@ -76,7 +75,7 @@ class TestSEBBsEvaluator:
         assert isinstance(result, tuple)
         assert len(result) == 4
 
-        psds, class_psds, psd_roc, stats = result
+        psds, class_psds, _psd_roc, _stats = result
 
         # Should return PSDS values
         assert isinstance(psds, (int, float))
@@ -84,10 +83,10 @@ class TestSEBBsEvaluator:
 
         # Should have class-wise PSDS
         assert isinstance(class_psds, dict)
-        assert 'test_class' in class_psds
-        assert isinstance(class_psds['test_class'], (int, float))
+        assert "test_class" in class_psds
+        assert isinstance(class_psds["test_class"], (int, float))
 
-    def test_evaluate_psds1(self, synthetic_data):
+    def test_evaluate_psds1(self, synthetic_data) -> None:
         """Test PSDS1 evaluation with standard DCASE settings."""
         scores, ground_truth, audio_durations = synthetic_data
 
@@ -103,9 +102,9 @@ class TestSEBBsEvaluator:
 
         # Should have class-wise PSDS1
         assert isinstance(class_psds1, dict)
-        assert 'test_class' in class_psds1
+        assert "test_class" in class_psds1
 
-    def test_evaluate_psds2(self, synthetic_data):
+    def test_evaluate_psds2(self, synthetic_data) -> None:
         """Test PSDS2 evaluation with standard DCASE settings."""
         scores, ground_truth, audio_durations = synthetic_data
 
@@ -122,7 +121,7 @@ class TestSEBBsEvaluator:
 
             # Should have class-wise PSDS2
             assert isinstance(class_psds2, dict)
-            assert 'test_class' in class_psds2
+            assert "test_class" in class_psds2
 
             # PSDS2 is typically lower than PSDS1 (more strict)
             # But with synthetic data this may not always hold
@@ -132,7 +131,7 @@ class TestSEBBsEvaluator:
             # This is acceptable for basic functionality testing
             pytest.skip("PSDS2 evaluation failed with synthetic data")
 
-    def test_evaluate_collar_based_fscore(self, synthetic_data):
+    def test_evaluate_collar_based_fscore(self, synthetic_data) -> None:
         """Test collar-based F-score evaluation."""
         scores, ground_truth, _ = synthetic_data
 
@@ -154,17 +153,17 @@ class TestSEBBsEvaluator:
 
         # Should return F-scores
         assert isinstance(f_scores, dict)
-        assert 'test_class' in f_scores
-        assert 'macro_average' in f_scores
-        assert 0.0 <= f_scores['macro_average'] <= 1.0
+        assert "test_class" in f_scores
+        assert "macro_average" in f_scores
+        assert 0.0 <= f_scores["macro_average"] <= 1.0
 
         # Should return precision and recall
         assert isinstance(precision, dict)
         assert isinstance(recall, dict)
-        assert 'test_class' in precision
-        assert 'test_class' in recall
+        assert "test_class" in precision
+        assert "test_class" in recall
 
-    def test_find_best_collar_based_fscore(self, synthetic_data):
+    def test_find_best_collar_based_fscore(self, synthetic_data) -> None:
         """Test finding best collar-based F-score and optimal thresholds."""
         scores, ground_truth, _ = synthetic_data
 
@@ -179,21 +178,21 @@ class TestSEBBsEvaluator:
 
         # Should return best F-scores
         assert isinstance(f_best, dict)
-        assert 'test_class' in f_best
-        assert 'macro_average' in f_best
-        assert 0.0 <= f_best['macro_average'] <= 1.0
+        assert "test_class" in f_best
+        assert "macro_average" in f_best
+        assert 0.0 <= f_best["macro_average"] <= 1.0
 
         # Should return optimal thresholds
         assert isinstance(thresholds, dict)
-        assert 'test_class' in thresholds
-        assert 0.0 <= thresholds['test_class'] <= 1.0
+        assert "test_class" in thresholds
+        assert 0.0 <= thresholds["test_class"] <= 1.0
 
         # Should return precision, recall, and counts
         assert isinstance(p_best, dict)
         assert isinstance(r_best, dict)
         assert isinstance(counts, dict)
 
-    def test_evaluate_mpauc(self, synthetic_data):
+    def test_evaluate_mpauc(self, synthetic_data) -> None:
         """Test mpAUC (mean partial AUROC) evaluation for MAESTRO."""
         scores, ground_truth, audio_durations = synthetic_data
 
@@ -211,10 +210,10 @@ class TestSEBBsEvaluator:
 
         # Should return class-wise mpAUC dict
         assert isinstance(class_mpauc, dict)
-        assert 'test_class' in class_mpauc
-        assert 0.0 <= class_mpauc['test_class'] <= 1.0
+        assert "test_class" in class_mpauc
+        assert 0.0 <= class_mpauc["test_class"] <= 1.0
 
-    def test_evaluate_mauc(self, synthetic_data):
+    def test_evaluate_mauc(self, synthetic_data) -> None:
         """Test mAUC (mean AUROC) evaluation."""
         scores, ground_truth, audio_durations = synthetic_data
 
@@ -231,10 +230,10 @@ class TestSEBBsEvaluator:
 
         # Should return class-wise mAUC dict
         assert isinstance(class_mauc, dict)
-        assert 'test_class' in class_mauc
-        assert 0.0 <= class_mauc['test_class'] <= 1.0
+        assert "test_class" in class_mauc
+        assert 0.0 <= class_mauc["test_class"] <= 1.0
 
-    def test_mpauc_lower_than_mauc(self, synthetic_data):
+    def test_mpauc_lower_than_mauc(self, synthetic_data) -> None:
         """Test that mpAUC is typically lower than mAUC (partial vs full AUROC)."""
         scores, ground_truth, audio_durations = synthetic_data
 
@@ -259,5 +258,5 @@ class TestSEBBsEvaluator:
         assert isinstance(mauc, (int, float))
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

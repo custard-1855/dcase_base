@@ -11,7 +11,6 @@ from .types import (
     AudioDurationsInput,
     ClasswiseParam,
     GroundTruthInput,
-    Scores,
     ScoresInput,
 )
 
@@ -363,9 +362,9 @@ class SEBBsEvaluator:
             max_fpr=max_fpr,
         )
         # segment_based.auroc returns dict with 'mean' and class-wise values
-        mpauc_mean = auroc_dict['mean']
+        mpauc_mean = auroc_dict["mean"]
         # Remove 'mean' key to get class-wise dict
-        class_mpauc = {k: v for k, v in auroc_dict.items() if k != 'mean'}
+        class_mpauc = {k: v for k, v in auroc_dict.items() if k != "mean"}
         return mpauc_mean, class_mpauc
 
     @staticmethod
@@ -412,9 +411,9 @@ class SEBBsEvaluator:
             segment_length=segment_length,
         )
         # segment_based.auroc returns dict with 'mean' and class-wise values
-        mauc_mean = auroc_dict['mean']
+        mauc_mean = auroc_dict["mean"]
         # Remove 'mean' key to get class-wise dict
-        class_mauc = {k: v for k, v in auroc_dict.items() if k != 'mean'}
+        class_mauc = {k: v for k, v in auroc_dict.items() if k != "mean"}
         return mauc_mean, class_mauc
 
 

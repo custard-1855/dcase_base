@@ -4,9 +4,6 @@ This module provides a type-safe, well-documented wrapper around the CSEBBsPredi
 from the sebbs submodule, improving code quality without modifying the submodule.
 """
 
-from pathlib import Path
-from typing import List, Optional, Union
-
 from sebbs.sebbs.csebbs import CSEBBsPredictor as _CSEBBsPredictorBase
 
 from .types import (

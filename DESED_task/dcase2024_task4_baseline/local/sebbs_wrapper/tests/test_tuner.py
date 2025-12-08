@@ -2,9 +2,8 @@
 
 import numpy as np
 import pytest
-from sed_scores_eval.base_modules.scores import create_score_dataframe
-
 from local.sebbs_wrapper import SEBBsPredictor, SEBBsTuner
+from sed_scores_eval.base_modules.scores import create_score_dataframe
 
 
 class TestSEBBsTuner:
@@ -33,34 +32,34 @@ class TestSEBBsTuner:
         timestamps1 = np.linspace(0.0, 4.0, len(y1) + 1)
 
         scores = {
-            'audio_0': create_score_dataframe(
-                y0[:, None], timestamps0, event_classes=['test_class']
+            "audio_0": create_score_dataframe(
+                y0[:, None], timestamps0, event_classes=["test_class"],
             ),
-            'audio_1': create_score_dataframe(
-                y1[:, None], timestamps1, event_classes=['test_class']
+            "audio_1": create_score_dataframe(
+                y1[:, None], timestamps1, event_classes=["test_class"],
             ),
         }
 
         # Ground truth events
         ground_truth = {
-            'audio_0': [
-                (1.0, 3.0, 'test_class'),  # Event from 1.0s to 3.0s
+            "audio_0": [
+                (1.0, 3.0, "test_class"),  # Event from 1.0s to 3.0s
             ],
-            'audio_1': [
-                (0.5, 2.0, 'test_class'),  # Event 1
-                (2.5, 4.0, 'test_class'),  # Event 2
+            "audio_1": [
+                (0.5, 2.0, "test_class"),  # Event 1
+                (2.5, 4.0, "test_class"),  # Event 2
             ],
         }
 
         # Audio durations
         audio_durations = {
-            'audio_0': 4.0,
-            'audio_1': 4.0,
+            "audio_0": 4.0,
+            "audio_1": 4.0,
         }
 
         return scores, ground_truth, audio_durations
 
-    def test_tune_for_psds_basic(self, synthetic_data):
+    def test_tune_for_psds_basic(self, synthetic_data) -> None:
         """Test basic PSDS tuning functionality."""
         scores, ground_truth, audio_durations = synthetic_data
 
@@ -81,10 +80,10 @@ class TestSEBBsTuner:
         assert isinstance(metrics, dict)
 
         # Metrics should contain class-wise PSDS values
-        assert 'test_class' in metrics
-        assert isinstance(metrics['test_class'], (int, float))
+        assert "test_class" in metrics
+        assert isinstance(metrics["test_class"], (int, float))
 
-    def test_tune_for_collar_based_f1(self, synthetic_data):
+    def test_tune_for_collar_based_f1(self, synthetic_data) -> None:
         """Test collar-based F1 tuning functionality."""
         scores, ground_truth, audio_durations = synthetic_data
 
@@ -108,10 +107,10 @@ class TestSEBBsTuner:
         assert predictor.detection_threshold is not None
 
         # Metrics should contain F1 scores
-        assert 'test_class' in metrics
-        assert isinstance(metrics['test_class'], (int, float))
+        assert "test_class" in metrics
+        assert isinstance(metrics["test_class"], (int, float))
 
-    def test_tune_with_custom_selection_fn(self, synthetic_data):
+    def test_tune_with_custom_selection_fn(self, synthetic_data) -> None:
         """Test generic tune() method with custom selection function."""
         from sebbs.sebbs.csebbs import select_best_psds
 
@@ -134,7 +133,7 @@ class TestSEBBsTuner:
         assert isinstance(result, tuple)
         assert len(result) == 2
 
-    def test_cross_validation_basic(self, synthetic_data):
+    def test_cross_validation_basic(self, synthetic_data) -> None:
         """Test basic cross-validation functionality."""
         from sebbs.sebbs.csebbs import select_best_psds
 
@@ -142,8 +141,8 @@ class TestSEBBsTuner:
 
         # Define two folds
         folds = [
-            {'audio_0'},  # Fold 1
-            {'audio_1'},  # Fold 2
+            {"audio_0"},  # Fold 1
+            {"audio_1"},  # Fold 2
         ]
 
         # Perform cross-validation
@@ -165,5 +164,5 @@ class TestSEBBsTuner:
         assert len(result) == 3
 
 
-if __name__ == '__main__':
-    pytest.main([__file__, '-v'])
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])

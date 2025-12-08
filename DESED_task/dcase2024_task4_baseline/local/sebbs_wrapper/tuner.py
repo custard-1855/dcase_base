@@ -5,8 +5,6 @@ cross-validation functionality.
 """
 
 from collections.abc import Callable
-from pathlib import Path
-from typing import List, Optional, Tuple, Union
 
 from sebbs.sebbs import csebbs
 
@@ -16,7 +14,6 @@ from .types import (
     GroundTruthInput,
     Scores,
     ScoresInput,
-    TuningConfig,
 )
 
 
