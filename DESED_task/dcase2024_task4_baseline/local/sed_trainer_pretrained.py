@@ -5,6 +5,7 @@ from collections import defaultdict
 from copy import deepcopy
 from math import ceil
 from pathlib import Path
+from typing import Any, TypeAlias
 
 import numpy as np
 import pandas as pd
@@ -15,7 +16,7 @@ import torch.nn.functional as F
 import torchmetrics
 import wandb
 from codecarbon import OfflineEmissionsTracker
-from desed_task.data_augm import *
+from desed_task.data_augm import MixupAugmentor
 from desed_task.evaluation.evaluation_measures import (
     compute_per_intersection_macro_f1,
     compute_psds_from_operating_points,
@@ -27,8 +28,7 @@ from desed_task.utils.scaler import TorchScaler
 # Import SEBBs wrapper layer for type-safe interface
 from local.sebbs_wrapper import SEBBsPredictor, SEBBsTuner
 
-# Keep direct imports for selection functions and utilities
-from sebbs.sebbs import csebbs
+# Keep direct import for utilities
 from sebbs.sebbs.utils import sed_scores_from_sebbs
 from sed_scores_eval.base_modules.scores import create_score_dataframe, validate_score_dataframe
 
@@ -44,6 +44,34 @@ from .classes_dict import (
 from .utils import batched_decode_preds, log_sedeval_metrics
 
 PROJECT_NAME = "SED-pl-noise"
+
+# Type Aliases for complex data structures
+# Batch structure returned by DataLoader and unpacked by _unpack_batch
+BatchType: TypeAlias = tuple[
+    torch.Tensor,  # audio: (batch_size, audio_length) waveform
+    torch.Tensor,  # labels: (batch_size, time_steps, num_classes) strong labels
+    torch.Tensor,  # padded_indxs: (batch_size,) padding mask
+    list[str],  # filenames: audio file paths
+    torch.Tensor,  # embeddings: (batch_size, embedding_dim, time_steps) BEATs features
+    torch.Tensor,  # valid_class_mask: (batch_size, num_classes) class validity mask
+]
+
+# Student/teacher model prediction outputs
+# Each PredictionPair contains strong (frame-level) and weak (clip-level) predictions
+PredictionPair: TypeAlias = tuple[
+    torch.Tensor,  # strong_preds: (batch_size, time_steps, num_classes) frame-level predictions
+    torch.Tensor,  # weak_preds: (batch_size, num_classes) clip-level predictions
+]
+
+# Score dataframes for PSDS evaluation (keyed by audio clip ID)
+# Maps clip IDs (e.g., "audio1-0-1000") to score DataFrames
+# Each DataFrame contains columns: onset, offset, class1_score, class2_score, ...
+ScoreDataFrameDict: TypeAlias = dict[str, pd.DataFrame]
+
+# PSDS evaluation results structure
+# Contains PSDS scores (float) and optional per-class breakdowns (dict[str, float])
+# Example: {"psds": 0.653, "per_class": {"Blender": 0.75, "Cat": 0.68}}
+PSDSResult: TypeAlias = dict[str, float | dict[str, float]]
 
 
 class _NoneSafeIterator:
@@ -95,39 +123,55 @@ class SafeDataLoader(DataLoader):
 
 
 class SEDTask4(pl.LightningModule):
-    """Pytorch lightning module for the SED 2021 baseline
+    """PyTorch Lightning module for Sound Event Detection with teacher-student semi-supervised learning.
+
+    This module implements the DCASE 2024 Task 4 baseline with a refactored architecture that uses
+    helper methods to consolidate common operations across training, validation, and test steps.
+    The refactoring eliminates code duplication while maintaining full backward compatibility with
+    existing configurations and checkpoints.
+
+    Architecture:
+        - Teacher-student semi-supervised learning with EMA (Exponential Moving Average) updates
+        - CRNN-based models (CNN + RNN) with optional pre-trained BEATs embeddings
+        - Helper methods for embedding processing, prediction generation, loss computation, and metric updates
+        - Support for strong (frame-level) and weak (clip-level) event detection
+        - Optional cSEBBs post-processing for robust event segmentation
+
+    Helper Methods:
+        - _process_embeddings(): Conditional BEATs embedding extraction with model eval mode enforcement
+        - _generate_predictions(): Unified student/teacher model inference from audio
+        - _compute_step_loss(): Supervised loss computation with optional masking
+        - _update_metrics(): Metric accumulation for torchmetrics instances
 
     Args:
-        hparams: dict, the dictionary to be used for the current experiment/
-        encoder: ManyHotEncoder object, object to encode and decode labels.
-        sed_student: torch.Module, the student model to be trained. The teacher model will be
-        opt: torch.optimizer.Optimizer object, the optimizer to be used
-        train_data: torch.utils.data.Dataset subclass object, the training data to be used.
-        valid_data: torch.utils.data.Dataset subclass object, the validation data to be used.
-        test_data: torch.utils.data.Dataset subclass object, the test data to be used.
-        train_sampler: torch.utils.data.Sampler subclass object, the sampler to be used in the training dataloader.
-        scheduler: BaseScheduler subclass object, the scheduler to be used.
-                   This is used to apply ramp-up during training for example.
-        fast_dev_run: bool, whether to launch a run with only one batch for each set, this is for development purpose,
-            to test the code runs.
+        hparams: dict, the hyperparameter dictionary for the current experiment
+        encoder: ManyHotEncoder object, encodes and decodes labels between one-hot and string representations
+        sed_student: torch.nn.Module, the student model to be trained (teacher model created via EMA)
+        opt: torch.optim.Optimizer object, the optimizer to be used for training
+        train_data: torch.utils.data.Dataset subclass object, the training data to be used
+        valid_data: torch.utils.data.Dataset subclass object, the validation data to be used
+        test_data: torch.utils.data.Dataset subclass object, the test data to be used
+        train_sampler: torch.utils.data.Sampler subclass object, the sampler for the training dataloader
+        scheduler: BaseScheduler subclass object, learning rate scheduler (e.g., ramp-up during training)
+        fast_dev_run: bool, whether to launch a development run with only one batch per set for testing
 
     """
 
     def __init__(
         self,
-        hparams,
-        encoder,
-        sed_student,
-        pretrained_model,
-        opt=None,
-        train_data=None,
-        valid_data=None,
-        test_data=None,
-        train_sampler=None,
-        scheduler=None,
-        fast_dev_run=False,
-        evaluation=False,
-        sed_teacher=None,
+        hparams: dict,
+        encoder: Any,  # ManyHotEncoder from desed_task.utils.encoder
+        sed_student: Any,  # CRNN model
+        pretrained_model: Any | None,  # BEATs or other pretrained model
+        opt: torch.optim.Optimizer | None = None,
+        train_data: Any | None = None,  # Dataset
+        valid_data: Any | None = None,  # Dataset
+        test_data: Any | None = None,  # Dataset
+        train_sampler: Any | None = None,  # Sampler
+        scheduler: Any | None = None,  # LR scheduler
+        fast_dev_run: bool = False,
+        evaluation: bool = False,
+        sed_teacher: Any | None = None,  # CRNN model
     ):
         super(SEDTask4, self).__init__()
         self.hparams.update(hparams)
@@ -136,50 +180,47 @@ class SEDTask4(pl.LightningModule):
             self._init_wandb_project()
         else:
             # wandbを使わない場合はNoneに設定
-            self._wandb_checkpoint_dir = None
+            self._wandb_checkpoint_dir: str | None = None
 
-        self.encoder = encoder
-        self.sed_student = sed_student
-        self.median_filter = ClassWiseMedianFilter(self.hparams["net"]["median_filter"])
-        self.mixup_augmentor = MixupAugmentor(self.hparams["training"])
+        self.encoder: Any = encoder  # ManyHotEncoder
+        self.sed_student: Any = sed_student  # CRNN
+        self.median_filter: ClassWiseMedianFilter = ClassWiseMedianFilter(
+            self.hparams["net"]["median_filter"],
+        )
+        self.mixup_augmentor: MixupAugmentor = MixupAugmentor(self.hparams["training"])
 
         # CMT
-        self.cmt_enabled = self.hparams.get("cmt", {}).get("enabled", False)
-        self.phi_clip = float(self.hparams.get("cmt", {}).get("phi_clip", 0.5))
-        self.phi_frame = float(self.hparams.get("cmt", {}).get("phi_frame", 0.5))
+        self.cmt_enabled: bool = self.hparams.get("cmt", {}).get("enabled", False)
+        self.phi_clip: float = float(self.hparams.get("cmt", {}).get("phi_clip", 0.5))
+        self.phi_frame: float = float(self.hparams.get("cmt", {}).get("phi_frame", 0.5))
 
-        self.cmt_scale = self.hparams.get("cmt", {}).get("scale", False)
-        self.cmt_warmup_epochs = int(self.hparams.get("cmt", {}).get("warmup_epochs", 50))
-        self.use_neg_sample = self.hparams.get("cmt", {}).get("use_neg_sample", False)
+        self.cmt_scale: bool = self.hparams.get("cmt", {}).get("scale", False)
+        self.cmt_warmup_epochs: int = int(self.hparams.get("cmt", {}).get("warmup_epochs", 50))
+        self.use_neg_sample: bool = self.hparams.get("cmt", {}).get("use_neg_sample", False)
 
         # cSEBBs param
-        self.sebbs_enabled = self.hparams.get("sebbs", {}).get("enabled", False)
-        self.mixup_augmentor = MixupAugmentor(self.hparams["training"])
+        self.sebbs_enabled: bool = self.hparams.get("sebbs", {}).get("enabled", False)
 
         if self.hparams["pretrained"]["e2e"]:
-            self.pretrained_model = pretrained_model
+            self.pretrained_model: Any = pretrained_model  # BEATs or other pretrained model
         # else we use pre-computed embeddings from hdf5
 
-        if sed_teacher is None:
-            self.sed_teacher = deepcopy(sed_student)
-        else:
-            self.sed_teacher = sed_teacher
-        self.opt = opt
-        self.train_data = train_data
-        self.valid_data = valid_data
-        self.test_data = test_data
-        self.train_sampler = train_sampler
-        self.scheduler = scheduler
-        self.fast_dev_run = fast_dev_run
-        self.evaluation = evaluation
+        self.sed_teacher: Any = (
+            deepcopy(sed_student) if sed_teacher is None else sed_teacher
+        )  # CRNN
+        self.opt: torch.optim.Optimizer | None = opt
+        self.train_data: Any | None = train_data  # Dataset
+        self.valid_data: Any | None = valid_data  # Dataset
+        self.test_data: Any | None = test_data  # Dataset
+        self.train_sampler: Any | None = train_sampler  # Sampler
+        self.scheduler: Any | None = scheduler  # LR scheduler
+        self.fast_dev_run: bool = fast_dev_run
+        self.evaluation: bool = evaluation
 
-        if self.fast_dev_run:
-            self.num_workers = 1
-        else:
-            self.num_workers = self.hparams["training"]["num_workers"]
+        self.num_workers: int = 1 if self.fast_dev_run else self.hparams["training"]["num_workers"]
 
         feat_params = self.hparams["feats"]
-        self.mel_spec = MelSpectrogram(
+        self.mel_spec: MelSpectrogram = MelSpectrogram(
             sample_rate=feat_params["sample_rate"],
             n_fft=feat_params["n_window"],
             win_length=feat_params["n_window"],
@@ -196,7 +237,8 @@ class SEDTask4(pl.LightningModule):
             param.detach_()
 
         # instantiating losses
-        self.supervised_loss = torch.nn.BCELoss()
+        self.supervised_loss: torch.nn.BCELoss = torch.nn.BCELoss()
+        self.selfsup_loss: torch.nn.MSELoss | torch.nn.BCELoss
         if hparams["training"]["self_sup_loss"] == "mse":
             self.selfsup_loss = torch.nn.MSELoss()
         elif hparams["training"]["self_sup_loss"] == "bce":
@@ -205,23 +247,27 @@ class SEDTask4(pl.LightningModule):
             raise NotImplementedError
 
         # for weak labels we simply compute f1 score
-        self.get_weak_student_f1_seg_macro = torchmetrics.classification.f_beta.MultilabelF1Score(
-            len(self.encoder.labels),
-            average="macro",
+        self.get_weak_student_f1_seg_macro: torchmetrics.Metric = (
+            torchmetrics.classification.f_beta.MultilabelF1Score(
+                len(self.encoder.labels),
+                average="macro",
+            )
         )
-        self.get_weak_teacher_f1_seg_macro = torchmetrics.classification.f_beta.MultilabelF1Score(
-            len(self.encoder.labels),
-            average="macro",
+        self.get_weak_teacher_f1_seg_macro: torchmetrics.Metric = (
+            torchmetrics.classification.f_beta.MultilabelF1Score(
+                len(self.encoder.labels),
+                average="macro",
+            )
         )
 
-        self.scaler = self._init_scaler()
+        self.scaler: TorchScaler = self._init_scaler()
         # buffer for event based scores which we compute using sed-eval
 
-        self.val_buffer_sed_scores_eval_student = {}
-        self.val_buffer_sed_scores_eval_teacher = {}
+        self.val_buffer_sed_scores_eval_student: ScoreDataFrameDict = {}
+        self.val_buffer_sed_scores_eval_teacher: ScoreDataFrameDict = {}
 
-        self.val_tune_sebbs_student = {}
-        self.val_tune_sebbs_teacher = {}
+        self.val_tune_sebbs_student: dict = {}
+        self.val_tune_sebbs_teacher: dict = {}
 
         test_n_thresholds = self.hparams["training"]["n_test_thresholds"]
         test_thresholds = np.arange(
@@ -229,27 +275,31 @@ class SEDTask4(pl.LightningModule):
             1,
             1 / test_n_thresholds,
         )
-        self.test_buffer_psds_eval_student = {k: pd.DataFrame() for k in test_thresholds}
-        self.test_buffer_psds_eval_teacher = {k: pd.DataFrame() for k in test_thresholds}
-        self.test_buffer_sed_scores_eval_student = {}
-        self.test_buffer_sed_scores_eval_teacher = {}
-        self.test_buffer_sed_scores_eval_unprocessed_student = {}
-        self.test_buffer_sed_scores_eval_unprocessed_teacher = {}
-        self.test_buffer_detections_thres05_student = pd.DataFrame()
-        self.test_buffer_detections_thres05_teacher = pd.DataFrame()
+        self.test_buffer_psds_eval_student: dict[float, pd.DataFrame] = {
+            k: pd.DataFrame() for k in test_thresholds
+        }
+        self.test_buffer_psds_eval_teacher: dict[float, pd.DataFrame] = {
+            k: pd.DataFrame() for k in test_thresholds
+        }
+        self.test_buffer_sed_scores_eval_student: ScoreDataFrameDict = {}
+        self.test_buffer_sed_scores_eval_teacher: ScoreDataFrameDict = {}
+        self.test_buffer_sed_scores_eval_unprocessed_student: ScoreDataFrameDict = {}
+        self.test_buffer_sed_scores_eval_unprocessed_teacher: ScoreDataFrameDict = {}
+        self.test_buffer_detections_thres05_student: pd.DataFrame = pd.DataFrame()
+        self.test_buffer_detections_thres05_teacher: pd.DataFrame = pd.DataFrame()
 
     _exp_dir = None
 
     @property
-    def exp_dir(self):
+    def exp_dir(self) -> str:
         if self._exp_dir is None:
             try:
-                self._exp_dir = self.logger.log_dir
-            except Exception as e:
+                self._exp_dir = self.logger.log_dir  # type: ignore[union-attr]  # Logger may be None
+            except Exception:
                 self._exp_dir = self.hparams["log_dir"]
         return self._exp_dir
 
-    def log(self, name, value, *args, **kwargs):
+    def log(self, name: str, value: Any, *args: Any, **kwargs: Any) -> None:
         """Override LightningModule.log to mirror logs to wandb when enabled.
 
         This calls the original pl.LightningModule.log and then attempts to
@@ -266,7 +316,7 @@ class SEDTask4(pl.LightningModule):
             pass
         return res
 
-    def log_dict(self, dictionary, *args, **kwargs):
+    def log_dict(self, dictionary: dict[str, Any], *args: Any, **kwargs: Any) -> None:  # type: ignore[override]  # Lightning expects specific Mapping type
         """Mirror a dictionary of metrics to wandb in addition to Lightning's log_dict."""
         res = super(SEDTask4, self).log_dict(dictionary, *args, **kwargs)
         try:
@@ -275,7 +325,7 @@ class SEDTask4(pl.LightningModule):
             pass
         return res
 
-    def _maybe_wandb_log(self, log_dict):
+    def _maybe_wandb_log(self, log_dict: dict[str, Any]) -> None:
         """Safely log a dict to wandb if enabled and initialized.
 
         Converts torch tensors and numpy arrays to Python scalars or lists.
@@ -345,7 +395,8 @@ class SEDTask4(pl.LightningModule):
         # attempt to set step if available
         step = None
         try:
-            step = int(getattr(self, "global_step", None))
+            global_step = getattr(self, "global_step", None)
+            step = int(global_step) if global_step is not None else None
         except Exception:
             step = None
         try:
@@ -357,7 +408,7 @@ class SEDTask4(pl.LightningModule):
             # never raise from logging
             pass
 
-    def _init_wandb_project(self):
+    def _init_wandb_project(self) -> None:
         wandb.init(project=PROJECT_NAME, name=self.hparams["net"]["wandb_dir"])
 
         # wandb runディレクトリ内にcheckpointsディレクトリを作成
@@ -383,7 +434,7 @@ class SEDTask4(pl.LightningModule):
         else:
             self._wandb_checkpoint_dir = None
 
-    def lr_scheduler_step(self, scheduler, optimizer_idx, metric):
+    def lr_scheduler_step(self, scheduler: Any, optimizer_idx: int, metric: Any) -> None:
         scheduler.step()
 
     def on_train_start(self) -> None:
@@ -409,7 +460,9 @@ class SEDTask4(pl.LightningModule):
         for message in to_ignore:
             warnings.filterwarnings("ignore", message)
 
-    def update_ema(self, alpha, global_step, model, ema_model):
+    def update_ema(
+        self, alpha: float, global_step: int, model: torch.nn.Module, ema_model: torch.nn.Module
+    ) -> None:
         """Update teacher model parameters
 
         Args:
@@ -424,7 +477,7 @@ class SEDTask4(pl.LightningModule):
         for ema_params, params in zip(ema_model.parameters(), model.parameters()):
             ema_params.data.mul_(alpha).add_(params.data, alpha=1 - alpha)
 
-    def _init_scaler(self):
+    def _init_scaler(self) -> TorchScaler:
         """Scaler inizialization
 
         Raises:
@@ -474,9 +527,9 @@ class SEDTask4(pl.LightningModule):
                     self.hparams["scaler"]["savepath"],
                 ),
             )
-            return scaler
+        return scaler
 
-    def take_log(self, mels):
+    def take_log(self, mels: torch.Tensor) -> torch.Tensor:
         """Apply the log transformation to mel spectrograms.
 
         Args:
@@ -491,7 +544,13 @@ class SEDTask4(pl.LightningModule):
         # clamp to reproduce old code
         return amp_to_db(mels).clamp(min=-50, max=80)
 
-    def detect(self, mel_feats, model, embeddings=None, **kwargs):
+    def detect(
+        self,
+        mel_feats: torch.Tensor,
+        model: torch.nn.Module,
+        embeddings: torch.Tensor | None = None,
+        **kwargs: Any,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         if embeddings is None:
             return model(self.scaler(self.take_log(mel_feats)), **kwargs)
         return model(
@@ -500,20 +559,129 @@ class SEDTask4(pl.LightningModule):
             **kwargs,
         )
 
-    def _unpack_batch(self, batch):
+    def _process_embeddings(self, embeddings: torch.Tensor) -> torch.Tensor:
+        """Extract embeddings from pretrained model if e2e mode enabled.
+
+        Preconditions:
+        - embeddings tensor must match pretrained_model expected input shape
+        - self.pretrained_model must be initialized if hparams["pretrained"]["e2e"] is True
+
+        Postconditions:
+        - Returns processed embeddings if e2e=True, otherwise returns input unchanged
+        - Ensures pretrained_model is in eval mode if frozen=True
+
+        Invariants:
+        - Does not modify model weights (inference only)
+        """
+        if self.hparams["pretrained"]["e2e"]:
+            if self.pretrained_model.training and self.hparams["pretrained"]["freezed"]:
+                self.pretrained_model.eval()
+            return self.pretrained_model(embeddings)[self.hparams["net"]["embedding_type"]]
+        return embeddings
+
+    def _generate_predictions(
+        self,
+        audio: torch.Tensor,
+        embeddings: torch.Tensor,
+        classes_mask: torch.Tensor | None = None,
+    ) -> tuple[tuple[torch.Tensor, torch.Tensor], tuple[torch.Tensor, torch.Tensor]]:
+        """Generate student and teacher model predictions from audio.
+
+        Preconditions:
+        - audio tensor shape: (batch_size, audio_length)
+        - embeddings must be processed via _process_embeddings()
+        - classes_mask optional tensor for masked class predictions
+
+        Postconditions:
+        - Returns ((strong_student, weak_student), (strong_teacher, weak_teacher))
+        - Each prediction tensor shape: (batch_size, time_steps, num_classes) for strong,
+          (batch_size, num_classes) for weak
+
+        Invariants:
+        - Mel spectrogram computed once and shared across both models
+        """
+        mels = self.mel_spec(audio)
+        strong_student, weak_student = self.detect(
+            mels,
+            self.sed_student,
+            embeddings=embeddings,
+            classes_mask=classes_mask,
+        )
+        strong_teacher, weak_teacher = self.detect(
+            mels,
+            self.sed_teacher,
+            embeddings=embeddings,
+            classes_mask=classes_mask,
+        )
+        return (strong_student, weak_student), (strong_teacher, weak_teacher)
+
+    def _compute_step_loss(
+        self,
+        predictions: torch.Tensor,
+        labels: torch.Tensor,
+        mask: torch.Tensor | None = None,
+    ) -> torch.Tensor:
+        """Compute supervised loss for masked predictions.
+
+        Preconditions:
+        - predictions and labels must have compatible shapes for BCE loss
+        - mask (if provided) must be boolean tensor matching batch dimension
+
+        Postconditions:
+        - Returns scalar loss tensor
+        - If mask provided, loss computed only on masked subset
+
+        Invariants:
+        - Loss is non-negative
+        """
+        if mask is not None:
+            predictions = predictions[mask]
+            labels = labels[mask]
+        return self.supervised_loss(predictions, labels)
+
+    def _update_metrics(
+        self,
+        predictions: torch.Tensor,
+        labels: torch.Tensor,
+        metric_name: str,
+        mask: torch.Tensor | None = None,
+    ) -> None:
+        """Update specified metric with predictions and labels.
+
+        Preconditions:
+        - metric_name must correspond to initialized torchmetrics instance (e.g., "weak_student_f1_seg_macro")
+        - predictions and labels must match metric's expected format
+        - mask (if provided) must be boolean tensor matching batch dimension
+
+        Postconditions:
+        - Updates internal metric state (accumulated for epoch-end computation)
+        - No return value (side effect only)
+
+        Invariants:
+        - Metric state remains valid after update
+        """
+        metric = getattr(self, f"get_{metric_name}")
+        if mask is not None:
+            predictions = predictions[mask]
+            labels = labels[mask]
+        metric(predictions, labels.long() if "f1" in metric_name else labels)
+
+    def _unpack_batch(self, batch: BatchType) -> BatchType:
+        """Unpack batch data, handling e2e mode if needed.
+
+        Args:
+            batch: BatchType tuple with 6 elements
+
+        Returns:
+            BatchType: Unpacked batch tuple
+
+        """
         if not self.hparams["pretrained"]["e2e"]:
             return batch
         # untested
-        raise NotImplementedError
-        # we train e2e
-        if len(batch) > 3:
-            audio, labels, padded_indxs, ast_feats = batch
-            pretrained_input = ast_feats
-        else:
-            audio, labels, padded_indxs = batch
-            pretrained_input = audio
+        raise NotImplementedError("E2E mode unpacking not yet implemented")
 
-    def training_step(self, batch, batch_indx):
+    def training_step(self, batch: BatchType, batch_indx: int) -> torch.Tensor:
         """Apply the training for one batch (a step). Used during trainer.fit
 
         Args:
@@ -523,8 +691,12 @@ class SEDTask4(pl.LightningModule):
         Returns:
            torch.Tensor, the loss to take into account.
 
+        Note:
+            type: ignore[override] - PyTorch Lightning base class uses Any for batch parameter,
+            but we use specific BatchType for type safety in this implementation.
+
         """
-        audio, labels, padded_indxs, embeddings, valid_class_mask = self._unpack_batch(
+        audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = self._unpack_batch(
             batch,
         )
 
@@ -597,11 +769,12 @@ class SEDTask4(pl.LightningModule):
         )
 
         # ---Supervised loss ---
-        loss_strong = self.supervised_loss(
-            strong_preds_student[strong_mask],
-            labels[strong_mask],
+        loss_strong = self._compute_step_loss(
+            strong_preds_student,
+            labels,
+            mask=strong_mask,
         )
-        loss_weak = self.supervised_loss(
+        loss_weak = self._compute_step_loss(
             weak_preds_student[weak_mask],
             labels_weak,
         )
@@ -619,11 +792,11 @@ class SEDTask4(pl.LightningModule):
         # --- Consistency Loss (Mean Teacher) ---
         weight = self.hparams["training"]["const_max"]
         if self.current_epoch < self.hparams["training"]["epoch_decay"]:
-            weight *= self.scheduler["scheduler"]._get_scaling_factor()
+            weight *= self.scheduler["scheduler"]._get_scaling_factor()  # type: ignore[index]  # scheduler is dict-like
 
         cmt_active = self.cmt_enabled and (self.current_epoch >= self.cmt_warmup_epochs)
 
-        # # CMT # こちらも一時的にmask_consistencyに戻す. 比較検証のため
+        # CMT
         if cmt_active:
             # Apply CMT processing
             with torch.no_grad():
@@ -681,7 +854,7 @@ class SEDTask4(pl.LightningModule):
 
         # 学習率など
         self.log("train/weight", weight)
-        self.log("train/lr", self.opt.param_groups[-1]["lr"], prog_bar=True)
+        self.log("train/lr", self.opt.param_groups[-1]["lr"], prog_bar=True)  # type: ignore[union-attr]  # opt initialized in setup
 
         # 各種step情報
         self.log("train/step/global_step", self.global_step)
@@ -689,7 +862,14 @@ class SEDTask4(pl.LightningModule):
 
         return tot_loss
 
-    def apply_cmt_postprocessing(self, y_w, y_s, index_weak, phi_clip=0.5, phi_frame=0.5):
+    def apply_cmt_postprocessing(
+        self,
+        y_w: torch.Tensor,
+        y_s: torch.Tensor,
+        index_weak: int,
+        phi_clip: float = 0.5,
+        phi_frame: float = 0.5,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply Confident Mean Teacher postprocessing.
         y_w: (batch, classes)
         y_s: (batch, classes, frames)
@@ -717,27 +897,29 @@ class SEDTask4(pl.LightningModule):
             filtered = self.median_filter(sample)
             y_tilde_s_list.append(filtered)
 
-        y_tilde_s = np.stack(y_tilde_s_list, axis=0)  # (batch, frames, classes)
-        y_tilde_s = torch.from_numpy(y_tilde_s).to(original_device)
-        y_tilde_s = y_tilde_s.transpose(1, 2)  # -> (batch, classes, frames)
+        y_tilde_s_np = np.stack(y_tilde_s_list, axis=0)  # (batch, frames, classes)
+        y_tilde_s_tensor = torch.from_numpy(y_tilde_s_np).to(original_device)
+        y_tilde_s = y_tilde_s_tensor.transpose(1, 2)  # -> (batch, classes, frames)
 
         y_tilde_w = torch.cat((y_w[:index_weak], y_tilde_w), dim=0)
         y_tilde_s = torch.cat((y_s[:index_weak], y_tilde_s), dim=0)
 
         return y_tilde_w, y_tilde_s
 
-    def compute_cmt_confidence_weights(self, y_w, y_s, y_tilde_w, y_tilde_s):
+    def compute_cmt_confidence_weights(
+        self, y_w: torch.Tensor, y_s: torch.Tensor, y_tilde_w: torch.Tensor, y_tilde_s: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute confidence weights based on teacher's certainty.
         Correction: High confidence for both positive (near 1) and negative (near 0) predictions.
         """
         if self.use_neg_sample:
             # --- use neg_sample ---
             # Weak Confidence:
-            c_w = torch.where(y_tilde_w > self.cmt_phi_clip, y_w, 1.0 - y_w)
+            c_w = torch.where(y_tilde_w > self.cmt_phi_clip, y_w, 1.0 - y_w)  # type: ignore[operator]  # cmt_phi_clip is float attribute
 
             # Strong Confidence:
             y_w_prob_expanded = y_w.unsqueeze(-1).expand_as(y_s)
-            conf_s_frame = torch.where(y_s > self.cmt_phi_frame, y_s, 1.0 - y_s)
+            conf_s_frame = torch.where(y_s > self.cmt_phi_frame, y_s, 1.0 - y_s)  # type: ignore[operator]  # cmt_phi_frame is float attribute
             # c_w_expanded = c_w.unsqueeze(-1).expand_as(y_s)
             # c_s = conf_s_frame * c_w_expanded
             c_s = conf_s_frame * y_w_prob_expanded
@@ -756,13 +938,13 @@ class SEDTask4(pl.LightningModule):
 
     def compute_cmt_consistency_loss(
         self,
-        student_w,
-        student_s,
-        teacher_pseudo_w,
-        teacher_pseudo_s,
-        confidence_w,
-        confidence_s,
-    ):
+        student_w: torch.Tensor,
+        student_s: torch.Tensor,
+        teacher_pseudo_w: torch.Tensor,
+        teacher_pseudo_s: torch.Tensor,
+        confidence_w: torch.Tensor,
+        confidence_s: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute weighted BCE loss."""
         # Weak Loss
         bce_w = F.binary_cross_entropy(student_w, teacher_pseudo_w, reduction="none")
@@ -789,16 +971,16 @@ class SEDTask4(pl.LightningModule):
 
         return loss_w_con, loss_s_con
 
-    def on_before_zero_grad(self, *args, **kwargs):
+    def on_before_zero_grad(self, *args: Any, **kwargs: Any) -> None:
         # update EMA teacher
         self.update_ema(
             self.hparams["training"]["ema_factor"],
-            self.scheduler["scheduler"].step_num,
+            self.scheduler["scheduler"].step_num,  # type: ignore[index]  # scheduler is dict-like
             self.sed_student,
             self.sed_teacher,
         )
 
-    def validation_step(self, batch, batch_indx):
+    def validation_step(self, batch: BatchType, batch_indx: int) -> None:
         """Apply validation to a batch (step). Used during trainer.fit
 
         Args:
@@ -812,28 +994,16 @@ class SEDTask4(pl.LightningModule):
             batch,
         )
 
-        if self.hparams["pretrained"]["e2e"]:
-            # extract embeddings here
-            if self.pretrained_model.training and self.hparams["pretrained"]["freezed"]:
-                # check that is freezed
-                self.pretrained_model.eval()
-            embeddings = self.pretrained_model(embeddings)[self.hparams["net"]["embedding_type"]]
+        embeddings = self._process_embeddings(embeddings)
 
-        # prediction for student
-        mels = self.mel_spec(audio)
-        strong_preds_student, weak_preds_student = self.detect(
-            mels,
-            self.sed_student,
-            embeddings=embeddings,
-            classes_mask=valid_class_mask,
-        )
-        # prediction for teacher
-        strong_preds_teacher, weak_preds_teacher = self.detect(
-            mels,
-            self.sed_teacher,
-            embeddings=embeddings,
-            classes_mask=valid_class_mask,
-        )
+        # prediction for student and teacher using helper method
+        (
+            (strong_preds_student, weak_preds_student),
+            (
+                strong_preds_teacher,
+                weak_preds_teacher,
+            ),
+        ) = self._generate_predictions(audio, embeddings, classes_mask=valid_class_mask)
 
         # we derive masks for each dataset based on folders of filenames
         mask_weak = (
@@ -864,35 +1034,43 @@ class SEDTask4(pl.LightningModule):
         if torch.any(mask_weak):
             labels_weak = (torch.sum(labels[mask_weak], -1) >= 1).float()
 
-            loss_weak_student = self.supervised_loss(
-                weak_preds_student[mask_weak],
+            loss_weak_student = self._compute_step_loss(
+                weak_preds_student,
                 labels_weak,
+                mask=mask_weak,
             )
-            loss_weak_teacher = self.supervised_loss(
-                weak_preds_teacher[mask_weak],
+            loss_weak_teacher = self._compute_step_loss(
+                weak_preds_teacher,
                 labels_weak,
+                mask=mask_weak,
             )
             self.log("val/weak/student/loss_weak", loss_weak_student)
             self.log("val/weak/teacher/loss_weak", loss_weak_teacher)
 
             # accumulate f1 score for weak labels
-            self.get_weak_student_f1_seg_macro(
-                weak_preds_student[mask_weak],
-                labels_weak.long(),
+            self._update_metrics(
+                weak_preds_student,
+                labels_weak,
+                "weak_student_f1_seg_macro",
+                mask=mask_weak,
             )
-            self.get_weak_teacher_f1_seg_macro(
-                weak_preds_teacher[mask_weak],
-                labels_weak.long(),
+            self._update_metrics(
+                weak_preds_teacher,
+                labels_weak,
+                "weak_teacher_f1_seg_macro",
+                mask=mask_weak,
             )
 
         if torch.any(mask_strong):
-            loss_strong_student = self.supervised_loss(
-                strong_preds_student[mask_strong],
-                labels[mask_strong],
+            loss_strong_student = self._compute_step_loss(
+                strong_preds_student,
+                labels,
+                mask=mask_strong,
             )
-            loss_strong_teacher = self.supervised_loss(
-                strong_preds_teacher[mask_strong],
-                labels[mask_strong],
+            loss_strong_teacher = self._compute_step_loss(
+                strong_preds_teacher,
+                labels,
+                mask=mask_strong,
             )
 
             self.log("val/synth/student/loss_strong", loss_strong_student)
@@ -948,7 +1126,7 @@ class SEDTask4(pl.LightningModule):
                 scores_unprocessed_teacher_strong,
             )
 
-    def validation_epoch_end(self, outputs):
+    def validation_epoch_end(self, outputs: Any) -> dict[str, torch.Tensor]:  # type: ignore[override]  # Returns dict but Lightning expects None
         """Fonction applied at the end of all the validation steps of the epoch.
 
         Args:
@@ -1062,7 +1240,7 @@ class SEDTask4(pl.LightningModule):
         maestro_ground_truth = maestro_ground_truth[
             maestro_ground_truth.event_label.isin(classes_labels_maestro_real_eval)
         ]
-        maestro_ground_truth = {
+        maestro_ground_truth = {  # type: ignore[assignment]  # DataFrame converted to dict by comprehension
             clip_id: events
             for clip_id, events in sed_scores_eval.io.read_ground_truth_events(
                 maestro_ground_truth,
@@ -1204,14 +1382,14 @@ class SEDTask4(pl.LightningModule):
         self.get_weak_student_f1_seg_macro.reset()
         self.get_weak_teacher_f1_seg_macro.reset()
 
-        return obj_metric
+        return obj_metric  # type: ignore[return-value]  # Lightning expects None but we return metric dict
 
-    def on_save_checkpoint(self, checkpoint):
+    def on_save_checkpoint(self, checkpoint: dict[str, Any]) -> dict[str, Any]:  # type: ignore[override]  # Returns dict but Lightning expects None
         checkpoint["sed_student"] = self.sed_student.state_dict()
         checkpoint["sed_teacher"] = self.sed_teacher.state_dict()
         return checkpoint
 
-    def test_step(self, batch, batch_indx):
+    def test_step(self, batch: BatchType, batch_indx: int) -> None:
         """Apply Test to a batch (step), used only when (trainer.test is called)
 
         Args:
@@ -1225,30 +1403,20 @@ class SEDTask4(pl.LightningModule):
             batch,
         )
 
-        if self.hparams["pretrained"]["e2e"]:
-            # extract embeddings here
-            if self.pretrained_model.training and self.hparams["pretrained"]["freezed"]:
-                # check that is freezed
-                self.pretrained_model.eval()
-            embeddings = self.pretrained_model(embeddings)[self.hparams["net"]["embedding_type"]]
+        embeddings = self._process_embeddings(embeddings)
 
-        # prediction for student
-        mels = self.mel_spec(audio)
-        strong_preds_student, weak_preds_student = self.detect(
-            mels,
-            self.sed_student,
-            embeddings,
-        )
-        # prediction for teacher
-        strong_preds_teacher, weak_preds_teacher = self.detect(
-            mels,
-            self.sed_teacher,
-            embeddings,
-        )
+        # prediction for student and teacher using helper method
+        (
+            (strong_preds_student, weak_preds_student),
+            (
+                strong_preds_teacher,
+                weak_preds_teacher,
+            ),
+        ) = self._generate_predictions(audio, embeddings)
 
         if not self.evaluation:
-            loss_strong_student = self.supervised_loss(strong_preds_student, labels)
-            loss_strong_teacher = self.supervised_loss(strong_preds_teacher, labels)
+            loss_strong_student = self._compute_step_loss(strong_preds_student, labels)
+            loss_strong_teacher = self._compute_step_loss(strong_preds_teacher, labels)
 
             self.log("test/student/loss_strong", loss_strong_student)
             self.log("test/teacher/loss_strong", loss_strong_teacher)
@@ -1572,12 +1740,12 @@ class SEDTask4(pl.LightningModule):
 
     def _save_per_class_psds(
         self,
-        single_class_psds_dict,
-        save_path,
-        dataset_name,
-        model_name,
-        scenario_name=None,
-    ):
+        single_class_psds_dict: dict[str, float],
+        save_path: str,
+        dataset_name: str,
+        model_name: str,
+        scenario_name: str | None = None,
+    ) -> None:
         metrics_list = []
         for class_name, psds_value in single_class_psds_dict.items():
             metrics_list.append(
@@ -1604,11 +1772,11 @@ class SEDTask4(pl.LightningModule):
 
     def _save_per_class_mpauc(
         self,
-        auroc_results_dict,
-        save_path,
-        dataset_name,
-        model_name,
-    ):
+        auroc_results_dict: dict[str, float],
+        save_path: str,
+        dataset_name: str,
+        model_name: str,
+    ) -> None:
         metrics_list = []
         for class_name, mpauc_value in auroc_results_dict.items():
             if class_name == "mean":
@@ -1637,7 +1805,7 @@ class SEDTask4(pl.LightningModule):
         print(f"\n[Per-class mpAUC] Saved to: {save_path}")
         print(df.to_string(index=False))
 
-    def on_test_epoch_end(self):
+    def on_test_epoch_end(self) -> None:
         # pub eval dataset
         save_dir = os.path.join(self.exp_dir, "metrics_test")
         print("save_dir", save_dir)
@@ -1646,7 +1814,7 @@ class SEDTask4(pl.LightningModule):
         if wandb.run is not None:
             csv_dir = os.path.join(wandb.run.dir, "class-wise-csv")
         else:
-            csv_dir = os.path.join(self._exp_dir, "class-wise-csv")
+            csv_dir = os.path.join(str(self._exp_dir), "class-wise-csv")
         print("csv_dir", csv_dir)
 
         results = {}
@@ -2088,10 +2256,10 @@ class SEDTask4(pl.LightningModule):
             self.log(key, results[key], prog_bar=True, logger=True)
         wandb.finish()
 
-    def configure_optimizers(self):
-        return [self.opt], [self.scheduler]
+    def configure_optimizers(self) -> list[list[torch.optim.Optimizer] | list[dict]]:
+        return [self.opt], [self.scheduler]  # type: ignore[return-value]  # opt and scheduler initialized in setup
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> SafeDataLoader:
         self.train_loader = SafeDataLoader(
             self.train_data,
             batch_sampler=self.train_sampler,
@@ -2100,7 +2268,7 @@ class SEDTask4(pl.LightningModule):
 
         return self.train_loader
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> SafeDataLoader:
         self.val_loader = SafeDataLoader(
             self.valid_data,
             batch_size=self.hparams["training"]["batch_size_val"],
@@ -2110,7 +2278,7 @@ class SEDTask4(pl.LightningModule):
         )
         return self.val_loader
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> SafeDataLoader:
         self.test_loader = SafeDataLoader(
             self.test_data,
             batch_size=self.hparams["training"]["batch_size_val"],
@@ -2124,7 +2292,7 @@ class SEDTask4(pl.LightningModule):
         # dump consumption
         self.tracker_train.stop()
         training_kwh = self.tracker_train._total_energy.kWh
-        self.logger.log_metrics(
+        self.logger.log_metrics(  # type: ignore[union-attr]  # logger initialized before training
             {"/train/tot_energy_kWh": torch.tensor(float(training_kwh))},
         )
 
@@ -2235,7 +2403,9 @@ class SEDTask4(pl.LightningModule):
 
             self.tracker_devtest.start()
 
-    def load_maestro_audio_durations_and_gt(self):
+    def load_maestro_audio_durations_and_gt(
+        self,
+    ) -> tuple[dict[str, float], dict[str, list[tuple[float, float, str]]]]:
         """MAESTROのaudio durationsとground truthを読み込む。
 
         注: validation時と同じデータソース(real_maestro_train_tsv)を使用することで、

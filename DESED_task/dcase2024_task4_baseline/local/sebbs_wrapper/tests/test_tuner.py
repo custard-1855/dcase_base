@@ -163,6 +163,73 @@ class TestSEBBsTuner:
         assert isinstance(result, tuple)
         assert len(result) == 3
 
+    def test_tune_for_psds_verbose_false(self, synthetic_data) -> None:
+        """Test that verbose=False maintains existing behavior (no output)."""
+        scores, ground_truth, audio_durations = synthetic_data
+
+        # Run tuning with verbose=False (default)
+        predictor, metrics = SEBBsTuner.tune_for_psds(
+            scores=scores,
+            ground_truth=ground_truth,
+            audio_durations=audio_durations,
+            step_filter_lengths=(0.32, 0.48),
+            merge_thresholds_abs=(0.15, 0.2),
+            merge_thresholds_rel=(1.5, 2.0),
+            verbose=False,
+        )
+
+        # Should return valid results
+        assert isinstance(predictor, SEBBsPredictor)
+        assert isinstance(metrics, dict)
+
+    def test_tune_for_psds_verbose_true(self, synthetic_data, capsys) -> None:
+        """Test that verbose=True outputs progress information."""
+        scores, ground_truth, audio_durations = synthetic_data
+
+        # Run tuning with verbose=True
+        predictor, metrics = SEBBsTuner.tune_for_psds(
+            scores=scores,
+            ground_truth=ground_truth,
+            audio_durations=audio_durations,
+            step_filter_lengths=(0.32, 0.48),
+            merge_thresholds_abs=(0.15, 0.2),
+            merge_thresholds_rel=(1.5, 2.0),
+            verbose=True,
+        )
+
+        # Capture stdout/stderr
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+
+        # Should contain progress information
+        assert "Tuning" in output or "Grid" in output or "試行" in output
+        assert isinstance(predictor, SEBBsPredictor)
+        assert isinstance(metrics, dict)
+
+    def test_tune_for_collar_based_f1_verbose_true(self, synthetic_data, capsys) -> None:
+        """Test that tune_for_collar_based_f1 supports verbose parameter."""
+        scores, ground_truth, audio_durations = synthetic_data
+
+        # Run tuning with verbose=True
+        predictor, metrics = SEBBsTuner.tune_for_collar_based_f1(
+            scores=scores,
+            ground_truth=ground_truth,
+            audio_durations=audio_durations,
+            step_filter_lengths=(0.32, 0.48),
+            merge_thresholds_abs=(0.15, 0.2),
+            merge_thresholds_rel=(1.5, 2.0),
+            verbose=True,
+        )
+
+        # Capture stdout/stderr
+        captured = capsys.readouterr()
+        output = captured.out + captured.err
+
+        # Should contain progress information
+        assert "Tuning" in output or "Grid" in output or "試行" in output
+        assert isinstance(predictor, SEBBsPredictor)
+        assert isinstance(metrics, dict)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -69,6 +69,27 @@ predictor, metrics = SEBBsTuner.tune_for_psds(
 print(f"Best PSDS values: {metrics}")
 ```
 
+#### Progress Reporting
+
+Enable verbose mode to monitor tuning progress:
+
+```python
+# Show progress during tuning
+predictor, metrics = SEBBsTuner.tune_for_psds(
+    scores=val_scores,
+    ground_truth=val_gt,
+    audio_durations=val_durations,
+    verbose=True  # Enable progress display
+)
+# Output: "Tuning for PSDS optimization (Grid size: 27 combinations)"
+```
+
+The progress display shows:
+- Grid search size (total parameter combinations)
+- Optimization objective (PSDS or collar-based F1)
+
+This feature helps track long-running hyperparameter searches without adding dependencies (progress bars would require `tqdm`, which remains optional).
+
 ### Evaluation
 
 ```python

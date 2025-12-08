@@ -115,6 +115,7 @@ class SEBBsTuner:
         unit_of_time: str = "hour",
         max_efpr: float = 100.0,
         classwise: bool = True,
+        verbose: bool = False,
     ) -> tuple[SEBBsPredictor, dict]:
         """Tune hyperparameters to optimize PSDS (Polyphonic Sound Detection Score).
 
@@ -134,6 +135,7 @@ class SEBBsTuner:
             unit_of_time: Time unit for FPR computation ('hour', 'minute', etc.)
             max_efpr: Maximum false positives per time unit to consider
             classwise: Whether to use different parameters per sound class
+            verbose: If True, display progress information during tuning
 
         Returns:
             Tuple of (best_predictor, class_wise_psds_values)
@@ -145,10 +147,15 @@ class SEBBsTuner:
             ...     audio_durations=val_durations,
             ...     dtc_threshold=0.7,
             ...     gtc_threshold=0.7,
+            ...     verbose=True,  # Show progress
             ... )
             >>> print(f"PSDS: {psds_values}")
 
         """
+        if verbose:
+            grid_size = len(step_filter_lengths) * len(merge_thresholds_abs) * len(merge_thresholds_rel)
+            print(f"Tuning for PSDS optimization (Grid size: {grid_size} combinations)")
+
         predictor, metrics = csebbs.tune(
             scores=scores,
             ground_truth=ground_truth,
@@ -184,6 +191,7 @@ class SEBBsTuner:
         offset_collar: float = 0.2,
         offset_collar_rate: float = 0.2,
         classwise: bool = True,
+        verbose: bool = False,
     ) -> tuple[SEBBsPredictor, dict]:
         """Tune hyperparameters to optimize collar-based F1-score.
 
@@ -201,6 +209,7 @@ class SEBBsTuner:
             offset_collar: Minimum offset collar in seconds
             offset_collar_rate: Offset collar as rate of event length
             classwise: Whether to use different parameters per sound class
+            verbose: If True, display progress information during tuning
 
         Returns:
             Tuple of (best_predictor, class_wise_f1_values)
@@ -211,10 +220,15 @@ class SEBBsTuner:
             ...     scores=val_scores,
             ...     ground_truth=val_gt,
             ...     audio_durations=val_durations,
+            ...     verbose=True,  # Show progress
             ... )
             >>> print(f"F1 scores: {f1_values}")
 
         """
+        if verbose:
+            grid_size = len(step_filter_lengths) * len(merge_thresholds_abs) * len(merge_thresholds_rel)
+            print(f"Tuning for collar-based F1 optimization (Grid size: {grid_size} combinations)")
+
         predictor, metrics = csebbs.tune(
             scores=scores,
             ground_truth=ground_truth,
