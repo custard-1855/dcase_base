@@ -1035,30 +1035,26 @@ class SEDTask4(pl.LightningModule):
             labels_weak = (torch.sum(labels[mask_weak], -1) >= 1).float()
 
             loss_weak_student = self._compute_step_loss(
-                weak_preds_student,
+                weak_preds_student[mask_weak],
                 labels_weak,
-                mask=mask_weak,
             )
             loss_weak_teacher = self._compute_step_loss(
-                weak_preds_teacher,
+                weak_preds_teacher[mask_weak],
                 labels_weak,
-                mask=mask_weak,
             )
             self.log("val/weak/student/loss_weak", loss_weak_student)
             self.log("val/weak/teacher/loss_weak", loss_weak_teacher)
 
             # accumulate f1 score for weak labels
             self._update_metrics(
-                weak_preds_student,
+                weak_preds_student[mask_weak],
                 labels_weak,
                 "weak_student_f1_seg_macro",
-                mask=mask_weak,
             )
             self._update_metrics(
-                weak_preds_teacher,
+                weak_preds_teacher[mask_weak],
                 labels_weak,
                 "weak_teacher_f1_seg_macro",
-                mask=mask_weak,
             )
 
         if torch.any(mask_strong):
