@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-インタラクティブHTML可視化をブラウザで開くスクリプト
+"""インタラクティブHTML可視化をブラウザで開くスクリプト
 
 使用法:
     # UMAP可視化を開く
@@ -54,17 +53,17 @@ def open_in_browser(file_path: Path):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="インタラクティブHTML可視化をブラウザで開く"
+        description="インタラクティブHTML可視化をブラウザで開く",
     )
     parser.add_argument(
         "file",
         nargs="?",
-        help="開くHTMLファイルのパス（省略時は自動検索）"
+        help="開くHTMLファイルのパス（省略時は自動検索）",
     )
     parser.add_argument(
         "--search-dir",
         default="visualization_outputs",
-        help="検索するディレクトリ（デフォルト: visualization_outputs）"
+        help="検索するディレクトリ（デフォルト: visualization_outputs）",
     )
 
     args = parser.parse_args()
@@ -95,13 +94,16 @@ def main():
             open_in_browser(html_files[0])
         else:
             # 複数ある場合は選択
-            print("\n開くファイルを選択してください (1-{}, a=すべて, q=終了): ".format(len(html_files)), end="")
+            print(
+                f"\n開くファイルを選択してください (1-{len(html_files)}, a=すべて, q=終了): ",
+                end="",
+            )
             choice = input().strip().lower()
 
-            if choice == 'q':
+            if choice == "q":
                 print("終了しました")
                 return
-            elif choice == 'a':
+            if choice == "a":
                 print("\nすべてのファイルを開きます...")
                 for html_file in html_files:
                     open_in_browser(html_file)

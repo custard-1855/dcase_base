@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-可視化スクリプト用の共通ユーティリティモジュール
+"""可視化スクリプト用の共通ユーティリティモジュール
 
 このモジュールは、DCASE 2024 Task 4の可視化スクリプトで共通して使用される
 クラス定義、データローディング関数、その他のユーティリティを提供します。
@@ -8,42 +7,58 @@
 
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Union
+
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-
 # --- クラス定義（DESED + MAESTRO）---
 DESED_CLASSES = [
-    "Alarm_bell_ringing", "Blender", "Cat", "Dishes", "Dog",
-    "Electric_shaver_toothbrush", "Frying", "Running_water",
-    "Speech", "Vacuum_cleaner"
+    "Alarm_bell_ringing",
+    "Blender",
+    "Cat",
+    "Dishes",
+    "Dog",
+    "Electric_shaver_toothbrush",
+    "Frying",
+    "Running_water",
+    "Speech",
+    "Vacuum_cleaner",
 ]
 
 MAESTRO_REAL_ALL = [
-    "cutlery and dishes",      # 10
-    "furniture dragging",      # 11 (未使用)
-    "people talking",          # 12
-    "children voices",         # 13
-    "coffee machine",          # 14 (未使用)
-    "footsteps",               # 15
-    "large_vehicle",           # 16
-    "car",                     # 17
-    "brakes_squeaking",        # 18
-    "cash register beeping",   # 19 (未使用)
-    "announcement",            # 20 (未使用)
-    "shopping cart",           # 21 (未使用)
-    "metro leaving",           # 22
-    "metro approaching",       # 23
-    "door opens/closes",       # 24 (未使用)
-    "wind_blowing",            # 25
-    "birds_singing",           # 26
+    "cutlery and dishes",  # 10
+    "furniture dragging",  # 11 (未使用)
+    "people talking",  # 12
+    "children voices",  # 13
+    "coffee machine",  # 14 (未使用)
+    "footsteps",  # 15
+    "large_vehicle",  # 16
+    "car",  # 17
+    "brakes_squeaking",  # 18
+    "cash register beeping",  # 19 (未使用)
+    "announcement",  # 20 (未使用)
+    "shopping cart",  # 21 (未使用)
+    "metro leaving",  # 22
+    "metro approaching",  # 23
+    "door opens/closes",  # 24 (未使用)
+    "wind_blowing",  # 25
+    "birds_singing",  # 26
 ]
 
 ALL_CLASSES_27 = DESED_CLASSES + MAESTRO_REAL_ALL
 USED_CLASS_INDICES = [
     # DESED 10クラス全て
-    0, 1, 2, 3, 4, 5, 6, 7, 8, 9,
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
     # MAESTRO 11クラス
     10,  # cutlery and dishes
     12,  # people talking
@@ -63,11 +78,10 @@ USED_CLASSES_21 = [ALL_CLASSES_27[i] for i in USED_CLASS_INDICES]
 
 # --- データローディング関数 ---
 def load_inference_data(
-    model_dir: Union[str, Path],
-    verbose: bool = True
-) -> Dict[str, Dict[str, np.ndarray]]:
-    """
-    1つのモデルディレクトリから全データセットの推論結果を読み込む
+    model_dir: str | Path,
+    verbose: bool = True,
+) -> dict[str, dict[str, np.ndarray]]:
+    """1つのモデルディレクトリから全データセットの推論結果を読み込む
 
     Args:
         model_dir: モデルの推論結果が格納されたディレクトリパス
@@ -85,6 +99,7 @@ def load_inference_data(
     Raises:
         FileNotFoundError: 指定されたディレクトリが存在しない場合
         ValueError: NPZファイルのフォーマットが不正な場合
+
     """
     model_dir = Path(model_dir)
 
@@ -109,24 +124,29 @@ def load_inference_data(
             data = np.load(npz_file, allow_pickle=True)
 
             # 必須フィールドの確認
-            required_keys = ['features_student', 'features_teacher',
-                           'probs_student', 'probs_teacher', 'filenames']
+            required_keys = [
+                "features_student",
+                "features_teacher",
+                "probs_student",
+                "probs_teacher",
+                "filenames",
+            ]
             missing_keys = [k for k in required_keys if k not in data]
 
             if missing_keys:
                 raise ValueError(f"Missing required keys in {npz_file}: {missing_keys}")
 
             datasets[dataset_name] = {
-                'features_student': data['features_student'],
-                'features_teacher': data['features_teacher'],
-                'probs_student': data['probs_student'],
-                'probs_teacher': data['probs_teacher'],
-                'filenames': data['filenames'],
+                "features_student": data["features_student"],
+                "features_teacher": data["features_teacher"],
+                "probs_student": data["probs_student"],
+                "probs_teacher": data["probs_teacher"],
+                "filenames": data["filenames"],
             }
 
             # targetsはラベル付きデータのみ
-            if 'targets' in data:
-                datasets[dataset_name]['targets'] = data['targets']
+            if "targets" in data:
+                datasets[dataset_name]["targets"] = data["targets"]
 
         except Exception as e:
             if verbose:
@@ -138,13 +158,12 @@ def load_inference_data(
 
 # --- メタデータ作成関数 ---
 def create_metadata(
-    data: Dict[str, np.ndarray],
+    data: dict[str, np.ndarray],
     model_name: str,
     dataset_name: str,
-    feature_type: str = 'student'
+    feature_type: str = "student",
 ) -> pd.DataFrame:
-    """
-    単一データセットのメタデータDataFrameを作成
+    """単一データセットのメタデータDataFrameを作成
 
     Args:
         data: load_inference_dataで読み込んだ単一データセットのデータ
@@ -162,74 +181,77 @@ def create_metadata(
         - true_class: 正解クラス（ラベル付きデータのみ）
         - max_prob: 最大予測確率
         - entropy: 予測のエントロピー
+
     """
-    n_samples = data[f'features_{feature_type}'].shape[0]
-    probs = data[f'probs_{feature_type}']
+    n_samples = data[f"features_{feature_type}"].shape[0]
+    probs = data[f"probs_{feature_type}"]
 
     # 基本メタデータ
     meta = {
-        'model': [model_name] * n_samples,
-        'dataset': [dataset_name] * n_samples,
-        'filenames': data['filenames'].tolist() if data['filenames'].ndim > 0 else [data['filenames'].item()],
+        "model": [model_name] * n_samples,
+        "dataset": [dataset_name] * n_samples,
+        "filenames": data["filenames"].tolist()
+        if data["filenames"].ndim > 0
+        else [data["filenames"].item()],
     }
 
     # ドメイン情報の判定
-    if 'desed' in dataset_name.lower():
-        if 'unlabeled' in dataset_name.lower():
-            domain = 'unlabeled'
+    if "desed" in dataset_name.lower():
+        if "unlabeled" in dataset_name.lower():
+            domain = "unlabeled"
         else:
-            domain = 'synthetic'
-    elif 'maestro' in dataset_name.lower():
-        domain = 'real'
+            domain = "synthetic"
+    elif "maestro" in dataset_name.lower():
+        domain = "real"
     else:
-        domain = 'unknown'
-    meta['domain'] = [domain] * n_samples
+        domain = "unknown"
+    meta["domain"] = [domain] * n_samples
 
     # 予測クラス（最大確率のクラス）
     pred_classes_idx = np.argmax(probs, axis=1)
-    meta['predicted_class'] = [
-        ALL_CLASSES_27[i] if i < len(ALL_CLASSES_27) else f'class_{i}'
-        for i in pred_classes_idx
+    meta["predicted_class"] = [
+        ALL_CLASSES_27[i] if i < len(ALL_CLASSES_27) else f"class_{i}" for i in pred_classes_idx
     ]
 
     # 最大予測確率
-    meta['max_prob'] = np.max(probs, axis=1).tolist()
+    meta["max_prob"] = np.max(probs, axis=1).tolist()
 
     # エントロピー（不確実性の指標）
     eps = 1e-10
     probs_clipped = np.clip(probs, eps, 1 - eps)
     entropy = -np.sum(probs_clipped * np.log(probs_clipped), axis=1)
-    meta['entropy'] = entropy.tolist()
+    meta["entropy"] = entropy.tolist()
 
     # 正解クラス（ラベル付きデータのみ）
-    if 'targets' in data:
-        targets = data['targets']
+    if "targets" in data:
+        targets = data["targets"]
         true_classes = []
         for target in targets:
             true_indices = np.where(target > 0.5)[0]
             if len(true_indices) > 0:
                 # 最初の正解クラスを代表として使用
-                class_name = (ALL_CLASSES_27[true_indices[0]]
-                            if true_indices[0] < len(ALL_CLASSES_27)
-                            else f'class_{true_indices[0]}')
+                class_name = (
+                    ALL_CLASSES_27[true_indices[0]]
+                    if true_indices[0] < len(ALL_CLASSES_27)
+                    else f"class_{true_indices[0]}"
+                )
                 true_classes.append(class_name)
             else:
-                true_classes.append('none')
-        meta['true_class'] = true_classes
+                true_classes.append("none")
+        meta["true_class"] = true_classes
     else:
-        meta['predicted_class_label'] = ['unlabeled'] * n_samples
-        meta['true_class'] = ['unlabeled'] * n_samples
+        meta["predicted_class_label"] = ["unlabeled"] * n_samples
+        meta["true_class"] = ["unlabeled"] * n_samples
 
     return pd.DataFrame(meta)
 
 
 # --- 複数モデル・データセットの結合 ---
 def combine_multiple_models(
-    models_data: Dict[str, Dict[str, Dict[str, np.ndarray]]],
-    feature_type: str = 'student'
-) -> Tuple[np.ndarray, pd.DataFrame]:
-    """
-    複数モデル・複数データセットの特徴量とメタデータを結合
+    models_data: dict[str, dict[str, dict[str, np.ndarray]]],
+    feature_type: str = "student",
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """複数モデル・複数データセットの特徴量とメタデータを結合
 
     Args:
         models_data: {model_name: {dataset_name: {key: array}}}
@@ -238,6 +260,7 @@ def combine_multiple_models(
     Returns:
         features: 結合された特徴量配列 (N_total, 384)
         metadata: 結合されたメタデータDataFrame (N_total, columns)
+
     """
     all_features = []
     all_metadata = []
@@ -245,7 +268,7 @@ def combine_multiple_models(
     for model_name, datasets in models_data.items():
         for dataset_name, data in datasets.items():
             # 特徴量
-            features = data[f'features_{feature_type}']
+            features = data[f"features_{feature_type}"]
             all_features.append(features)
 
             # メタデータ
@@ -258,14 +281,14 @@ def combine_multiple_models(
 
     return features, metadata
 
+
 # --- データ前処理ユーティリティ---
 def filter_by_domain(
     features: np.ndarray,
     metadata: pd.DataFrame,
-    domains: List[str]
-) -> Tuple[np.ndarray, pd.DataFrame]:
-    """
-    指定されたドメインのデータのみをフィルタリング
+    domains: list[str],
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """指定されたドメインのデータのみをフィルタリング
 
     Args:
         features: 特徴量配列
@@ -275,19 +298,19 @@ def filter_by_domain(
 
     Returns:
         フィルタリング後の特徴量とメタデータ
+
     """
-    mask = metadata['domain'].isin(domains)
+    mask = metadata["domain"].isin(domains)
     return features[mask], metadata[mask].reset_index(drop=True)
 
 
 def filter_by_class(
     features: np.ndarray,
     metadata: pd.DataFrame,
-    classes: List[str],
-    use_predicted: bool = True
-) -> Tuple[np.ndarray, pd.DataFrame]:
-    """
-    指定されたクラスのデータのみをフィルタリング
+    classes: list[str],
+    use_predicted: bool = True,
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """指定されたクラスのデータのみをフィルタリング
 
     Args:
         features: 特徴量配列
@@ -297,8 +320,9 @@ def filter_by_class(
 
     Returns:
         フィルタリング後の特徴量とメタデータ
+
     """
-    column = 'predicted_class' if use_predicted else 'true_class'
+    column = "predicted_class" if use_predicted else "true_class"
     mask = metadata[column].isin(classes)
     return features[mask], metadata[mask].reset_index(drop=True)
 
@@ -307,11 +331,10 @@ def sample_balanced(
     features: np.ndarray,
     metadata: pd.DataFrame,
     n_samples_per_class: int,
-    column: str = 'predicted_class',
-    random_state: int = 42
-) -> Tuple[np.ndarray, pd.DataFrame]:
-    """
-    各クラスから均等にサンプリング
+    column: str = "predicted_class",
+    random_state: int = 42,
+) -> tuple[np.ndarray, pd.DataFrame]:
+    """各クラスから均等にサンプリング
 
     Args:
         features: 特徴量配列
@@ -322,6 +345,7 @@ def sample_balanced(
 
     Returns:
         バランスされた特徴量とメタデータ
+
     """
     np.random.seed(random_state)
 
@@ -339,54 +363,54 @@ def sample_balanced(
 
 
 # --- 統計情報の計算 ---
-def compute_dataset_statistics(metadata: pd.DataFrame) -> Dict[str, any]:
-    """
-    データセットの統計情報を計算
+def compute_dataset_statistics(metadata: pd.DataFrame) -> dict[str, any]:
+    """データセットの統計情報を計算
 
     Args:
         metadata: メタデータDataFrame
 
     Returns:
         統計情報を含む辞書
+
     """
     stats = {
-        'total_samples': len(metadata),
-        'n_models': metadata['model'].nunique(),
-        'n_datasets': metadata['dataset'].nunique(),
-        'domain_distribution': metadata['domain'].value_counts().to_dict(),
-        'class_distribution': metadata['predicted_class'].value_counts().to_dict(),
+        "total_samples": len(metadata),
+        "n_models": metadata["model"].nunique(),
+        "n_datasets": metadata["dataset"].nunique(),
+        "domain_distribution": metadata["domain"].value_counts().to_dict(),
+        "class_distribution": metadata["predicted_class"].value_counts().to_dict(),
     }
 
     # ラベル付きデータがある場合
-    if 'true_class' in metadata and not all(metadata['true_class'] == 'unlabeled'):
-        labeled_mask = metadata['true_class'] != 'unlabeled'
-        stats['n_labeled'] = labeled_mask.sum()
-        stats['n_unlabeled'] = (~labeled_mask).sum()
+    if "true_class" in metadata and not all(metadata["true_class"] == "unlabeled"):
+        labeled_mask = metadata["true_class"] != "unlabeled"
+        stats["n_labeled"] = labeled_mask.sum()
+        stats["n_unlabeled"] = (~labeled_mask).sum()
 
     # エントロピー統計
-    if 'entropy' in metadata:
-        stats['entropy_mean'] = metadata['entropy'].mean()
-        stats['entropy_std'] = metadata['entropy'].std()
+    if "entropy" in metadata:
+        stats["entropy_mean"] = metadata["entropy"].mean()
+        stats["entropy_std"] = metadata["entropy"].std()
 
     # 確信度統計
-    if 'max_prob' in metadata:
-        stats['confidence_mean'] = metadata['max_prob'].mean()
-        stats['confidence_std'] = metadata['max_prob'].std()
+    if "max_prob" in metadata:
+        stats["confidence_mean"] = metadata["max_prob"].mean()
+        stats["confidence_std"] = metadata["max_prob"].std()
 
     return stats
 
 
-def print_statistics(stats: Dict[str, any], title: str = "Dataset Statistics"):
-    """
-    統計情報を見やすく表示
+def print_statistics(stats: dict[str, any], title: str = "Dataset Statistics"):
+    """統計情報を見やすく表示
 
     Args:
         stats: 統計情報の辞書
         title: 表示タイトル
+
     """
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print(f"{title}")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
 
     # 基本統計
     print(f"Total samples: {stats['total_samples']:,}")
@@ -394,20 +418,20 @@ def print_statistics(stats: Dict[str, any], title: str = "Dataset Statistics"):
     print(f"Number of datasets: {stats['n_datasets']}")
 
     # ラベル情報
-    if 'n_labeled' in stats:
+    if "n_labeled" in stats:
         print(f"Labeled samples: {stats['n_labeled']:,}")
         print(f"Unlabeled samples: {stats['n_unlabeled']:,}")
 
     # ドメイン分布
     print("\nDomain distribution:")
-    for domain, count in stats['domain_distribution'].items():
-        percentage = (count / stats['total_samples']) * 100
+    for domain, count in stats["domain_distribution"].items():
+        percentage = (count / stats["total_samples"]) * 100
         print(f"  {domain}: {count:,} ({percentage:.1f}%)")
 
     # エントロピー・確信度
-    if 'entropy_mean' in stats:
+    if "entropy_mean" in stats:
         print(f"\nEntropy: {stats['entropy_mean']:.3f} ± {stats['entropy_std']:.3f}")
-    if 'confidence_mean' in stats:
+    if "confidence_mean" in stats:
         print(f"Confidence: {stats['confidence_mean']:.3f} ± {stats['confidence_std']:.3f}")
 
-    print(f"{'='*60}\n")
+    print(f"{'=' * 60}\n")

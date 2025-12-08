@@ -2,6 +2,9 @@
 
 Kiro-style Spec Driven Development implementation on AI-DLC (AI Development Life Cycle)
 
+## Conversation Guidelines
+- 常に日本語で会話する
+
 ## Project Context
 
 ### Paths
