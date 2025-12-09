@@ -188,7 +188,7 @@ class SEDTask4(pl.LightningModule):
         super(SEDTask4, self).__init__()
         self.hparams.update(hparams)
 
-        if self.hparams["net"]["use_wandb"]:
+        if self.hparams["wandb"]["use_wandb"]:
             self._init_wandb_project()
         else:
             # wandbを使わない場合はNoneに設定
@@ -424,7 +424,7 @@ class SEDTask4(pl.LightningModule):
             pass
 
     def _init_wandb_project(self) -> None:
-        wandb.init(project=PROJECT_NAME, name=self.hparams["net"]["wandb_dir"])
+        wandb.init(project=PROJECT_NAME, name=self.hparams["wandb"]["wandb_dir"])
 
         # wandb runディレクトリ内にcheckpointsディレクトリを作成
         # 結果: wandb/run-20250102_123456-abcd1234/checkpoints/
@@ -683,7 +683,6 @@ class SEDTask4(pl.LightningModule):
             predictions = predictions[mask]
             labels = labels[mask]
         metric(predictions, labels.long() if "f1" in metric_name else labels)
-
 
     def training_step(self, batch: TrainBatchType, batch_indx: int) -> torch.Tensor:  # type: ignore[override]
         """Apply the training for one batch (a step). Used during trainer.fit.
