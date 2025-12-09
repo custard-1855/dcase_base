@@ -752,7 +752,7 @@ def prepare_run(argv=None):
         configs["sebbs"]["enabled"] = args.sebbs
 
     # wandb
-    if args.wandb_dir is not None:
+    if args.use_wandb is not None:
         configs["wandb"]["use_wandb"] = args.use_wandb
     if args.wandb_dir is not None:
         configs["wandb"]["wandb_dir"] = args.wandb_dir
