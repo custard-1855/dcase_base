@@ -710,15 +710,38 @@ def prepare_run(argv=None):
     parser.add_argument(
         "--phi_frame",
         default=0.5,
+        type=float,
+        help="Frame-level threshold for CMT",
+    )
+    parser.add_argument(
+        "--phi_clip",
+        default=None,
+        type=float,
+        help="Clip-level threshold for CMT",
+    )
+    parser.add_argument(
+        "--phi_neg",
+        default=None,
+        type=float,
+        help="Negative sample threshold for CMT confidence weighting",
+    )
+    parser.add_argument(
+        "--phi_pos",
+        default=None,
+        type=float,
+        help="Positive sample threshold for CMT confidence weighting",
     )
     parser.add_argument(
         "--warmup_epochs",
         default=0,
+        type=int,
+        help="Number of warmup epochs for CMT",
     )
     parser.add_argument(
         "--use_neg_sample",
         action="store_true",
         default=False,
+        help="Use negative sampling in CMT confidence weighting",
     )
 
     # MixStyle
@@ -783,6 +806,12 @@ def prepare_run(argv=None):
         configs["cmt"]["enabled"] = args.cmt
     if args.cmt is not None:
         configs["cmt"]["phi_frame"] = args.phi_frame
+    if args.phi_clip is not None:
+        configs["cmt"]["phi_clip"] = args.phi_clip
+    if args.phi_neg is not None:
+        configs["cmt"]["phi_neg"] = args.phi_neg
+    if args.phi_pos is not None:
+        configs["cmt"]["phi_pos"] = args.phi_pos
     if args.cmt is not None:
         configs["cmt"]["warmup_epochs"] = args.warmup_epochs
     if args.cmt is not None:
