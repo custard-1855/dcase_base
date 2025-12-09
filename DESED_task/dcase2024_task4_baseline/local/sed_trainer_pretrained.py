@@ -451,36 +451,7 @@ class SEDTask4(pl.LightningModule):
         )
         print(f"Detected execution mode: {self.execution_mode.value}")
 
-        # Legacy mode: --wandb_dir が指定されている場合（後方互換性）
-        if self.hparams["wandb"]["wandb_dir"] != "None":
-            print("Using legacy wandb_dir mode (ignoring execution mode)")
-            wandb.init(
-                project=PROJECT_NAME,
-                name=self.hparams["wandb"]["wandb_dir"],
-            )
-            if wandb.run is not None:
-                self._wandb_checkpoint_dir = os.path.join(wandb.run.dir, "checkpoints")
-                os.makedirs(self._wandb_checkpoint_dir, exist_ok=True)
-                print(f"Checkpoint directory: {self._wandb_checkpoint_dir}")
-
-                # ハイパーパラメータをWandBに保存
-                wandb.config.update(self.hparams, allow_val_change=True)
-                print("WandB config updated with hyperparameters")
-
-                # 設定ファイル自体をWandBに保存
-                if "config_file_path" in self.hparams and os.path.exists(
-                    self.hparams["config_file_path"],
-                ):
-                    wandb.save(
-                        self.hparams["config_file_path"],
-                        base_path=os.path.dirname(self.hparams["config_file_path"]),
-                    )
-                    print(f"Configuration file saved to WandB: {self.hparams['config_file_path']}")
-            else:
-                self._wandb_checkpoint_dir = None
-            return
-
-        # New mode: ExperimentConfig を使用
+        # ExperimentConfig を使用
         if "experiment" in self.hparams:
             exp_config = ExperimentConfig(**self.hparams["experiment"])
 
@@ -550,14 +521,12 @@ class SEDTask4(pl.LightningModule):
             else:
                 self._wandb_checkpoint_dir = None
         else:
-            # Default fallback（既存動作）
-            wandb.init(project=PROJECT_NAME)
-            if wandb.run is not None:
-                self._wandb_checkpoint_dir = os.path.join(wandb.run.dir, "checkpoints")
-                os.makedirs(self._wandb_checkpoint_dir, exist_ok=True)
-                print(f"Checkpoint directory: {self._wandb_checkpoint_dir}")
-            else:
-                self._wandb_checkpoint_dir = None
+            # experimentセクションが設定されていない場合はエラー
+            msg = (
+                "The 'experiment' section is required in the configuration YAML. "
+                "Please add an 'experiment' section with mode, category, method, and variant fields."
+            )
+            raise ValueError(msg)
 
     def lr_scheduler_step(self, scheduler: Any, optimizer_idx: int, metric: Any) -> None:
         scheduler.step()
@@ -911,22 +880,39 @@ class SEDTask4(pl.LightningModule):
         if cmt_active:
             # Apply CMT processing
             with torch.no_grad():
-                # Apply CMT postprocessing to teacher predictions
-                teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
-                    weak_preds_teacher[mask_consistency],
-                    strong_preds_teacher[mask_consistency],
-                    index_weak=indx_weak,
-                    phi_clip=self.phi_clip,
-                    phi_frame=self.phi_frame,
-                )
+                if self.use_neg_sample:
+                    # Apply CMT postprocessing to teacher predictions
+                    (
+                        teacher_pseudo_w,
+                        teacher_pseudo_s,
+                    ) = self.apply_cmt_postprocessing(
+                        weak_preds_teacher[mask_consistency],
+                        strong_preds_teacher[mask_consistency],
+                        index_weak=indx_weak,
+                    )
+                    # Compute confidence weights
+                    confidence_w, confidence_s = self.compute_cmt_confidence_weights(
+                        weak_preds_teacher[mask_consistency],
+                        strong_preds_teacher[mask_consistency],
+                        teacher_pseudo_w,
+                        teacher_pseudo_s,
+                        index_weak=indx_weak,
+                    )
+                else:
+                    # Apply CMT postprocessing to teacher predictions
+                    teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
+                        weak_preds_teacher[mask_consistency],
+                        strong_preds_teacher[mask_consistency],
+                        index_weak=indx_weak,
+                    )
 
-                # Compute confidence weights
-                confidence_w, confidence_s = self.compute_cmt_confidence_weights(
-                    weak_preds_teacher[mask_consistency],
-                    strong_preds_teacher[mask_consistency],
-                    teacher_pseudo_w,
-                    teacher_pseudo_s,
-                )
+                    # Compute confidence weights
+                    confidence_w, confidence_s = self.compute_cmt_confidence_weights(
+                        weak_preds_teacher[mask_consistency],
+                        strong_preds_teacher[mask_consistency],
+                        teacher_pseudo_w,
+                        teacher_pseudo_s,
+                    )
 
             # Compute CMT consistency loss with confidence weighting
             weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
@@ -978,33 +964,49 @@ class SEDTask4(pl.LightningModule):
         y_w: torch.Tensor,
         y_s: torch.Tensor,
         index_weak: int,
-        phi_clip: float = 0.5,
-        phi_frame: float = 0.5,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Apply Confident Mean Teacher postprocessing only unlabeled data.
 
         y_w: (batch, classes)
         y_s: (batch, classes, frames)
         """
-        # Step 1: Clip-level thresholding for unlabeled data
-        y_tilde_w = (y_w[index_weak:] > phi_clip).float()
+        y_w_unlabeled = y_w[index_weak:]  # (unlabeled_batch, classes)
+        y_s_unlabeled = y_s[index_weak:]  # (unlabeled_batch, classes, frames)
 
-        # Expand weak pseudo-labels to match strong shape: (batch, classes, 1) -> (batch, classes, frames)
-        y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s[index_weak:])
+        if self.use_neg_sample:
+            # Weak (clip-level)
+            y_tilde_w = torch.where(
+                y_w_unlabeled >= self.phi_pos,
+                torch.ones_like(y_w_unlabeled),  # 正例 → 1.0
+                torch.where(
+                    y_w_unlabeled <= self.phi_neg,
+                    torch.zeros_like(y_w_unlabeled),  # 負例 → 0.0
+                    y_w_unlabeled,  # 中間値 → そのまま（後で信頼度0）
+                ),
+            )
 
-        # Step 2 & 3: Frame-level thresholding with Weak constraint
-        y_s_binary = y_w_expanded * (y_s[index_weak:] > phi_frame).float()
+            # Strong (frame-level) - Weak制約なし、独立判定
+            y_s_binary = torch.where(
+                y_s_unlabeled >= self.phi_pos,
+                torch.ones_like(y_s_unlabeled),  # 正例 → 1.0
+                torch.where(
+                    y_s_unlabeled <= self.phi_neg,
+                    torch.zeros_like(y_s_unlabeled),  # 負例 → 0.0
+                    y_s_unlabeled,  # 中間値 → そのまま（後で信頼度0）
+                ),
+            )
 
-        # Step 4: Median filtering
+        else:
+            y_tilde_w = (y_w_unlabeled > self.phi_clip).float()  # clip
+            y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s_unlabeled)
+            y_s_binary = y_w_expanded * (y_s_unlabeled > self.phi_frame).float()  # frame
+
         y_tilde_s_list = []
         original_device = y_s.device
+        y_s_numpy = y_s_binary.detach().cpu().numpy()  # y_s_binary: (batch, classes, frames)
 
-        # y_s_binary: (batch, classes, frames)
-        y_s_numpy = y_s_binary.detach().cpu().numpy()
-
-        for i in range(y_s[index_weak:].shape[0]):
-            # (classes, frames) -> (frames, classes) に転置してフィルタ適用
-            sample = y_s_numpy[i].transpose(1, 0)
+        for i in range(y_s_unlabeled.shape[0]):
+            sample = y_s_numpy[i].transpose(1, 0)  # (classes, frames) -> (frames, classes)
             filtered = self.median_filter(sample)
             y_tilde_s_list.append(filtered)
 
@@ -1023,6 +1025,7 @@ class SEDTask4(pl.LightningModule):
         y_s: torch.Tensor,
         y_tilde_w: torch.Tensor,
         y_tilde_s: torch.Tensor,
+        index_weak: int,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute confidence weights based on teacher's certainty.
 
@@ -1030,29 +1033,42 @@ class SEDTask4(pl.LightningModule):
         """
         if self.use_neg_sample:
             # --- use neg_sample ---
-            # Weak Confidence:
-            c_w = torch.where(
-                y_tilde_w >= self.phi_pos,
-                y_tilde_w,  # pos以上: そのまま
-                torch.where(
-                    y_tilde_w <= self.phi_neg,
-                    1.0 - y_tilde_w,  # neg以下: 1-予測値
-                    0,  # 中間: 0
-                ),
+            # マスク生成
+            # マスク生成
+            pos_mask_w_unlabeled = (y_tilde_w[index_weak:] == 1.0).float()
+            neg_mask_w_unlabeled = (y_tilde_w[index_weak:] == 0.0).float()
+
+            # Labeled部分は1.0マスク（全てのサンプルを同等に扱う）
+            ones_mask_w = torch.ones_like(y_w[:index_weak])
+
+            pos_mask_w = torch.cat((ones_mask_w, pos_mask_w_unlabeled), dim=0)
+            neg_mask_w = torch.cat(
+                (torch.zeros_like(y_w[:index_weak]), neg_mask_w_unlabeled),
+                dim=0,
             )
 
-            # Strong Confidence:
-            c_s = torch.where(
-                y_tilde_s >= self.phi_pos,
-                y_tilde_s,  # pos以上: そのまま
-                torch.where(
-                    y_tilde_s <= self.phi_neg,
-                    1.0 - y_tilde_s,  # neg以下: 1-予測値
-                    0,  # 中間: 0
-                ),
+            # 信頼度計算
+            c_w_pos = pos_mask_w * y_w  # labeled部分: 1.0 * y_w = y_w
+            c_w_neg = neg_mask_w * (1.0 - y_w)  # labeled部分: 0
+            c_w = c_w_pos + c_w_neg
+
+            pos_mask_s_unlabeled = (y_tilde_s[index_weak:] == 1.0).float()
+            neg_mask_s_unlabeled = (y_tilde_s[index_weak:] == 0.0).float()
+
+            # Labeled部分は1.0マスク（全てのサンプルを同等に扱う）
+            ones_mask_s = torch.ones_like(y_s[:index_weak])
+
+            pos_mask_s = torch.cat((ones_mask_s, pos_mask_s_unlabeled), dim=0)
+            neg_mask_s = torch.cat(
+                (torch.zeros_like(y_s[:index_weak]), neg_mask_s_unlabeled),
+                dim=0,
             )
-            # フレーム重みに対し,clip重みは乗算しない. 確率もかけない. フレーム単独の信頼度を使う.
-            # 負例や正例の影響が過度に強くなる懸念があるため
+
+            # 信頼度計算
+            c_s_pos = pos_mask_s * y_s  # labeled部分: 1.0 * y_w = y_w
+            c_s_neg = neg_mask_s * (1.0 - y_s)  # labeled部分: 0
+            c_s = c_s_pos + c_s_neg
+
         else:
             # --- CMT ---
             c_w = y_w * y_tilde_w
@@ -1062,44 +1078,33 @@ class SEDTask4(pl.LightningModule):
         # 実装予定
         # 温度パラメータによる調整
 
-        if self.pos_neg_scale:  # 正例と負例の量を調整
-            # 正例と負例のマスクを作成
-            pos_mask_w = (y_tilde_w >= self.phi_pos).float()
-            neg_mask_w = (y_tilde_w <= self.phi_neg).float()
-
-            pos_mask_s = (y_tilde_s >= self.phi_pos).float()
-            neg_mask_s = (y_tilde_s <= self.phi_neg).float()
-
+        if self.use_neg_sample and self.pos_neg_scale:  # 正例と負例の量を調整
             # 正例と負例の総重みを計算
-            pos_sum_w = (c_w * pos_mask_w).sum().clamp(min=1e-6)
-            neg_sum_w = (c_w * neg_mask_w).sum().clamp(min=1e-6)
+            pos_sum_w = c_w_pos.sum().clamp(min=1e-6)
+            neg_sum_w = c_w_neg.sum().clamp(min=1e-6)
 
-            pos_sum_s = (c_s * pos_mask_s).sum().clamp(min=1e-6)
-            neg_sum_s = (c_s * neg_mask_s).sum().clamp(min=1e-6)
+            pos_sum_s = c_s_pos.sum().clamp(min=1e-6)
+            neg_sum_s = c_s_neg.sum().clamp(min=1e-6)
 
-            # 少ない方にスケーリング (少ない方を1.0に、多い方を縮小)
-            scale_factor_w = torch.where(
-                pos_sum_w < neg_sum_w,
-                neg_sum_w / pos_sum_w,  # 正例が少ない → 負例を縮小
-                pos_sum_w / neg_sum_w,  # 負例が少ない → 正例を縮小
-            )
-
-            scale_factor_s = torch.where(
-                pos_sum_s < neg_sum_s,
-                neg_sum_s / pos_sum_s,
-                pos_sum_s / neg_sum_s,
-            )
-
-            # スケーリングを適用
+            # 少ない方に合わせてスケーリング
             if pos_sum_w < neg_sum_w:
-                c_w = c_w * torch.where(neg_mask_w.bool(), 1.0 / scale_factor_w, 1.0)
+                # 負例が多い → 負例を縮小
+                scale_factor = neg_sum_w / pos_sum_w
+                c_w = c_w_pos + c_w_neg / scale_factor
             else:
-                c_w = c_w * torch.where(pos_mask_w.bool(), 1.0 / scale_factor_w, 1.0)
+                # 正例が多い → 正例を縮小
+                scale_factor = pos_sum_w / neg_sum_w
+                c_w = c_w_pos / scale_factor + c_w_neg
 
             if pos_sum_s < neg_sum_s:
-                c_s = c_s * torch.where(neg_mask_s.bool(), 1.0 / scale_factor_s, 1.0)
+                scale_factor = neg_sum_s / pos_sum_s
+                c_s = c_s_pos + c_s_neg / scale_factor
             else:
-                c_s = c_s * torch.where(pos_mask_s.bool(), 1.0 / scale_factor_s, 1.0)
+                scale_factor = pos_sum_s / neg_sum_s
+                c_s = c_s_pos / scale_factor + c_s_neg
+
+            self.log("train/cmt/pos_neg_ratio_weak", pos_sum_w / neg_sum_w)
+            self.log("train/cmt/pos_neg_ratio_strong", pos_sum_s / neg_sum_s)
 
         return c_w, c_s
 
@@ -1136,6 +1141,11 @@ class SEDTask4(pl.LightningModule):
             loss_s_con = weighted_bce_s.sum() / num_nonzero_s
         else:
             loss_s_con = weighted_bce_s.mean()
+
+        self.log("train/cmt/confidence_weak_mean", confidence_w.mean())
+        self.log("train/cmt/confidence_weak_std", confidence_w.std())
+        self.log("train/cmt/confidence_strong_mean", confidence_s.mean())
+        self.log("train/cmt/confidence_strong_std", confidence_s.std())
 
         return loss_w_con, loss_s_con
 
