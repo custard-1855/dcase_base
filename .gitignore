@@ -159,3 +159,6 @@ wandb/
 .kiro
 .claude
 .serena
+
+tests
+.devcontainer/*.md

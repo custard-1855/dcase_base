@@ -19,7 +19,83 @@ We also have a [Troubleshooting page](./HELP.md).
 ## Installation
 
 The script `conda_create_environment.sh` is available to create an environment which runs the
-following code (recommended to run line by line in case of problems). 
+following code (recommended to run line by line in case of problems).
+
+## Development Container (Devcontainer)
+
+**Recommended for quick setup:** We provide a VS Code Development Container configuration that automatically sets up a complete development environment with all dependencies, tools, and configurations.
+
+### Overview
+
+The devcontainer provides:
+- **Automated Environment Setup**: Python 3.12, PyTorch Lightning 1.9.x, audio processing libraries (SoX, FFmpeg, libsndfile)
+- **Integrated Development Tools**: Ruff (linter/formatter), MyPy (type checker), pytest, pre-commit hooks
+- **AI Assistant Integration**: Claude Code CLI for development assistance
+- **One-Click Startup**: No manual dependency installation required
+
+### Prerequisites
+
+Before using the devcontainer, ensure you have:
+
+1. **Docker Desktop 20.10+** installed on your machine ([Download Docker Desktop](https://www.docker.com/products/docker-desktop/))
+2. **VS Code** with the [Dev Containers extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-containers)
+3. **GitHub CLI authentication**: Run `gh auth login` on your host machine (required for Git submodule initialization)
+
+### Setup Steps
+
+1. Clone the repository and navigate to the project directory
+2. Open the project in VS Code
+3. When prompted, click **"Reopen in Container"** (or run the command `Dev Containers: Reopen in Container` from the Command Palette)
+4. Wait for the container to build and start (initial build takes 5-7 minutes, subsequent builds ~1-2 minutes)
+5. The development environment is ready when you see "postCreateCommand completed" in the terminal
+
+### Basic Usage
+
+Once inside the devcontainer, you can run all standard commands:
+
+```bash
+# Download datasets (if not already downloaded)
+python generate_dcase_task4_2024.py --basedir="../../data"
+
+# Extract BEATs embeddings
+python extract_embeddings.py --output_dir ./embeddings
+
+# Train the baseline model (CPU-only in devcontainer)
+python train_pretrained.py
+
+# Run tests
+pytest
+
+# Visualize with UMAP
+python visualize/visualize_umap.py
+```
+
+**Note**: The devcontainer is configured for **CPU-only** development. For GPU training, use the traditional conda installation method.
+
+### Port Forwarding
+
+The devcontainer automatically forwards the following ports:
+- **6006**: TensorBoard (`tensorboard --logdir=exp/`)
+- **8080**: Optuna Dashboard (for hyperparameter tuning)
+
+### Data Persistence
+
+The following directories are mounted as Docker volumes for data persistence:
+- `data/` - Audio datasets
+- `embeddings/` - Pre-computed BEATs embeddings
+- `exp/` - Experiment outputs (checkpoints, logs)
+- `wandb/` - Weights & Biases artifacts (optional)
+
+### Troubleshooting
+
+For detailed troubleshooting, advanced configuration options, and FAQ, see [DEVCONTAINER_GUIDE.md](./DEVCONTAINER_GUIDE.md).
+
+Common issues:
+- **Git submodule initialization fails**: Ensure `gh auth login` was run on the host machine before starting the container
+- **Low memory warning**: Increase Docker Desktop memory limit to 8GB+ in Docker Desktop settings
+- **Disk space issues**: Run `docker volume prune` to clean up unused volumes
+
+---
 
 ## Downloading the Task Datasets
 
