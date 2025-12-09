@@ -84,8 +84,9 @@ def mix_style(content_feature): # ok
         return content_feature
 
     # 試験的に周波数で混合
-    content_mean = content_feature.mean(dim=(3), keepdim=True)
-    content_var = content_feature.var(dim=(3), keepdim=True)
+    # 実験のため2に戻す
+    content_mean = content_feature.mean(dim=(2), keepdim=True)
+    content_var = content_feature.var(dim=(2), keepdim=True)
     content_std = (content_var + 1e-6).sqrt()
 
     content_mean, content_std = content_mean.detach(), content_std.detach()
