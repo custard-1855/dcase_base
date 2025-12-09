@@ -18,7 +18,7 @@ cmt:
 sebbs:
   enabled: false
 
-wamdb:
+wandb:
   use_wandb: False
   wandb_dir: "None"
 
