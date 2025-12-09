@@ -1,423 +1,518 @@
-# Gap Analysis: refactor-experiment-structure
+# ギャップ分析: 実験ディレクトリ構造リファクタリング
 
-## Analysis Summary
+## 1. 現状調査サマリー
 
-**スコープ**: wandbのデフォルトディレクトリ構造から、カスタム階層的実験ディレクトリ構造への移行
+### 既存のディレクトリ構造
 
-**主要な課題**:
-- wandb統合コードの変更（現在wandb.initで自動ディレクトリ生成）
-- チェックポイント、推論結果、可視化ツールの複数箇所への散在したパス参照
-- 設定ファイル駆動の実験命名システムの不在
-- 既存の3つの異なる出力ディレクトリ（`wandb/`, `exp/`, `visualize/visualization_outputs/`）の統合
+現在のプロジェクトでは、以下のような実験成果物の保存構造が採用されている:
 
-**推奨アプローチ**: Hybrid (Option C) - 既存コンポーネントの拡張と新規パス管理モジュールの作成
-
----
-
-## 1. Current State Investigation
-
-### 1.1 Key Files and Directory Layout
-
-**実験管理関連の主要ファイル**:
-- `local/sed_trainer_pretrained.py`: PyTorch Lightning module（wandb初期化、チェックポイント管理）
-- `train_pretrained.py`: トレーニングエントリーポイント（ModelCheckpoint設定、ロガー初期化）
-- `confs/pretrained.yaml`: 設定ファイル（wandb関連設定を含む）
-- `visualize/get_features/extract_inference_features.py`: 推論結果の保存
-- `visualize/visualize_*.py`: 可視化スクリプト（UMAP、信頼性ダイアグラム、Grad-CAM）
-
-**現在の出力ディレクトリ構造**:
 ```
 DESED_task/dcase2024_task4_baseline/
-├── exp/                          # TensorBoardLogger default output
-│   └── {experiment_name}/
-├── wandb/                        # wandb default structure
-│   └── run-{timestamp}-{id}/
-│       ├── files/
-│       └── checkpoints/          # カスタム追加（_init_wandb_project内）
-└── visualize/
-    ├── inference_outputs/        # 推論結果（暗黙的）
-    │   └── {model_name}/
-    └── visualization_outputs/    # 可視化結果（ハードコード）
-        ├── umap/
-        ├── reliability/
-        └── gradcam/
+├── exp/
+│   └── 2024_baseline/               # TensorBoard logger による命名
+│       └── version_X/               # 自動バージョニング
+│           ├── checkpoints/
+│           └── hparams.yaml
+├── wandb/
+│   ├── run-{timestamp}-{id}/        # wandbデフォルト形式
+│   │   ├── checkpoints/             # 新規追加された統合ディレクトリ
+│   │   ├── files/
+│   │   └── logs/
+│   └── latest-run -> symlink
+├── visualize/get_features/
+│   ├── inference_configs/
+│   └── inference_outputs/           # 推論結果（手動管理）
+└── output/                          # カスタム出力（用途不明瞭）
 ```
 
-### 1.2 Dominant Architecture Patterns
+### 既存のwandb統合状況
 
-**パス生成パターン**:
-1. **wandb自動ディレクトリ生成** (`sed_trainer_pretrained.py:412-418`):
-   ```python
-   wandb.init(project=PROJECT_NAME, name=self.hparams["net"]["wandb_dir"])
-   self._wandb_checkpoint_dir = os.path.join(wandb.run.dir, "checkpoints")
-   os.makedirs(self._wandb_checkpoint_dir, exist_ok=True)
-   ```
+#### train_pretrained.py (lines 504-508, 539-545)
+```python
+logger = TensorBoardLogger(
+    os.path.dirname(config["log_dir"]),
+    config["log_dir"].split("/")[-1],
+)
 
-2. **TensorBoardLogger使用** (`train_pretrained.py:504-508`):
-   ```python
-   logger = TensorBoardLogger(
-       os.path.dirname(config["log_dir"]),
-       config["log_dir"].split("/")[-1],
-   )
-   ```
-
-3. **ModelCheckpoint動的ディレクトリ設定** (`train_pretrained.py:540-544`):
-   ```python
-   if hasattr(desed_training, '_wandb_checkpoint_dir') and desed_training._wandb_checkpoint_dir:
-       checkpoint_dir = desed_training._wandb_checkpoint_dir
-   else:
-       checkpoint_dir = logger.log_dir
-   ```
-
-4. **可視化ツールのハードコードパス** (`visualize_umap.py:9-10`):
-   ```python
-   --input_dirs inference_outputs/baseline inference_outputs/cmt_normal
-   --output_dir visualization_outputs/umap
-   ```
-
-**依存関係パターン**:
-- PyTorch Lightning → wandb/TensorBoard → ファイルシステム
-- 可視化ツール → 推論結果の暗黙的パス（`inference_outputs/`）
-- チェックポイントローダー → `inference_metadata.json`内のチェックポイントパス
-
-### 1.3 Integration Surfaces
-
-**現在の統合ポイント**:
-- `SEDTask4._init_wandb_project()`: wandb初期化とチェックポイントディレクトリ作成
-- `train_pretrained.py:single_run()`: ロガーとコールバック設定
-- `ModelCheckpoint`: チェックポイント保存パス
-- 可視化スクリプト: `--input_dirs`引数でデータロード
-
-**データフロー**:
-```
-設定ファイル (YAML)
-    ↓
-train_pretrained.py (ロガー初期化、checkpoint_dir決定)
-    ↓
-SEDTask4 (wandb.init、_wandb_checkpoint_dir設定)
-    ↓
-ModelCheckpoint (best.ckpt保存)
-    ↓
-推論スクリプト (inference_metadata.json生成)
-    ↓
-可視化スクリプト (結果ロード、可視化出力)
+# wandbが有効な場合はwandbのcheckpointディレクトリを使用
+if hasattr(desed_training, '_wandb_checkpoint_dir') and desed_training._wandb_checkpoint_dir:
+    checkpoint_dir = desed_training._wandb_checkpoint_dir
+else:
+    checkpoint_dir = logger.log_dir
 ```
 
----
+#### sed_trainer_pretrained.py (lines 182-186, 417-441)
+```python
+if self.hparams["net"]["use_wandb"]:
+    self._init_wandb_project()
+else:
+    self._wandb_checkpoint_dir: str | None = None
 
-## 2. Requirements Feasibility Analysis
+def _init_wandb_project(self) -> None:
+    wandb.init(project=PROJECT_NAME, name=self.hparams["net"]["wandb_dir"])
 
-### 2.1 Requirements Mapping
+    if wandb.run is not None:
+        self._wandb_checkpoint_dir = os.path.join(wandb.run.dir, "checkpoints")
+        os.makedirs(self._wandb_checkpoint_dir, exist_ok=True)
+```
 
-#### Requirement 1: 階層的実験ディレクトリ構造
+**重要な発見**:
+- wandbの `name` パラメータにコマンドライン引数 `--wandb_dir` が直接渡されている
+- これが実質的な「実験名」として機能しているが、階層的構造は未サポート
+- wandbは内部的に `run-{timestamp}-{id}` 形式のディレクトリを作成
+- チェックポイントは `wandb.run.dir/checkpoints/` に保存されるよう修正済み
 
-**技術的ニーズ**:
-- パス生成ロジック: `experiments/{category}/{method}/{variant}/`
-- ディレクトリ検証: ファイルシステム互換性チェック
-- 衝突解決: タイムスタンプ/カウンター追加ロジック
+### 実験命名の現状
 
-**Gaps**:
-- ❌ **Missing**: カスタムディレクトリレイアウト生成ロジック（現在wandb/exp固定）
-- ❌ **Missing**: ファイル名検証ユーティリティ（OS依存の無効文字チェック）
-- ⚠️ **Constraint**: PyTorch Lightning 1.9.xの`Trainer.logger`との互換性保持
+#### コマンドライン引数による制御 (run_exp_cmt.sh, train_pretrained.py)
+```bash
+# run_exp_cmt.sh (line 4, 40)
+BASE_WANDB_DIR="150/cmt_apply-unlabeled/"
+uv run train_pretrained.py \
+    --wandb_dir ${BASE_WANDB_DIR}/CMT_use_neg_sample \
+    --cmt --use_neg_sample
 
-**実現可能性**: ✅ **High** - 既存のパス操作パターン（`os.makedirs`使用42箇所）を拡張可能
+# train_pretrained.py (lines 702-738)
+parser.add_argument("--wandb_dir")
+if args.wandb_dir is not None:
+    configs["net"]["wandb_dir"] = args.wandb_dir
+```
 
----
+**実験命名パターンの実態**:
+- スラッシュ区切りで疑似的な階層構造を表現: `"150/cmt_apply-unlabeled/CMT_use_neg_sample"`
+- しかし、ファイルシステム上は `wandb/run-{timestamp}-{id}/` という平坦な構造
+- 階層情報はwandb UIのrun名としてのみ保持される
 
-#### Requirement 2: 実験成果物の統合管理
+### 設定ファイルの現状 (pretrained.yaml)
 
-**技術的ニーズ**:
-- サブディレクトリ構造: `checkpoints/`, `metrics/`, `inference/`, `visualizations/`, `config/`
-- マニフェスト生成: 実験終了時のアーティファクトメタデータ
+```yaml
+net:
+  use_wandb: False                   # デフォルトではwandb無効
+  wandb_dir: "None"                  # 文字列 "None"（実質未設定）
 
-**Gaps**:
-- ❌ **Missing**: 統合ディレクトリ構造（現在3箇所に散在）
-- ❌ **Missing**: アーティファクトマニフェスト生成ロジック
-- ⚠️ **Constraint**: TensorBoard/wandb既存ログとの互換性
+# 実験パラメータはYAMLに直接記載
+cmt:
+  enabled: False
+  phi_frame: 0.5
+sebbs:
+  enabled: false
+```
 
-**実現可能性**: ✅ **Medium-High** - 既存の保存ロジックをラップして統合可能だが、複数箇所の修正が必要
-
----
-
-#### Requirement 3: wandb統合とパス解決
-
-**技術的ニーズ**:
-- wandb `dir`パラメータオーバーライド
-- シンボリックリンク/メタデータマッピング（run ID ↔ 実験パス）
-- ヘルパー関数: `get_checkpoint_dir()`, `get_inference_dir()`
-
-**Gaps**:
-- ❌ **Missing**: パス解決システム（現在は属性直接参照）
-- ⚠️ **Unknown**: wandbの`dir`パラメータ使用時の既存機能への影響（トラッキング、自動アップロード）
-- ✅ **Existing**: `_wandb_checkpoint_dir`属性（部分的解決）
-
-**実現可能性**: ⚠️ **Medium** - wandb APIとの統合テストが必要（Research Needed）
-
-**Research Needed**:
-- wandb.init(dir=...)使用時のファイル同期動作
-- シンボリックリンク vs メタデータファイルの性能トレードオフ
-
----
-
-#### Requirement 4: 設定駆動の実験命名
-
-**技術的ニーズ**:
-- YAML設定拡張: `experiment.category`, `experiment.method`, `experiment.variant`
-- テンプレート展開: `{method}_{variant}_{timestamp}`
-- 環境変数展開: `$SCRATCH_DIR/experiments`
-
-**Gaps**:
-- ❌ **Missing**: 実験命名設定スキーマ（現在`wandb_dir`のみ）
-- ❌ **Missing**: テンプレート展開ロジック
-- ✅ **Existing**: YAML設定読み込み基盤（`train_pretrained.py:707-708`）
-
-**実現可能性**: ✅ **High** - 既存の設定システムを拡張するのみ
+**設定駆動の実装状況**:
+- CMT/SEBBsなどの実験パラメータはYAMLで管理可能
+- しかし、実験名の階層構造（category/method/variant）はYAMLに記載されていない
+- コマンドライン引数が実質的な実験名制御手段となっている
 
 ---
 
-### 2.2 Complexity Signals
+## 2. 要件と既存資産のマッピング
 
-**タスクタイプ**: Workflow (複数コンポーネント間の連携変更)
+### Requirement 1: 階層的実験ディレクトリ構造
 
-**複雑度指標**:
-- 変更が必要なファイル数: 5-8ファイル（trainer, train script, visualize scripts, config）
-- 統合ポイント数: 4箇所（wandb, TensorBoard, ModelCheckpoint, visualize tools）
-- 外部依存: wandb, PyTorch Lightning, pathlib/os
+| 受入基準 | 既存資産 | ギャップ |
+|---------|---------|---------|
+| AC1: `experiments/{category}/{method}/{variant}/` 構造を作成 | ❌ なし | **Missing** - ディレクトリ作成ロジックが存在しない |
+| AC2: 親ディレクトリの自動作成 | ⚠️ `os.makedirs(self._wandb_checkpoint_dir, exist_ok=True)` (L424) | **Extend** - wandb内部用、汎用化が必要 |
+| AC3: 3階層サポート (category/method/variant) | ❌ なし | **Missing** - 階層構造の概念がない |
+| AC4: ファイルシステム互換性検証 | ❌ なし | **Missing** - パス検証機能が未実装 |
+| AC5: 同一階層での一意性確保（タイムスタンプ/カウンタ付加） | ✅ wandb自動生成: `run-{timestamp}-{id}` | **Constraint** - wandbの命名規則と統合が必要 |
+
+**分析**:
+- 既存のwandb統合は平坦な構造を前提としている
+- 階層的構造の実装は新規機能として追加が必要
+- wandbの自動ID生成機能は維持すべき（一意性保証のため）
+
+### Requirement 2: 実験成果物の統合管理
+
+| 受入基準 | 既存資産 | ギャップ |
+|---------|---------|---------|
+| AC1: `{experiment_dir}/checkpoints/` にチェックポイント保存 | ✅ `self._wandb_checkpoint_dir` (L423-424) | **Extend** - wandb専用、汎用化が必要 |
+| AC2: `{experiment_dir}/metrics/` にメトリクス保存 | ⚠️ wandb.log() による自動保存 | **Integrate** - ファイルとして保存する仕組みが必要 |
+| AC3: `{experiment_dir}/inference/` に推論結果保存 | ⚠️ `visualize/get_features/inference_outputs/` (分離) | **Relocate** - 実験ディレクトリ内に移動 |
+| AC4: `{experiment_dir}/visualizations/` に可視化保存 | ⚠️ `visualize/` 配下に分散 | **Relocate** - 実験ディレクトリ内に移動 |
+| AC5: `{experiment_dir}/config/` に設定スナップショット保存 | ⚠️ wandb自動保存 + `hparams.yaml` | **Extend** - 明示的な設定保存機構 |
+| AC6: マニフェストファイル生成 | ❌ なし | **Missing** - 新規実装が必要 |
+
+**分析**:
+- チェックポイント管理は部分的に実装済み（wandb連携部分のみ）
+- メトリクスはwandb経由でクラウド保存されるが、ローカルファイルとしての保存は未実装
+- 推論結果と可視化は実験とは独立した場所に保存されている（構造的な分離）
+- マニフェストファイル生成は新規機能
+
+### Requirement 3: wandb統合とパス解決
+
+| 受入基準 | 既存資産 | ギャップ |
+|---------|---------|---------|
+| AC1: wandbデフォルトディレクトリを上書き | ⚠️ `wandb.init(name=...)` のみ | **Missing** - `dir` パラメータ未使用 |
+| AC2: 初期化時にカスタム `dir` パラメータを注入 | ❌ なし | **Missing** - 実装が必要 |
+| AC3: wandb run IDと実験パスのマッピング維持 | ⚠️ `wandb.run.dir` 使用 | **Constraint** - 逆方向マッピング（ID→パス）が未実装 |
+| AC4: パス解決ヘルパー関数提供 | ❌ なし | **Missing** - `get_checkpoint_dir()` 等の実装が必要 |
+| AC5: run IDからの実験パス解決（100ms以内） | ❌ なし | **Missing** - マッピングテーブルまたはメタデータファイルが必要 |
+
+**分析**:
+- 現在の実装は wandb の自動ディレクトリ作成に依存
+- カスタムディレクトリへの配置機能は未実装
+- パス解決機能が存在しないため、実験成果物の参照が困難
+
+### Requirement 4: 設定駆動の実験命名
+
+| 受入基準 | 既存資産 | ギャップ |
+|---------|---------|---------|
+| AC1: YAML設定で実験命名パラメータをサポート | ⚠️ 部分的: `cmt`, `sebbs` パラメータのみ | **Extend** - `category`, `method`, `variant` フィールドが必要 |
+| AC2: テンプレート機能（`{method}_{variant}_{timestamp}`） | ❌ なし | **Missing** - テンプレート展開機能が必要 |
+| AC3: 設定ロード時の命名パラメータ検証 | ❌ なし | **Missing** - バリデーション機能が必要 |
+| AC4: デフォルト値のフォールバック | ❌ なし | **Missing** - デフォルト値設定が必要 |
+| AC5: 環境変数置換（`$SCRATCH_DIR/experiments`） | ❌ なし | **Missing** - 環境変数展開機能が必要 |
+
+**分析**:
+- 現在の設定ファイルは実験パラメータの管理には対応
+- 実験命名の階層構造はコマンドライン引数に依存（YAMLには未記載）
+- テンプレート機能や環境変数置換は未実装
 
 ---
 
-## 3. Implementation Approach Options
+## 3. 実装アプローチの評価
 
-### Option A: Extend Existing Components
+### Option A: 既存コンポーネントの拡張
 
 **拡張対象ファイル**:
-- `local/sed_trainer_pretrained.py`: `_init_wandb_project()`メソッド拡張
-- `train_pretrained.py`: ロガー初期化部分の修正
-- `confs/pretrained.yaml`: 実験命名パラメータ追加
+1. `sed_trainer_pretrained.py` (L417-441: `_init_wandb_project`)
+2. `train_pretrained.py` (L504-508: logger設定, L539-545: checkpoint_dir設定)
+
+**拡張内容**:
+```python
+# sed_trainer_pretrained.py
+def _init_wandb_project(self) -> None:
+    # 新機能: 階層的実験パスの構築
+    exp_path = self._build_experiment_path()  # category/method/variant
+
+    # wandbのdirパラメータに実験パスを指定
+    wandb.init(
+        project=PROJECT_NAME,
+        name=self.hparams["experiment"]["name"],
+        dir=exp_path,  # ← 新規追加
+    )
+
+    # サブディレクトリ作成
+    self._create_experiment_subdirs(exp_path)
+
+    # マッピングファイル生成
+    self._save_experiment_metadata(wandb.run.id, exp_path)
+```
 
 **互換性評価**:
-- ✅ 既存の`_wandb_checkpoint_dir`属性パターンを踏襲
-- ✅ YAML設定拡張は後方互換（デフォルト値提供）
-- ⚠️ wandb/TensorBoardロガーとの統合動作要確認
+- ✅ 既存のwandb連携コードを活用可能
+- ✅ TensorBoardLoggerとの共存が可能
+- ⚠️ wandb無効時のフォールバック処理が必要
+- ❌ `visualize/` 配下の推論スクリプトは別途修正が必要
 
-**複雑度と保守性**:
-- ✅ 最小限の新規ファイル（パス生成ユーティリティのみ追加）
-- ⚠️ `sed_trainer_pretrained.py`の責任範囲拡大（パス管理ロジック追加）
-- ⚠️ 可視化スクリプトは各々個別修正が必要
+**複雑性とメンテナンス性**:
+- **認知負荷**: 中程度 - `_init_wandb_project` の責務が増加（パス構築、マッピング管理）
+- **単一責任原則**: やや違反 - wandb初期化とディレクトリ管理が混在
+- **ファイルサイズ**: `sed_trainer_pretrained.py` が肥大化（現在 ~1400行 → 推定 ~1600行）
 
-**Trade-offs**:
-- ✅ 学習曲線が緩やか（既存パターン踏襲）
-- ✅ 既存インフラ（wandb/TensorBoard）活用
-- ❌ トレーナーモジュールの肥大化リスク
-- ❌ パス管理ロジックの再利用性低下
+**トレードオフ**:
+- ✅ 新規ファイル数が少ない（開発速度向上）
+- ✅ 既存のwandb統合パターンを踏襲（学習コスト低）
+- ❌ `SEDTask4` クラスの責務が過剰になる
+- ❌ 実験管理ロジックがLightningModuleに埋め込まれる（再利用性低下）
 
 ---
 
-### Option B: Create New Components
+### Option B: 新規コンポーネントの作成
 
-**新規作成コンポーネント**:
-- `local/experiment_manager.py`: 実験ディレクトリ構造管理クラス
-  ```python
-  class ExperimentManager:
-      def __init__(self, config: dict):
-          self.category = config["experiment"]["category"]
-          self.method = config["experiment"]["method"]
-          self.variant = config["experiment"]["variant"]
-          self.base_dir = Path(config["experiment"]["base_dir"])
-
-      def get_experiment_dir(self) -> Path: ...
-      def get_checkpoint_dir(self) -> Path: ...
-      def get_inference_dir(self) -> Path: ...
-      def get_visualization_dir(self) -> Path: ...
-      def create_manifest(self) -> None: ...
-  ```
-- `local/experiment_config.py`: 設定検証とテンプレート展開
-- `local/experiment_paths.py`: パス解決ヘルパー
+**新規作成ファイル**:
+```
+local/
+├── experiment_manager.py         # 実験ディレクトリ管理
+│   ├── ExperimentPathBuilder     # パス構築ロジック
+│   ├── ExperimentArtifactManager # 成果物保存・マニフェスト生成
+│   └── ExperimentMetadata        # run ID <-> パス マッピング
+└── config_utils.py               # 設定テンプレート展開
+    └── ExperimentConfigResolver   # YAML設定 + テンプレート + 環境変数
+```
 
 **統合ポイント**:
-- `SEDTask4.__init__()`: ExperimentManager初期化
-- `train_pretrained.py:single_run()`: ExperimentManagerからパス取得
-- 可視化スクリプト: `experiment_paths`ユーティリティインポート
+```python
+# sed_trainer_pretrained.py
+from local.experiment_manager import ExperimentPathBuilder, ExperimentArtifactManager
 
-**責任境界**:
-- `ExperimentManager`: ディレクトリ構造生成、アーティファクト管理
-- `SEDTask4`: モデルトレーニングロジック（パス管理から分離）
-- `experiment_paths`: 読み取り専用パス解決（可視化ツール向け）
+def _init_wandb_project(self) -> None:
+    # 実験パス構築を専用クラスに委譲
+    path_builder = ExperimentPathBuilder(self.hparams["experiment"])
+    exp_path = path_builder.build_path()
 
-**Trade-offs**:
-- ✅ 明確な責任分離（Single Responsibility Principle）
-- ✅ 可視化ツールでの再利用性高い
-- ✅ テスト容易性向上
-- ❌ 新規ファイル追加（学習コスト）
-- ❌ 既存コードとの統合箇所増加
+    wandb.init(project=PROJECT_NAME, name=path_builder.get_name(), dir=exp_path)
+
+    # 成果物管理を専用クラスに委譲
+    self.artifact_manager = ExperimentArtifactManager(exp_path)
+    self.artifact_manager.setup_directories()
+    self.artifact_manager.save_metadata(wandb.run.id)
+```
+
+**責務境界**:
+- **ExperimentPathBuilder**: 階層パス構築、一意性確保、パス検証
+- **ExperimentArtifactManager**: サブディレクトリ作成、成果物保存、マニフェスト生成
+- **ExperimentMetadata**: run ID <-> パス マッピングの永続化・検索
+- **SEDTask4**: 学習ロジック、メトリクス計算（実験管理から分離）
+
+**トレードオフ**:
+- ✅ 関心の分離が明確（テスト容易性向上）
+- ✅ 再利用性が高い（他プロジェクトへの展開可能）
+- ✅ `SEDTask4` の責務が軽減（単一責任原則）
+- ❌ ファイル数が増加（ナビゲーション複雑化）
+- ❌ インターフェース設計に時間が必要
 
 ---
 
-### Option C: Hybrid Approach ⭐ **Recommended**
+### Option C: ハイブリッドアプローチ
 
-**戦略**:
-1. **Phase 1**: コア機能実装（新規コンポーネント作成）
-   - `local/experiment_manager.py`: ExperimentManager作成
-   - `confs/pretrained.yaml`: 実験命名設定追加（デフォルト値で後方互換）
-   - `SEDTask4`: ExperimentManagerインスタンス化とwandб統合
+**段階的実装戦略**:
 
-2. **Phase 2**: 既存コンポーネント統合
-   - `train_pretrained.py`: ModelCheckpointパスをExperimentManager経由に変更
-   - `sed_trainer_pretrained.py`: `exp_dir`プロパティをExperimentManager.get_experiment_dir()にリダイレクト
+**Phase 1: 最小限の拡張（MVP）**
+- `sed_trainer_pretrained.py` に `_build_experiment_path()` メソッドを追加
+- wandb の `dir` パラメータをカスタムパスに設定
+- 基本的なサブディレクトリ作成（checkpoints/metrics/config のみ）
+- **対象要件**: Requirement 1 (AC1-3), Requirement 2 (AC1, AC5)
 
-3. **Phase 3**: 可視化ツール移行（段階的）
-   - `visualize/get_features/extract_inference_features.py`: 出力パスをExperimentManager経由に
-   - 他の可視化スクリプトは後方互換性保持（オプショナル引数で新パス対応）
+**Phase 2: マッピング機能の追加**
+- `local/experiment_metadata.py` を新規作成
+- run ID <-> パス マッピングの永続化
+- パス解決ヘルパー関数の実装
+- **対象要件**: Requirement 3 (AC3-5)
 
-**段階的実装理由**:
-- Phase 1で基盤完成（トレーニングワークフロー中断なし）
-- Phase 2でメインワークフロー移行
-- Phase 3は既存スクリプトを壊さない（段階的移行可能）
+**Phase 3: 成果物管理の統合**
+- `visualize/` スクリプトを修正し、実験ディレクトリ内に保存
+- マニフェストファイル生成機能
+- **対象要件**: Requirement 2 (AC3-4, AC6)
+
+**Phase 4: 設定駆動の実装**
+- `confs/pretrained.yaml` に `experiment` セクション追加
+- テンプレート展開と環境変数置換
+- **対象要件**: Requirement 4 (全AC)
 
 **リスク軽減**:
-- 設定にフィーチャーフラグ追加: `experiment.use_custom_structure: false` (デフォルト)
-- 既存の`wandb/`ディレクトリも並行利用可能（移行期間中）
-- ExperimentManager内でフォールバックロジック実装
+- ✅ 段階的なロールアウト（既存機能への影響を最小化）
+- ✅ 各フェーズで動作確認可能（増分テスト）
+- ✅ 必要に応じてリファクタリング（Phase 2以降で設計改善）
+- ⚠️ Phase 1が肥大化した場合、Phase 2でリファクタリングコストが発生
 
-**Trade-offs**:
-- ✅ 段階的ロールアウト（リスク分散）
-- ✅ 既存ワークフロー中断なし
-- ✅ 新規システムの段階的検証
-- ⚠️ 移行期間中の複雑性（2つのパスシステム併存）
-- ⚠️ フィーチャーフラグ管理のオーバーヘッド
-
----
-
-## 4. Implementation Complexity & Risk
-
-### Effort Estimation
-
-**Size**: **M (Medium, 3-7 days)**
-
-**内訳**:
-- ExperimentManager実装: 1-2日（ディレクトリ生成、マニフェスト、パス解決）
-- SEDTask4/train_pretrained統合: 1-2日（wandb統合、ModelCheckpoint修正）
-- 設定システム拡張: 0.5-1日（YAML検証、テンプレート展開）
-- 可視化ツール修正: 1-2日（3-4スクリプトのパス参照変更）
-- テスト・検証: 1日（統合テスト、既存実験との互換性確認）
-
-**根拠**: 既存パターン踏襲（`os.makedirs`パターン42箇所）により複雑なファイルシステム操作なし。wandb統合は既存コード（`_init_wandb_project`）をベースに拡張。
+**トレードオフ**:
+- ✅ 初期開発速度とメンテナンス性のバランス
+- ✅ リスク分散（段階的な検証）
+- ❌ 設計の一貫性が損なわれる可能性（Phase間で設計思想が変わるリスク）
+- ❌ 複数フェーズにわたる調整コスト
 
 ---
 
-### Risk Assessment
+## 4. 複雑性とリスクの評価
 
-**Risk Level**: **Medium**
+### 実装規模: M (Medium, 3-7日)
 
-**High-risk Areas**:
-1. **wandb統合の予期しない動作** (Medium)
-   - `wandb.init(dir=...)`使用時のファイル同期への影響不明
-   - **Mitigation**: 早期プロトタイプでwandб動作検証、公式ドキュメント確認
+**根拠**:
+- 既存の wandb 統合パターンは理解済み（調査完了）
+- パス構築ロジックは標準的な文字列操作（複雑性低）
+- 既存の `ModelCheckpoint` コールバックとの統合が必要（中程度の複雑性）
+- マッピングファイルの永続化は軽量（JSON/YAML形式で十分）
+- 推論スクリプトの修正は影響範囲が限定的
 
-2. **可視化ツールのパス依存** (Medium)
-   - `inference_outputs/`ディレクトリへのハードコード参照が複数箇所
-   - **Mitigation**: Phase 3で段階的移行、後方互換性保持
+**タスク分解**:
+1. 階層的パス構築ロジック (1日)
+2. wandb統合とサブディレクトリ作成 (1日)
+3. マッピング機能とヘルパー関数 (1日)
+4. 設定ファイル拡張とテンプレート展開 (1日)
+5. 推論スクリプト修正 (1日)
+6. テストとドキュメント (2日)
 
-3. **ModelCheckpointとwandbの相互作用** (Low-Medium)
-   - カスタムチェックポイントディレクトリとwandб自動アップロード
-   - **Mitigation**: `wandb.save()`明示的呼び出しで対応
+### リスク: Medium
 
-**Low-risk Areas**:
-- YAML設定拡張（既存システム安定）
-- ディレクトリ生成ロジック（標準ライブラリのみ使用）
-- パス解決ヘルパー（読み取り専用、副作用なし）
+**技術的リスク**:
+- **wandb の `dir` パラメータの挙動**: wandb は指定ディレクトリ配下に `wandb/run-*` を作成する可能性
+  - **軽減策**: wandb ドキュメント確認 + 事前検証実験
+- **PyTorch Lightning の ModelCheckpoint との統合**: チェックポイントパスの設定タイミングが不適切な場合、保存先が二重管理される
+  - **軽減策**: `train_pretrained.py` L539-545 の既存ロジックを踏襲
+- **既存実験との後方互換性**: wandb無効時のフォールバックが不適切な場合、既存の実験スクリプトが動作しなくなる
+  - **軽減策**: `use_wandb=False` 時は従来のTensorBoardLogger動作を保証
 
----
+**運用リスク**:
+- **ディレクトリ命名の一貫性**: 手動でのコマンドライン引数指定に依存すると、命名規則が統一されない
+  - **軽減策**: YAML設定に `experiment.category/method/variant` を必須化
+- **ディスク容量**: 実験成果物が統合管理されることで、1実験あたりのディスク使用量が増加
+  - **軽減策**: マニフェストファイルでサイズ監視、古い実験の自動アーカイブ機能（将来拡張）
 
-## 5. Recommendations for Design Phase
-
-### Preferred Approach
-
-**Option C (Hybrid)** を推奨:
-- Phase 1-2でコアワークフローを移行（Medium effort, Medium risk）
-- Phase 3の可視化ツール移行は後続タスクとして分離可能
-- フィーチャーフラグにより既存システムとの並行稼働
-
-### Key Decisions to Make in Design Phase
-
-1. **wandb統合戦略**:
-   - `wandb.init(dir=custom_path)` vs シンボリックリンク vs メタデータファイル
-   - wandбの既存機能（自動アップロード、run管理）への影響範囲
-
-2. **ディレクトリ構造詳細**:
-   - マニフェストファイル形式（JSON/YAML）
-   - メタデータ内容（タイムスタンプ、git commit hash、ハイパーパラメータ）
-
-3. **後方互換性ポリシー**:
-   - 既存の`wandb/`, `exp/`ディレクトリサポート期間
-   - 移行ツール提供の要否
-
-4. **エラーハンドリング**:
-   - ディレクトリ作成失敗時のフォールバック
-   - 無効な実験名のバリデーション
-
-### Research Items to Carry Forward
-
-1. **wandb API Deep Dive** (Priority: High):
-   - `dir`パラメータのドキュメント精読
-   - カスタムディレクトリ使用時のrun.dir動作
-   - 自動ファイル同期の挙動変化
-
-2. **Performance Impact** (Priority: Medium):
-   - シンボリックリンク vs メタデータファイルの読み取り性能
-   - 大量実験時のディレクトリ構造スキャン性能
-
-3. **Visualization Tool Integration** (Priority: Low):
-   - 既存スクリプトのパス参照パターン詳細調査
-   - 共通パス解決ライブラリの設計
+**スケジュールリスク**:
+- **推論スクリプトの影響範囲**: `visualize/` 配下の複数スクリプトが `inference_outputs/` を参照している場合、修正範囲が拡大
+  - **軽減策**: Grep で全参照箇所を特定済み（2ファイルのみ: `check_feature_properties.py`, `extract_inference_features.py`）
 
 ---
 
-## 6. Requirement-to-Asset Map
+## 5. 既知の制約と依存関係
 
-| Requirement | Existing Assets | Gap Status | Notes |
-|-------------|----------------|-----------|-------|
-| **Req 1.1**: `experiments/{category}/{method}/{variant}/` | `os.makedirs` (42 usages) | **Missing** | パターン存在、カスタムレイアウトロジック不在 |
-| **Req 1.2**: 親ディレクトリ自動作成 | `os.makedirs(..., exist_ok=True)` | ✅ **Exists** | `sed_trainer_pretrained.py:418` |
-| **Req 1.3**: 3階層サポート | - | **Missing** | 新規実装必要 |
-| **Req 1.4**: ファイル名検証 | - | **Missing** | pathlib.Path使用の基盤あり |
-| **Req 1.5**: 衝突解決（タイムスタンプ） | wandb run ID生成 | **Constraint** | wandbパターン参考可能 |
-| **Req 2.1**: checkpoints/ | `_wandb_checkpoint_dir` | ✅ **Partial** | wandb内のみ実装済 |
-| **Req 2.2**: metrics/ | TensorBoardLogger | **Constraint** | 既存ログとの統合必要 |
-| **Req 2.3**: inference/ | `visualize/get_features/` | **Constraint** | ハードコードパス変更必要 |
-| **Req 2.4**: visualizations/ | `visualization_outputs/` | **Constraint** | 3-4スクリプト修正 |
-| **Req 2.5**: config/ | `wandb.save(config_file)` | ✅ **Partial** | 拡張可能 |
-| **Req 2.6**: マニフェスト生成 | - | **Missing** | 新規実装 |
-| **Req 3.1**: wandb dir override | `wandb.init()` | **Unknown** | API調査必要 |
-| **Req 3.2**: wandb初期化時インジェクション | `_init_wandb_project()` | ✅ **Exists** | 拡張ポイント明確 |
-| **Req 3.3**: run ID ↔ パス マッピング | - | **Missing** | シンボリックリンク or JSON |
-| **Req 3.4**: ヘルパー関数 | `_wandb_checkpoint_dir` | **Missing** | 統一インターフェース化 |
-| **Req 3.5**: パス解決性能（<100ms） | - | **Unknown** | ベンチマーク必要（低優先度） |
-| **Req 4.1**: YAML命名パラメータ | `wandb_dir` | **Missing** | スキーマ拡張 |
-| **Req 4.2**: テンプレート展開 | - | **Missing** | str.format()で実装可能 |
-| **Req 4.3**: パラメータ検証 | `yaml.safe_load()` | ✅ **Exists** | バリデーション追加のみ |
-| **Req 4.4**: デフォルト値フォールバック | - | **Missing** | 設計必要 |
-| **Req 4.5**: 環境変数展開 | `os.environ` | ✅ **Exists** | `os.path.expandvars()`利用 |
+### アーキテクチャ制約
+
+1. **PyTorch Lightning フレームワーク**:
+   - `SEDTask4` は `pl.LightningModule` を継承
+   - `__init__` でのwandb初期化タイミングが固定（L182-186）
+   - **影響**: 実験パス構築ロジックも初期化時に実行する必要がある
+
+2. **wandb ライフサイクル**:
+   - `wandb.init()` は1プロセスにつき1回のみ呼び出し可能
+   - `wandb.run.dir` は初期化後に確定
+   - **影響**: パス構築は `wandb.init()` より前に完了する必要がある
+
+3. **TensorBoardLogger との共存**:
+   - `train_pretrained.py` L504-508 で TensorBoardLogger を明示的に使用
+   - wandb無効時はこれがメインのロガー
+   - **影響**: wandb無効時のフォールバックとして TensorBoardLogger の `log_dir` を使用
+
+### 既存の統合ポイント
+
+1. **ModelCheckpoint コールバック** (`train_pretrained.py` L554-561):
+   ```python
+   ModelCheckpoint(
+       checkpoint_dir,  # ← wandb有効時は _wandb_checkpoint_dir
+       monitor="val/obj_metric",
+       save_top_k=1,
+   )
+   ```
+   - **依存**: `checkpoint_dir` の値に基づいてファイルが保存される
+   - **統合要件**: 新しい実験ディレクトリ構造に合わせて `checkpoint_dir` を設定
+
+2. **コマンドライン引数解析** (`train_pretrained.py` L702-738):
+   ```python
+   parser.add_argument("--wandb_dir")
+   configs["net"]["wandb_dir"] = args.wandb_dir
+   ```
+   - **依存**: 既存の `--wandb_dir` 引数が実験名として機能
+   - **統合要件**: 新しい階層的命名規則との互換性を保つ
+
+3. **推論特徴量抽出** (`visualize/get_features/extract_inference_features.py`):
+   ```python
+   parser.add_argument("--output_dir", default="inference_outputs/baseline")
+   ```
+   - **依存**: 固定パスに推論結果を保存
+   - **統合要件**: 実験ディレクトリ内に動的にパスを生成する仕組みが必要
+
+### パフォーマンス制約
+
+- **AC5 (Requirement 3)**: run IDからの実験パス解決を100ms以内で実行
+  - **実装オプション**:
+    - JSON/YAMLマッピングファイル（単純、十分高速）
+    - SQLiteデータベース（オーバーキル）
+  - **推奨**: JSON形式のマッピングファイル（`experiments_metadata.json`）
 
 ---
 
-## 7. Gap Analysis Approach
+## 6. 要調査項目（Research Needed）
 
-本分析は `.kiro/settings/rules/gap-analysis.md` フレームワークに従って実施:
+以下の項目は設計フェーズで詳細調査が必要:
 
-- ✅ **Current State Investigation**: 5主要ファイル、42箇所のパス操作パターン特定
-- ✅ **Requirements Feasibility Analysis**: 4要件を19個の受入基準にマッピング
-- ✅ **Multiple Implementation Options**: 3アプローチ評価（Extend/New/Hybrid）
-- ✅ **Complexity & Risk Assessment**: M effort, Medium risk（根拠明示）
-- ✅ **Explicit Gaps**: 8 Missing, 6 Constraint, 3 Unknown（Research Needed明示）
+### 1. wandb の `dir` パラメータ挙動
+- **質問**: `wandb.init(dir="experiments/cat1/method1/var1")` を指定した場合、wandbは:
+  - a) `experiments/cat1/method1/var1/` 直下に成果物を保存するか
+  - b) `experiments/cat1/method1/var1/wandb/run-*` という階層を作成するか
+- **調査方法**: 小規模な検証スクリプトで実験
+- **設計への影響**: ディレクトリ構造の最終形に影響
+
+### 2. TensorBoardLogger と wandb の同時使用
+- **質問**: 両方のロガーが有効な場合、ログファイルの保存場所はどうなるか
+- **調査方法**: 既存コードで `use_wandb=True` かつ TensorBoardLogger 有効時の動作確認
+- **設計への影響**: ログファイルの統合管理方法
+
+### 3. 既存実験データの移行
+- **質問**: 既に `wandb/run-*/` 形式で保存された実験データを新構造に移行するか
+- **調査方法**: ステークホルダーへのヒアリング
+- **設計への影響**: マイグレーションスクリプトの必要性
+
+### 4. マニフェストファイルのスキーマ
+- **質問**: マニフェストに含めるメタデータの詳細（ファイルハッシュ、Git commit ID など）
+- **調査方法**: 類似プロジェクトのベストプラクティス調査（MLflow, DVC など）
+- **設計への影響**: マニフェスト生成ロジックの複雑性
 
 ---
 
-## Next Steps
+## 7. 推奨実装戦略と次ステップ
 
-1. **Gap Analysis Review**: 本ドキュメント確認とフィードバック
-2. **Proceed to Design**: `/kiro:spec-design refactor-experiment-structure` 実行
-3. **wandb Research**: 設計フェーズ前にwandб統合動作の簡易検証推奨
+### 推奨アプローチ: **Option C (ハイブリッド)** を採用
 
-**注**: 本分析は情報提供を目的とし、最終実装決定は設計フェーズで行う。複数の実現可能な選択肢を提示している。
+**理由**:
+1. **リスク分散**: 段階的実装により、各フェーズで動作確認が可能
+2. **柔軟性**: Phase 1で最小限の機能を提供し、フィードバックに基づいてPhase 2以降を調整
+3. **メンテナンス性**: Phase 2以降で新規コンポーネントを導入することで、最終的に Option B の設計品質を達成
+4. **開発速度**: Phase 1は既存コードの拡張で迅速に実装可能
+
+### Phase 1 実装スコープ (MVP)
+
+**含まれる機能**:
+- ✅ 階層的実験パス構築（`experiments/{category}/{method}/{variant}/`）
+- ✅ wandb の `dir` パラメータ設定
+- ✅ 基本サブディレクトリ作成（checkpoints/metrics/config）
+- ✅ 設定スナップショット保存
+- ✅ wandb無効時のフォールバック（TensorBoardLogger経由）
+
+**除外される機能** (Phase 2以降):
+- ❌ run ID <-> パス マッピング（手動での実験検索で代替）
+- ❌ 推論結果の自動統合（既存の `inference_outputs/` を継続使用）
+- ❌ マニフェストファイル生成
+- ❌ YAML設定のテンプレート展開
+
+**Phase 1 成功基準**:
+1. `--wandb_dir "category/method/variant"` を指定した場合、`experiments/category/method/variant/run-*/` が作成される
+2. チェックポイントが `experiments/category/method/variant/run-*/checkpoints/` に保存される
+3. 設定ファイルが `experiments/category/method/variant/run-*/config/` に保存される
+4. `use_wandb=False` の場合、従来通り `exp/2024_baseline/` に保存される
+
+### 設計フェーズへの引継ぎ事項
+
+**要調査項目の優先順位**:
+1. **高**: wandb `dir` パラメータの挙動（Phase 1実装に直接影響）
+2. **中**: 既存実験データの移行方針（ステークホルダー判断が必要）
+3. **低**: マニフェストスキーマ（Phase 3で詳細化）
+
+**設計判断が必要な項目**:
+- YAML設定の `experiment` セクションのスキーマ設計（category/method/variant の必須/任意）
+- コマンドライン引数とYAML設定の優先順位（引数 > YAML か、エラーにするか）
+- 一意性確保のためのタイムスタンプフォーマット（ISO 8601 vs Unix timestamp）
+
+**既存コードへの影響範囲**:
+- **低影響**: `sed_trainer_pretrained.py` (1メソッド追加、既存メソッド修正)
+- **低影響**: `train_pretrained.py` (checkpoint_dir設定箇所のみ)
+- **影響なし**: `desed_task/` (コアライブラリは変更不要)
+- **Phase 2以降**: `visualize/` (推論スクリプト群)
+
+---
+
+## 8. まとめ
+
+### ギャップ分析の結論
+
+現在のコードベースは、wandb統合の基礎は実装されているものの、**階層的な実験管理機能は全体的に欠落している**。以下の点が主要なギャップ:
+
+1. **ディレクトリ構造**: 平坦な `wandb/run-*` 形式 → 階層的な `experiments/{category}/{method}/{variant}/` への変換が必要
+2. **パス解決**: run ID から実験パスを引く仕組みが存在しない
+3. **成果物統合**: 推論結果・可視化が実験とは別の場所に保存されている
+4. **設定駆動**: 実験名の階層構造がYAMLに記載されておらず、コマンドライン引数に依存
+
+### 実装の実現可能性
+
+**実現可能**: すべての要件は既存技術スタックで実装可能
+- wandb の柔軟な設定オプション（`dir`, `name`）を活用
+- PyTorch Lightning の拡張ポイント（`__init__`, callbacks）を利用
+- 既存のYAML設定機構を拡張
+
+**推定工数**: **Medium (5-7日)**
+- Phase 1 MVP: 3日
+- テスト・調整: 2日
+- ドキュメント: 1日
+
+**推奨される次のステップ**:
+1. `/kiro:spec-design refactor-experiment-structure` を実行し、技術設計書を作成
+2. Phase 1 実装範囲の詳細設計（クラス設計、インターフェース定義）
+3. wandb `dir` パラメータの挙動検証（小規模実験）
+4. Phase 1 実装開始
+
+---
+
+**生成日時**: 2025-12-09
+**対象Specification**: refactor-experiment-structure
+**フェーズ**: Gap Analysis Complete → Design Phase Ready

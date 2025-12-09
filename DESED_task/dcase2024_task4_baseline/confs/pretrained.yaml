@@ -5,11 +5,15 @@ pretrained:
   extracted_embeddings_dir: ./embeddings
 
 cmt:
-  enabled: False          # CMTを有効化
-  phi_clip: 0.5             # クリップレベル閾値 (論文では0.5)
-  phi_frame: 0.5          # フレームレベル閾値 (論文では0.5)
+  enabled: False
+  phi_clip: 0.5
+  phi_frame: 0.5
+  phi_neg: 0.3
+  phi_pos: 0.7
   warmup_epochs: 0
   use_neg_sample: False
+  non_zero_scale: False
+  pos_neg_scale: False
 
 sebbs:
   enabled: false
