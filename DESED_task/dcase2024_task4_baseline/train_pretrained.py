@@ -618,7 +618,7 @@ def single_run(
             if isinstance(cb, ModelCheckpoint):
                 best_path = cb.best_model_path
                 break
-        print(f"best model: {best_path}")s
+        print(f"best model: {best_path}")
         torch.serialization.add_safe_globals([np._core.multiarray.scalar])
         test_state_dict = torch.load(best_path, weights_only=False)["state_dict"]
 
