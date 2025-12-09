@@ -18,6 +18,11 @@ cmt:
 sebbs:
   enabled: false
 
+wamdb:
+  use_wandb: False
+  wandb_dir: "None"
+
+
 training:  
   batch_size: [12, 6, 6, 12, 24]    # [maestro, synth, strong, weak, unlabel]
   batch_size_val: 24
@@ -145,6 +150,3 @@ net:
   attn_type: default
   attn_deepen: 2
   mixstyle_type: disable
-  # wandb
-  use_wandb: False
-  wandb_dir: "None"
