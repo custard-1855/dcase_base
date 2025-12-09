@@ -719,6 +719,7 @@ def prepare_run(argv=None):
     )
     parser.add_argument(
         "--wandb_dir",
+        default="None",
     )
 
     args = parser.parse_args(argv)
