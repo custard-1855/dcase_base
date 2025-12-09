@@ -1,22 +1,24 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
+
 # import random
 from torch.distributions.beta import Beta
 
-
 # ========== Attention Network Building Blocks ==========
+
 
 class ResidualConvBlock(nn.Module):
     """残差接続付き畳み込みブロック"""
+
     def __init__(self, channels, kernel_size=3):
         super().__init__()
         self.conv = nn.Sequential(
-            nn.Conv1d(channels, channels, kernel_size, padding=kernel_size//2),
+            nn.Conv1d(channels, channels, kernel_size, padding=kernel_size // 2),
             nn.BatchNorm1d(channels),
             nn.ReLU(),
-            nn.Conv1d(channels, channels, kernel_size, padding=kernel_size//2),
-            nn.BatchNorm1d(channels)
+            nn.Conv1d(channels, channels, kernel_size, padding=kernel_size // 2),
+            nn.BatchNorm1d(channels),
         )
         self.relu = nn.ReLU()
 
@@ -26,6 +28,7 @@ class ResidualConvBlock(nn.Module):
 
 class MultiScaleConvBlock(nn.Module):
     """マルチスケール畳み込みブロック（異なる受容野を並列処理）"""
+
     def __init__(self, in_channels, out_channels):
         super().__init__()
         # 異なるkernel sizeで周波数パターンを捉える
@@ -48,6 +51,7 @@ class MultiScaleConvBlock(nn.Module):
 
 class SEBlock(nn.Module):
     """Squeeze-and-Excitation Block (チャネルattention)"""
+
     def __init__(self, channels, reduction=4):
         super().__init__()
         self.squeeze = nn.AdaptiveAvgPool1d(1)  # Global average pooling
@@ -55,7 +59,7 @@ class SEBlock(nn.Module):
             nn.Linear(channels, max(channels // reduction, 1)),
             nn.ReLU(),
             nn.Linear(max(channels // reduction, 1), channels),
-            nn.Sigmoid()
+            nn.Sigmoid(),
         )
 
     def forward(self, x):
@@ -70,15 +74,16 @@ class SEBlock(nn.Module):
 
 # ========== MixStyle Function ==========
 
-def mix_style(content_feature): # ok
-    """
-    Args:
+
+def mix_style(content_feature):  # ok
+    """Args:
         content_feature (Tensor): スタイルを適用したい元の特徴量
             (batch_size, n_channels, n_frames, n_freq)
+
     Returns:
         Tensor: スタイルが適用された新しい特徴量
-    """
 
+    """
     p = 0.5
     if torch.rand(1).item() > p:
         return content_feature
@@ -99,31 +104,31 @@ def mix_style(content_feature): # ok
     mu2, sig2 = content_mean[perm], content_std[perm]
 
     # ランダムな比率で統計量を混ぜる
-    alpha = 0.1 # デフォルトは0.1
+    alpha = 0.1  # デフォルトは0.1
     lam = Beta(alpha, alpha).sample((B, 1, 1, 1))
     lam = lam.to(device=content_feature.device)
 
     mixed_mean = lam * content_mean + (1 - lam) * mu2
-    mixed_std = lam * content_std + (1 - lam) *  sig2
+    mixed_std = lam * content_std + (1 - lam) * sig2
 
     # 元の特徴量を新しい統計量で正規化・スケールし直す
-    return  content_normed * mixed_std + mixed_mean
+    return content_normed * mixed_std + mixed_mean
 
 
 class FrequencyAttentionMixStyle(nn.Module):
     def __init__(self, channels, **kwargs):
-        """
-        Args:
-            channels (int): 入力特徴量のチャンネル数
-            kwargs:
-                attn_type (str): attention network type
-                    - "default": 浅い2層CNN
-                    - "residual_deep": 残差接続で深いネットワーク
-                    - "multiscale": マルチスケール畳み込み
-                    - "se_deep": SE-Block組み込み深層ネットワーク
-                    - "dilated_deep": Dilated Convolution
-                attn_deepen (int): 深さ（層数）
-                mixstyle_type (str): MixStyleとの組み合わせ方
+        """Args:
+        channels (int): 入力特徴量のチャンネル数
+        kwargs:
+            attn_type (str): attention network type
+                - "default": 浅い2層CNN
+                - "residual_deep": 残差接続で深いネットワーク
+                - "multiscale": マルチスケール畳み込み
+                - "se_deep": SE-Block組み込み深層ネットワーク
+                - "dilated_deep": Dilated Convolution
+            attn_deepen (int): 深さ（層数）
+            mixstyle_type (str): MixStyleとの組み合わせ方
+
         """
         super().__init__()
         self.channels = channels
@@ -138,12 +143,14 @@ class FrequencyAttentionMixStyle(nn.Module):
 
         # Attention Networkの構築（attention_typeに応じて切り替え）
         self.attention_network = self._build_attention_network(
-            channels, specific_channels, self.attention_type, int(self.deepen)
+            channels,
+            specific_channels,
+            self.attention_type,
+            int(self.deepen),
         )
 
     def _build_attention_network(self, in_channels, mid_channels, attn_type, depth):
-        """
-        Attention Networkを構築
+        """Attention Networkを構築.
 
         Args:
             in_channels: 入力チャネル数
@@ -153,22 +160,22 @@ class FrequencyAttentionMixStyle(nn.Module):
 
         Returns:
             nn.Module: 構築されたattention network
-        """
 
+        """
         if attn_type == "default":
             # デフォルト: 浅い2層CNN
             return nn.Sequential(
                 nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
                 nn.ReLU(),
-                nn.Conv1d(mid_channels, in_channels, kernel_size=1)
+                nn.Conv1d(mid_channels, in_channels, kernel_size=1),
             )
 
-        elif attn_type == "residual_deep":
+        if attn_type == "residual_deep":
             # 残差接続で深いネットワーク
             layers = [
                 nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
                 nn.BatchNorm1d(mid_channels),
-                nn.ReLU()
+                nn.ReLU(),
             ]
 
             # 残差ブロックを複数積み重ね
@@ -180,88 +187,96 @@ class FrequencyAttentionMixStyle(nn.Module):
 
             return nn.Sequential(*layers)
 
-        elif attn_type == "multiscale":
+        if attn_type == "multiscale":
             # マルチスケール畳み込み
             layers = []
             layers.append(MultiScaleConvBlock(in_channels, mid_channels))
 
             # 追加の層
             for _ in range(depth - 1):
-                layers.extend([
-                    nn.Conv1d(mid_channels, mid_channels, kernel_size=3, padding=1),
-                    nn.BatchNorm1d(mid_channels),
-                    nn.ReLU()
-                ])
+                layers.extend(
+                    [
+                        nn.Conv1d(mid_channels, mid_channels, kernel_size=3, padding=1),
+                        nn.BatchNorm1d(mid_channels),
+                        nn.ReLU(),
+                    ],
+                )
 
             layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
 
             return nn.Sequential(*layers)
 
-        elif attn_type == "se_deep":
+        if attn_type == "se_deep":
             # SE-Block組み込み深層ネットワーク
             layers = [
                 nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
                 nn.BatchNorm1d(mid_channels),
-                nn.ReLU()
+                nn.ReLU(),
             ]
 
             # SE Blockを挟みながら層を深くする
             for _ in range(depth):
-                layers.extend([
-                    nn.Conv1d(mid_channels, mid_channels, kernel_size=3, padding=1),
-                    nn.BatchNorm1d(mid_channels),
-                    nn.ReLU(),
-                    SEBlock(mid_channels, reduction=4)
-                ])
+                layers.extend(
+                    [
+                        nn.Conv1d(mid_channels, mid_channels, kernel_size=3, padding=1),
+                        nn.BatchNorm1d(mid_channels),
+                        nn.ReLU(),
+                        SEBlock(mid_channels, reduction=4),
+                    ],
+                )
 
             layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
 
             return nn.Sequential(*layers)
 
-        elif attn_type == "dilated_deep":
+        if attn_type == "dilated_deep":
             # Dilated Convolution（広い受容野）
             layers = [
                 nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
                 nn.BatchNorm1d(mid_channels),
-                nn.ReLU()
+                nn.ReLU(),
             ]
 
             # Dilationを増やしながら層を深くする
             for i in range(depth):
-                dilation = 2 ** i  # 1, 2, 4, 8, ...
+                dilation = 2**i  # 1, 2, 4, 8, ...
                 padding = dilation  # dilationに応じてpaddingを調整
-                layers.extend([
-                    nn.Conv1d(mid_channels, mid_channels, kernel_size=3,
-                             padding=padding, dilation=dilation),
-                    nn.BatchNorm1d(mid_channels),
-                    nn.ReLU()
-                ])
+                layers.extend(
+                    [
+                        nn.Conv1d(
+                            mid_channels,
+                            mid_channels,
+                            kernel_size=3,
+                            padding=padding,
+                            dilation=dilation,
+                        ),
+                        nn.BatchNorm1d(mid_channels),
+                        nn.ReLU(),
+                    ],
+                )
 
             layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
 
             return nn.Sequential(*layers)
 
-        else:
-            raise ValueError(f"Unknown attention_type: {attn_type}. "
-                           f"Choose from ['default', 'residual_deep', 'multiscale', 'se_deep', 'dilated_deep']")
+        raise ValueError(
+            f"Unknown attention_type: {attn_type}. "
+            f"Choose from ['default', 'residual_deep', 'multiscale', 'se_deep', 'dilated_deep']",
+        )
 
     def forward(self, x_content):
-        """
-        Args:
-            x_content (Tensor): スタイル適用対象の特徴量 (Batch, Channels, Frame, Frequency)
-        """
+        """x_content (Tensor): スタイル適用対象の特徴量 (Batch, Channels, Frame, Frequency)."""
         x_mixed = mix_style(x_content)
 
         # 時間方向の平均をとり、周波数の静的な特徴を取得
-        x_avg = x_mixed.mean(dim=2) # 実際に使用するMixedの周波数で重要度を得る
+        x_avg = x_mixed.mean(dim=2)  # 実際に使用するMixedの周波数で重要度を得る
 
         # 周波数動的注意 重みを作成
-        # (B, C, F)
-        attn_logits = self.attention_network(x_avg)
+        attn_logits = self.attention_network(x_avg)  # (B, C, F)
 
         # Sigmoid関数で重みを0〜1の範囲に正規化
         # (B, C, F) -> (B, C, 1, F) に変形してブロードキャスト可能に
         attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
 
-        output = attn_weights * x_mixed + (1-attn_weights) * x_content
+        output = attn_weights * x_mixed + (1 - attn_weights) * x_content
         return output
