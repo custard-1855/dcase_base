@@ -61,51 +61,6 @@ echo "Part 1: Ablation Study Completed"
 echo "=========================================="
 echo ""
 
-
-# ================================================================================
-# Part 4: 閾値感度分析 - phi_neg & phi_pos の組み合わせ
-# ================================================================================
-echo "=========================================="
-echo "Part 4: Threshold Sensitivity Analysis - phi_neg & phi_pos"
-echo "=========================================="
-echo ""
-
-# phi_neg と phi_pos の組み合わせ
-# 形式: "phi_neg phi_pos"
-PHI_NEG_POS_COMBINATIONS=(
-    "0.2 0.8"
-    "0.3 0.7"
-    "0.4 0.6"
-    "0.5 0.5"
-)
-
-for i in "${!PHI_NEG_POS_COMBINATIONS[@]}"; do
-    combination=${PHI_NEG_POS_COMBINATIONS[$i]}
-    phi_neg=$(echo $combination | cut -d' ' -f1)
-    phi_pos=$(echo $combination | cut -d' ' -f2)
-
-    echo "[$((i+1))/${#PHI_NEG_POS_COMBINATIONS[@]}] Running: phi_neg=${phi_neg}, phi_pos=${phi_pos}"
-
-    uv run train_pretrained.py \
-        --wandb_dir ${BASE_WANDB_DIR}/sensitivity/phi_neg_${phi_neg}_pos_${phi_pos} \
-        --cmt \
-        --use_neg_sample \
-        --phi_frame 0.5 \
-        --phi_clip 0.5 \
-        --phi_neg ${phi_neg} \
-        --phi_pos ${phi_pos} \
-        2>&1 | tee ${LOG_DIR}/sensitivity_phi_neg_${phi_neg}_pos_${phi_pos}_${TIMESTAMP}.log
-
-    echo ""
-    echo "---"
-    echo ""
-done
-
-echo "=========================================="
-echo "Part 4: phi_neg & phi_pos Sensitivity Analysis Completed"
-echo "=========================================="
-echo ""
-
 # ================================================================================
 # 実験完了
 # ================================================================================
