@@ -7,7 +7,7 @@
   "approvals": {
     "requirements": {
       "generated": true,
-      "approved": false,
+      "approved": true,
       "note": "Requirement 5 (実行モード別のwandBログ管理) を追加。再承認が必要。"
     },
     "design": {

@@ -47,8 +47,17 @@ from .utils import batched_decode_preds, log_sedeval_metrics
 PROJECT_NAME = "SED-pl-noise"
 
 # Type Aliases for complex data structures
-# Batch structure returned by DataLoader and unpacked by _unpack_batch
-BatchType: TypeAlias = tuple[
+# Training batch structure (without filenames) - 5 elements
+TrainBatchType: TypeAlias = tuple[
+    torch.Tensor,  # audio: (batch_size, audio_length) waveform
+    torch.Tensor,  # labels: (batch_size, time_steps, num_classes) strong labels
+    torch.Tensor,  # padded_indxs: (batch_size,) padding mask
+    torch.Tensor,  # embeddings: (batch_size, embedding_dim, time_steps) BEATs features
+    torch.Tensor,  # valid_class_mask: (batch_size, num_classes) class validity mask
+]
+
+# Evaluation batch structure (with filenames) - 6 elements
+EvalBatchType: TypeAlias = tuple[
     torch.Tensor,  # audio: (batch_size, audio_length) waveform
     torch.Tensor,  # labels: (batch_size, time_steps, num_classes) strong labels
     torch.Tensor,  # padded_indxs: (batch_size,) padding mask
@@ -675,26 +684,12 @@ class SEDTask4(pl.LightningModule):
             labels = labels[mask]
         metric(predictions, labels.long() if "f1" in metric_name else labels)
 
-    def _unpack_batch(self, batch: BatchType) -> BatchType:
-        """Unpack batch data, handling e2e mode if needed.
 
-        Args:
-            batch: BatchType tuple with 6 elements
-
-        Returns:
-            BatchType: Unpacked batch tuple
-
-        """
-        if not self.hparams["pretrained"]["e2e"]:
-            return batch
-        # untested
-        raise NotImplementedError("E2E mode unpacking not yet implemented")
-
-    def training_step(self, batch: BatchType, batch_indx: int) -> torch.Tensor:
+    def training_step(self, batch: TrainBatchType, batch_indx: int) -> torch.Tensor:  # type: ignore[override]
         """Apply the training for one batch (a step). Used during trainer.fit.
 
         Args:
-            batch: torch.Tensor, batch input tensor
+            batch: TrainBatchType, 5-element batch tuple (without filenames)
             batch_indx: torch.Tensor, 1D tensor of indexes to know which data are present in each batch.
 
         Returns:
@@ -702,12 +697,10 @@ class SEDTask4(pl.LightningModule):
 
         Note:
             type: ignore[override] - PyTorch Lightning base class uses Any for batch parameter,
-            but we use specific BatchType for type safety in this implementation.
+            but we use specific TrainBatchType for type safety in this implementation.
 
         """
-        audio, labels, padded_indxs, embeddings, valid_class_mask = self._unpack_batch(
-            batch,
-        )
+        audio, labels, padded_indxs, embeddings, valid_class_mask = batch
 
         features = self.mel_spec(audio)
 
@@ -1046,19 +1039,17 @@ class SEDTask4(pl.LightningModule):
             self.sed_teacher,
         )
 
-    def validation_step(self, batch: BatchType, batch_indx: int) -> None:
+    def validation_step(self, batch: EvalBatchType, batch_indx: int) -> None:  # type: ignore[override]
         """Apply validation to a batch (step). Used during trainer.fit.
 
         Args:
-            batch: torch.Tensor, input batch tensor
+            batch: EvalBatchType, 6-element batch tuple (with filenames)
             batch_indx: torch.Tensor, 1D tensor of indexes to know which data are present in each batch.
 
         Returns:
 
         """
-        audio, labels, _, filenames, embeddings, valid_class_mask = self._unpack_batch(
-            batch,
-        )
+        audio, labels, _, filenames, embeddings, valid_class_mask = batch
 
         embeddings = self._process_embeddings(embeddings)
 
@@ -1451,19 +1442,17 @@ class SEDTask4(pl.LightningModule):
         checkpoint["sed_teacher"] = self.sed_teacher.state_dict()
         return checkpoint
 
-    def test_step(self, batch: BatchType, batch_indx: int) -> None:
+    def test_step(self, batch: EvalBatchType, batch_indx: int) -> None:  # type: ignore[override]
         """Apply Test to a batch (step), used only when (trainer.test is called).
 
         Args:
-            batch: torch.Tensor, input batch tensor
+            batch: EvalBatchType, 6-element batch tuple (with filenames)
             batch_indx: torch.Tensor, 1D tensor of indexes to know which data are present in each batch.
 
         Returns:
 
         """
-        audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = self._unpack_batch(
-            batch,
-        )
+        audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = batch
 
         embeddings = self._process_embeddings(embeddings)
 
