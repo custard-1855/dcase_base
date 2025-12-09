@@ -30,6 +30,7 @@ echo ""
 echo "[1/3] Running: Baseline (No CMT)"
 uv run train_pretrained.py \
     --wandb_dir ${BASE_WANDB_DIR}/ablation/baseline \
+    --use_wandb \
     2>&1 | tee ${LOG_DIR}/ablation_baseline_${TIMESTAMP}.log
 
 echo ""
@@ -40,6 +41,7 @@ echo ""
 echo "[2/3] Running: CMT without negative sampling"
 uv run train_pretrained.py \
     --wandb_dir ${BASE_WANDB_DIR}/ablation/cmt_no_neg \
+    --use_wandb \
     --cmt \
     2>&1 | tee ${LOG_DIR}/ablation_cmt_no_neg_${TIMESTAMP}.log
 
@@ -51,6 +53,7 @@ echo ""
 echo "[3/3] Running: CMT with negative sampling"
 uv run train_pretrained.py \
     --wandb_dir ${BASE_WANDB_DIR}/ablation/cmt_with_neg \
+    --use_wandb \
     --cmt \
     --use_neg_sample \
     2>&1 | tee ${LOG_DIR}/ablation_cmt_with_neg_${TIMESTAMP}.log
