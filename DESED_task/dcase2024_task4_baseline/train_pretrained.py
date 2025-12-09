@@ -40,6 +40,7 @@ def process_experiment_section(configs: dict) -> dict:
 
     Raises:
         ValueError: If experiment config validation fails
+
     """
     # Initialize experiment section if missing
     if "experiment" not in configs:
@@ -49,7 +50,9 @@ def process_experiment_section(configs: dict) -> dict:
     exp_config = ExperimentConfig(**configs["experiment"])
 
     # Log the experiment structure
-    structure = f"{exp_config.mode.value}/{exp_config.category}/{exp_config.method}/{exp_config.variant}"
+    structure = (
+        f"{exp_config.mode.value}/{exp_config.category}/{exp_config.method}/{exp_config.variant}"
+    )
     print(f"Experiment structure: {structure}")
 
     return configs
@@ -744,6 +747,19 @@ def prepare_run(argv=None):
         help="Use negative sampling in CMT confidence weighting",
     )
 
+    parser.add_argument(
+        "--non_zero_scale",
+        action="store_true",
+        default=False,
+        help="Apply non-zero normalization to CMT confidence weights",
+    )
+    parser.add_argument(
+        "--pos_neg_scale",
+        action="store_true",
+        default=False,
+        help="Balance positive and negative samples in CMT",
+    )
+
     # MixStyle
     parser.add_argument(
         "--attn_type",
@@ -771,17 +787,43 @@ def prepare_run(argv=None):
         action="store_true",
         default=False,
     )
-    parser.add_argument(
-        "--wandb_dir",
-        default="None",
-    )
 
-    # Execution mode (Task 3.2)
+    # Experiment structure (新方式)
     parser.add_argument(
         "--mode",
         choices=["train", "test", "inference", "feature_extraction"],
         default=None,
-        help="Explicit execution mode (overrides auto-detection)",
+        help="Execution mode (train/test/inference/feature_extraction)",
+    )
+    parser.add_argument(
+        "--category",
+        type=str,
+        default=None,
+        help="Experiment category (e.g., baseline, ablation, optimization)",
+    )
+    parser.add_argument(
+        "--method",
+        type=str,
+        default=None,
+        help="Method name (e.g., cmt, beats, sebbs)",
+    )
+    parser.add_argument(
+        "--variant",
+        type=str,
+        default=None,
+        help="Variant description (e.g., use_neg_sample, phi_0.5)",
+    )
+    parser.add_argument(
+        "--base_dir",
+        type=str,
+        default=None,
+        help="Base directory for experiments (default: experiments)",
+    )
+    parser.add_argument(
+        "--log_test_to_wandb",
+        action="store_true",
+        default=False,
+        help="Create wandb runs in test mode",
     )
 
     args = parser.parse_args(argv)
@@ -791,12 +833,27 @@ def prepare_run(argv=None):
     # WandB用に設定ファイルパスを保存
     configs["config_file_path"] = os.path.abspath(args.confs)
 
-    # Override experiment mode with CLI argument before processing (Task 3.2)
+    # Override experiment parameters with CLI arguments
+    if "experiment" not in configs:
+        configs["experiment"] = {}
+
     if args.mode is not None:
-        if "experiment" not in configs:
-            configs["experiment"] = {}
         configs["experiment"]["mode"] = args.mode
-        print(f"Explicit mode specified: {args.mode}")
+
+    if args.category is not None:
+        configs["experiment"]["category"] = args.category
+
+    if args.method is not None:
+        configs["experiment"]["method"] = args.method
+
+    if args.variant is not None:
+        configs["experiment"]["variant"] = args.variant
+
+    if args.base_dir is not None:
+        configs["experiment"]["base_dir"] = args.base_dir
+
+    if args.log_test_to_wandb:
+        configs["experiment"]["log_test_to_wandb"] = True
 
     # Process experiment section (Task 3.1)
     configs = process_experiment_section(configs)
@@ -816,6 +873,10 @@ def prepare_run(argv=None):
         configs["cmt"]["warmup_epochs"] = args.warmup_epochs
     if args.cmt is not None:
         configs["cmt"]["use_neg_sample"] = args.use_neg_sample
+    if args.cmt is not None:
+        configs["cmt"]["non_zero_scale"] = args.non_zero_scale
+    if args.cmt is not None:
+        configs["cmt"]["pos_neg_scale"] = args.pos_neg_scale
 
     # MixStyle
     if args.attn_type is not None:
@@ -829,15 +890,9 @@ def prepare_run(argv=None):
     if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs
 
-    # wandb (Task 3.3 - Legacy mode compatibility)
-    if args.use_wandb is not None:
-        configs["wandb"]["use_wandb"] = args.use_wandb
-    if args.wandb_dir is not None:
-        configs["wandb"]["wandb_dir"] = args.wandb_dir
-
-        # Task 3.3: Log warning when legacy mode coexists with experiment section
-        if "experiment" in configs and args.wandb_dir != "None":
-            print("Using legacy wandb_dir mode (ignoring execution mode)")
+    # wandb
+    if args.use_wandb:
+        configs["wandb"]["use_wandb"] = True
 
     evaluation = False
     test_from_checkpoint = args.test_from_checkpoint
