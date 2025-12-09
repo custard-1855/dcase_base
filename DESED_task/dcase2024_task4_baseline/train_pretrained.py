@@ -1,7 +1,6 @@
 import argparse
 import os
 
-
 import desed
 import numpy as np
 import pandas as pd
@@ -9,23 +8,21 @@ import pytorch_lightning as pl
 import torch
 import torchaudio
 import yaml
-from local.classes_dict import (classes_labels_desed,
-                                classes_labels_maestro_real,
-                                maestro_desed_alias)
-from local.resample_folder import resample_folder
-from local.sed_trainer_pretrained import SEDTask4
-from local.utils import (calculate_macs, generate_tsv_wav_durations,
-                         process_tsvs)
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger
-
 from desed_task.dataio import ConcatDatasetBatchSampler
-from desed_task.dataio.datasets import (StronglyAnnotatedSet, UnlabeledSet,
-                                        WeakSet)
+from desed_task.dataio.datasets import StronglyAnnotatedSet, UnlabeledSet, WeakSet
 from desed_task.nnet.CRNN import CRNN
 from desed_task.utils.encoder import CatManyHotEncoder, ManyHotEncoder
 from desed_task.utils.schedulers import ExponentialWarmup
-
+from local.classes_dict import (
+    classes_labels_desed,
+    classes_labels_maestro_real,
+    maestro_desed_alias,
+)
+from local.resample_folder import resample_folder
+from local.sed_trainer_pretrained import SEDTask4
+from local.utils import calculate_macs, generate_tsv_wav_durations, process_tsvs
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 
 
 def resample_data_generate_durations(config_data, test_only=False, evaluation=False):
@@ -48,14 +45,17 @@ def resample_data_generate_durations(config_data, test_only=False, evaluation=Fa
     for dset in dsets:
         print(f"Resampling {dset} to 16 kHz.")
         computed = resample_folder(
-            config_data[dset + "_44k"], config_data[dset], target_fs=config_data["fs"]
+            config_data[dset + "_44k"],
+            config_data[dset],
+            target_fs=config_data["fs"],
         )
 
     if not evaluation:
         for base_set in ["synth_val", "test"]:
             if not os.path.exists(config_data[base_set + "_dur"]) or computed:
                 generate_tsv_wav_durations(
-                    config_data[base_set + "_folder"], config_data[base_set + "_dur"]
+                    config_data[base_set + "_folder"],
+                    config_data[base_set + "_dur"],
                 )
 
 
@@ -97,7 +97,6 @@ def get_embeddings_name(config, name):
 
 
 def split_maestro(config, maestro_dev_df):
-
     np.random.seed(config["training"]["seed"])
     split_f = config["training"]["maestro_split"]
     for indx, scene_name in enumerate(
@@ -107,16 +106,10 @@ def split_maestro(config, maestro_dev_df):
             "grocery_store",
             "metro_station",
             "residential_area",
-        ]
+        ],
     ):
-
-        mask = (
-            maestro_dev_df["filename"].apply(lambda x: "_".join(x.split("_")[:-1]))
-            == scene_name
-        )
-        filenames = (
-            maestro_dev_df[mask]["filename"].apply(lambda x: x.split("-")[0]).unique()
-        )
+        mask = maestro_dev_df["filename"].apply(lambda x: "_".join(x.split("_")[:-1])) == scene_name
+        filenames = maestro_dev_df[mask]["filename"].apply(lambda x: x.split("-")[0]).unique()
         np.random.shuffle(filenames)
 
         pivot = int(split_f * len(filenames))
@@ -124,33 +117,27 @@ def split_maestro(config, maestro_dev_df):
         filenames_valid = filenames[pivot:]
         if indx == 0:
             mask_train = (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_train)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_train)
             )
             mask_valid = (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_valid)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_valid)
             )
             train_split = maestro_dev_df[mask_train]
             valid_split = maestro_dev_df[mask_valid]
         else:
             mask_train = (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_train)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_train)
             )
             mask_valid = (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_valid)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_valid)
             )
             train_split = pd.concat(
-                [train_split, maestro_dev_df[mask_train]], ignore_index=True
+                [train_split, maestro_dev_df[mask_train]],
+                ignore_index=True,
             )
             valid_split = pd.concat(
-                [valid_split, maestro_dev_df[mask_valid]], ignore_index=True
+                [valid_split, maestro_dev_df[mask_valid]],
+                ignore_index=True,
             )
 
     return train_split, valid_split
@@ -166,8 +153,7 @@ def single_run(
     evaluation=False,
     callbacks=None,
 ):
-    """
-    Running sound event detection baselin
+    """Running sound event detection baselin
 
     Args:
         config (dict): the dictionary of configuration params
@@ -178,6 +164,7 @@ def single_run(
             to be loaded to test the model.
         fast_dev_run (bool, optional): whether to use a run with only one batch at train and validation, useful
             for development purposes.
+
     """
     config.update({"log_dir": log_dir})
 
@@ -185,7 +172,6 @@ def single_run(
     seed = config["training"]["seed"]
     if seed:
         pl.seed_everything(seed, workers=True)
-
 
     def filter_nonexistent_files(df, folder):
         # folder: ファイルが格納されているディレクトリ
@@ -199,7 +185,7 @@ def single_run(
 
     mask_events_desed = set(classes_labels_desed.keys())
     mask_events_maestro_real = set(classes_labels_maestro_real.keys()).union(
-        set(["Speech", "Dog", "Dishes"])
+        set(["Speech", "Dog", "Dishes"]),
     )
 
     if not config["pretrained"]["freezed"]:
@@ -212,7 +198,7 @@ def single_run(
         assert config["pretrained"]["extracted_embeddings_dir"] is not None, (
             "If e2e is false, you have to download pretrained embeddings from {}"
             "and set in the config yaml file the path to the downloaded directory".format(
-                "REPLACE ME"
+                "REPLACE ME",
             )
         )
 
@@ -272,14 +258,16 @@ def single_run(
         assert config["data"]["fs"] == 16000, "this pretrained model is trained on 16k"
         feature_extraction = None  # integrated in the model
         desed.download_from_url(
-            config["pretrained"]["url"], config["pretrained"]["dest"]
+            config["pretrained"]["url"],
+            config["pretrained"]["dest"],
         )
         # use PANNs as additional feature
         from local.panns.models import Cnn14_16k
 
         pretrained = Cnn14_16k()
         pretrained.load_state_dict(
-            torch.load(config["pretrained"]["dest"])["model"], strict=False
+            torch.load(config["pretrained"]["dest"])["model"],
+            strict=False,
         )
     else:
         pretrained = None
@@ -302,7 +290,8 @@ def single_run(
         )
 
         maestro_real_devtest_tsv = pd.read_csv(
-            config["data"]["real_maestro_val_tsv"], sep="\t"
+            config["data"]["real_maestro_val_tsv"],
+            sep="\t",
         )
         # optionally we can map to desed some maestro classes
         maestro_real_devtest = StronglyAnnotatedSet(
@@ -318,7 +307,7 @@ def single_run(
             test=True,
         )
         devtest_dataset = torch.utils.data.ConcatDataset(
-            [desed_devtest_dataset, maestro_real_devtest]
+            [desed_devtest_dataset, maestro_real_devtest],
         )
     else:
         devtest_dataset = UnlabeledSet(
@@ -374,10 +363,12 @@ def single_run(
     )
 
     maestro_real_train_df = pd.read_csv(
-        config["data"]["real_maestro_train_tsv"], sep="\t"
+        config["data"]["real_maestro_train_tsv"],
+        sep="\t",
     )
     maestro_real_train_df, maestro_real_valid_df = split_maestro(
-        config, maestro_real_train_df
+        config,
+        maestro_real_train_df,
     )
 
     maestro_real_valid = StronglyAnnotatedSet(
@@ -400,10 +391,9 @@ def single_run(
         print(f"[Debug] synth_df length: {len(synth_df)}")
         print(f"[Debug] synth_df shape: {synth_df.shape}")
 
-        #synth_df = filter_missing(synth_df) # データ欠損対策
+        # synth_df = filter_missing(synth_df) # データ欠損対策
         print(f"[Debug] synth_df length: {len(synth_df)}")
         print(f"[Debug] synth_df shape: {synth_df.shape}")
-
 
         synth_set = StronglyAnnotatedSet(
             config["data"]["synth_folder"],
@@ -418,7 +408,7 @@ def single_run(
 
         strong_df = pd.read_csv(config["data"]["strong_tsv"], sep="\t")
         strnog_df = filter_nonexistent_files(strong_df, config["data"]["strong_folder"])
-        #strong_df = filter_missing(strong_df) # データ欠損対策
+        # strong_df = filter_missing(strong_df) # データ欠損対策
         strong_set = StronglyAnnotatedSet(
             config["data"]["strong_folder"],
             strong_df,
@@ -427,7 +417,7 @@ def single_run(
             feats_pipeline=feature_extraction,
             embeddings_hdf5_file=get_embeddings_name(config, "strong_train"),
             embedding_type=config["net"]["embedding_type"],
-            mask_events_other_than=mask_events_desed
+            mask_events_other_than=mask_events_desed,
         )
 
         weak_set = WeakSet(
@@ -452,7 +442,8 @@ def single_run(
         )
 
         maestro_real_train_processed = process_tsvs(
-            maestro_real_train_df, alias_map=maestro_desed_alias
+            maestro_real_train_df,
+            alias_map=maestro_desed_alias,
         )
         maestro_real_train = StronglyAnnotatedSet(
             config["data"]["real_maestro_train_folder"],
@@ -464,7 +455,6 @@ def single_run(
             embedding_type=config["net"]["embedding_type"],
             mask_events_other_than=mask_events_maestro_real,
         )
-
 
         strong_full_set = torch.utils.data.ConcatDataset([strong_set, synth_set])
         # this gives best configuration see https://github.com/DCASE-REPO/DESED_task/issues/92
@@ -484,7 +474,7 @@ def single_run(
                     * config["training"]["accumulate_batches"]
                 )
                 for indx in range(len(tot_train_data))
-            ]
+            ],
         )
 
         if config["pretrained"]["freezed"] or not config["pretrained"]["e2e"]:
@@ -497,8 +487,13 @@ def single_run(
         tot_steps = config["training"]["n_epochs"] * epoch_len
         decay_steps = config["training"]["epoch_decay"] * epoch_len
         exp_scheduler = {
-            "scheduler": ExponentialWarmup(opt, config["opt"]["lr"], exp_steps,
-                                           start_annealing=decay_steps, max_steps=tot_steps),
+            "scheduler": ExponentialWarmup(
+                opt,
+                config["opt"]["lr"],
+                exp_steps,
+                start_annealing=decay_steps,
+                max_steps=tot_steps,
+            ),
             "interval": "step",
         }
         logger = TensorBoardLogger(
@@ -515,9 +510,9 @@ def single_run(
         logger = True
 
     # calulate multiply–accumulate operation (MACs)
-    #macs, _ = calculate_macs(sed_student, config, test_dataset)
-    #print(f"---------------------------------------------------------------")
-    #print(f"Total number of multiply–accumulate operation (MACs): {macs}\n")
+    # macs, _ = calculate_macs(sed_student, config, test_dataset)
+    # print(f"---------------------------------------------------------------")
+    # print(f"Total number of multiply–accumulate operation (MACs): {macs}\n")
 
     desed_training = SEDTask4(
         config,
@@ -537,7 +532,10 @@ def single_run(
     # callbacksの設定（desed_training作成後に移動）
     if test_state_dict is None:
         # wandbが有効な場合はwandのcheckpointディレクトリを使用
-        if hasattr(desed_training, '_wandb_checkpoint_dir') and desed_training._wandb_checkpoint_dir:
+        if (
+            hasattr(desed_training, "_wandb_checkpoint_dir")
+            and desed_training._wandb_checkpoint_dir
+        ):
             checkpoint_dir = desed_training._wandb_checkpoint_dir
             print(f"Using wandb checkpoint directory: {checkpoint_dir}")
         else:
@@ -611,7 +609,7 @@ def single_run(
         # start tracking energy consumption
         trainer.fit(desed_training, ckpt_path=checkpoint_resume)
         print(f"callback: {trainer.callbacks}")
-        
+
         # ModelCheckpointのインスタンスからbest_model_pathを取得
         best_path = None
         for cb in trainer.callbacks:
@@ -626,8 +624,10 @@ def single_run(
     results = trainer.test(desed_training)[0]
 
     if "test/teacher/psds1/sed_scores_eval" in results:
-        return (results["test/teacher/psds1/sed_scores_eval"]
-            + results["test/teacher/segment_mpauc/sed_scores_eval"])
+        return (
+            results["test/teacher/psds1/sed_scores_eval"]
+            + results["test/teacher/segment_mpauc/sed_scores_eval"]
+        )
 
 
 def prepare_run(argv=None):
@@ -648,13 +648,14 @@ def prepare_run(argv=None):
         help="Allow the training to be resumed, take as input a previously saved model (.ckpt).",
     )
     parser.add_argument(
-        "--test_from_checkpoint", default=None, help="Test the model specified"
+        "--test_from_checkpoint",
+        default=None,
+        help="Test the model specified",
     )
     parser.add_argument(
         "--gpus",
         default="1",
-        help="The number of GPUs to train on, or the gpu to use, default='0', "
-        "so uses one GPU",
+        help="The number of GPUs to train on, or the gpu to use, default='0', so uses one GPU",
     )
     parser.add_argument(
         "--fast_dev_run",
@@ -664,47 +665,64 @@ def prepare_run(argv=None):
         "It uses very few batches and epochs so it won't give any meaningful result.",
     )
     parser.add_argument(
-        "--eval_from_checkpoint", default=None, help="Evaluate the model specified"
+        "--eval_from_checkpoint",
+        default=None,
+        help="Evaluate the model specified",
     )
     # 実験管理用
     # CMT
     parser.add_argument(
-        "--cmt", action="store_true", default=False
+        "--cmt",
+        action="store_true",
+        default=False,
     )
     parser.add_argument(
-        "--phi_frame", default=0.5
+        "--phi_frame",
+        default=0.5,
     )
     parser.add_argument(
-        "--warmup_epochs", default=0
+        "--warmup_epochs",
+        default=0,
     )
     parser.add_argument(
-        "--use_neg_sample", action="store_true", default=False
+        "--use_neg_sample",
+        action="store_true",
+        default=False,
     )
 
     # MixStyle
     parser.add_argument(
-        "--attn_type", default="default",
+        "--attn_type",
+        default="default",
     )
     parser.add_argument(
-        "--attn_deepen", 
+        "--attn_deepen",
         default=2,
     )
     parser.add_argument(
-        "--mixstyle_type", default="disabled",
+        "--mixstyle_type",
+        default="disabled",
     )
 
     # SEBBs
     parser.add_argument(
-        "--sebbs", action="store_true", default=False
+        "--sebbs",
+        action="store_true",
+        default=False,
     )
 
-    #wandb
+    # wandb
     parser.add_argument(
-        "--wandb_dir"
+        "--use_wandb",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--wandb_dir",
     )
 
     args = parser.parse_args(argv)
-    with open(args.confs, "r") as f:
+    with open(args.confs) as f:
         configs = yaml.safe_load(f)
 
     # WandB用に設定ファイルパスを保存
@@ -720,7 +738,6 @@ def prepare_run(argv=None):
     if args.cmt is not None:
         configs["cmt"]["use_neg_sample"] = args.use_neg_sample
 
-
     # MixStyle
     if args.attn_type is not None:
         configs["net"]["attn_type"] = args.attn_type
@@ -733,10 +750,11 @@ def prepare_run(argv=None):
     if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs
 
-    #wandb
+    # wandb
     if args.wandb_dir is not None:
-        configs["net"]["wandb_dir"] = args.wandb_dir
-
+        configs["wandb"]["use_wandb"] = args.use_wandb
+    if args.wandb_dir is not None:
+        configs["wandb"]["wandb_dir"] = args.wandb_dir
 
     evaluation = False
     test_from_checkpoint = args.test_from_checkpoint
@@ -752,8 +770,7 @@ def prepare_run(argv=None):
         configs_ckpt = checkpoint["hyper_parameters"]
         configs_ckpt["data"] = configs["data"]
         print(
-            f"loaded model: {test_from_checkpoint} \n"
-            f"at epoch: {checkpoint['epoch']}"
+            f"loaded model: {test_from_checkpoint} \nat epoch: {checkpoint['epoch']}",
         )
         test_model_state_dict = checkpoint["state_dict"]
 
