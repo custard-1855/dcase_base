@@ -50,6 +50,11 @@ Custom logger at `src.library.logger.LOGGER` (Ruff-configured)
 - uv package manager (dependency management)
 - git with submodules (PSDS_Eval, sebbs)
 
+### Container-based Development
+- **Devcontainer**: `.devcontainer/` configuration for reproducible environment
+- **Security**: Verification documents for secrets/resource management
+- **Setup**: `post_create_command.sh` for automated environment initialization
+
 ### Common Commands
 ```bash
 # Setup: uv sync
