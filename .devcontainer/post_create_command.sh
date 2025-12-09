@@ -28,9 +28,10 @@ fi
 echo ""
 echo "Initializing Git submodules..."
 if git submodule update --init --recursive; then
-    echo "✓ Git submodules initialized successfully"
+    echo "✓ Git submodules initialized successfully (sebbs)"
 else
-    echo "❌ Error: Git submodule initialization failed (Req 4.3). PSDS_Eval and sebbs may be unavailable."
+    echo "❌ Error: Git submodule initialization failed (Req 4.3). sebbs may be unavailable."
+    echo "   Note: PSDS_Eval is NOT a submodule (managed as PyPI package: psds-eval)"
     echo "   Retry manually: git submodule update --init --recursive"
     echo "   Check GitHub authentication: gh auth status"
 fi

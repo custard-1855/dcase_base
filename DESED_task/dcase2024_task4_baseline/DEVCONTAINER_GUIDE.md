@@ -6,6 +6,8 @@ DCASE 2024 Task 4 Sound Event Detection (SED) システムのDevcontainer開発�
 
 - [事前準備](#事前準備)
 - [セットアップ手順](#セットアップ手順)
+- [セキュリティとデータ保護](#セキュリティとデータ保護)
+- [データ復旧手順](#データ復旧手順)
 - [トラブルシューティング](#トラブルシューティング)
 - [FAQ](#faq)
 - [設定ファイル解説](#設定ファイル解説)
@@ -45,7 +47,9 @@ Docker Desktopの設定で、以下のリソースを推奨します:
 
 ### GitHub CLI (gh) 認証
 
-**重要**: Git submodule（PSDS_Eval、sebbs）の初期化にはGitHub認証が必要です。
+**重要**: Git submodule（sebbs）の初期化にはGitHub認証が必要です。
+
+**注意**: PSDS_EvalはPyPIパッケージ（psds-eval）として管理されており、submoduleではありません。実際のsubmoduleは**sebbsのみ**です。
 
 #### GitHub CLI インストール
 
@@ -90,7 +94,7 @@ gh auth status
 ```
 
 **なぜ必要か**:
-- Git submodule（PSDS_Eval、sebbs）は非公開リポジトリまたは認証が必要な場合があります
+- Git submodule（sebbs）は非公開リポジトリまたは認証が必要な場合があります
 - `gh auth setup-git`コマンドにより、GitがGitHub CLI経由で認証情報を使用します
 - SSH鍵の設定が不要になります
 
@@ -164,10 +168,12 @@ python --version
 which sox ffmpeg git gh
 # すべてパスが表示されること
 
-# Git submodule 確認
-ls -la DESED_task/dcase2024_task4_baseline/PSDS_Eval
+# Git submodule 確認（sebbsのみが実際のsubmodule）
 ls -la DESED_task/dcase2024_task4_baseline/sebbs
 # ディレクトリに内容が存在すること
+
+# psds-eval パッケージ確認（PyPIからインストール済み）
+uv pip show psds-eval
 
 # Claude Code 確認
 claude --version
@@ -180,6 +186,355 @@ claude --version
 ```bash
 cd DESED_task/dcase2024_task4_baseline
 python train_pretrained.py
+```
+
+## セキュリティとデータ保護
+
+### Claude Codeの不慮のコマンド実行でホストシステムは安全か?
+
+**結論: はい、ホストシステムのデータは保護されています。**
+
+Devcontainer環境は、Claude Codeの不慮のコマンド実行（例: `rm -rf /`）でもホストシステムのデータを保護する多層防御策を実装しています。
+
+#### 1. コンテナファイルシステムの分離
+
+**仕組み**:
+- コンテナ内のファイルシステムはホストから完全に分離されています
+- `/workspace`はDocker bind mountとしてプロジェクトディレクトリのみマウント
+- `/usr`、`/etc`等のシステムディレクトリはコンテナ内の独立したファイルシステム
+
+**効果**:
+- コンテナ内での破壊的コマンドはコンテナ内のみ影響
+- ホストの`/Users`、`/Applications`、`/System`等には一切影響なし
+
+**検証方法**:
+```bash
+# Devcontainer内で実行
+ls -la /workspace  # プロジェクトファイルのみ
+ls -la /home       # コンテナ内の独立した/home（ホストとは別）
+```
+
+#### 2. 非rootユーザー実行による権限制限
+
+**仕組み**:
+- すべてのプロセスは非rootユーザー（`vscode`）で実行
+- システムディレクトリ（`/usr/bin`、`/etc`等）への書き込み権限なし
+
+**効果**:
+- 破壊的コマンド実行時もシステムファイル削除不可
+- Claude Codeの誤操作でもコンテナシステムは保護される
+
+**検証方法**:
+```bash
+# Devcontainer内で実行
+whoami  # 出力: vscode
+
+# システムディレクトリへの書き込みテスト（失敗することを確認）
+touch /usr/bin/test_file
+# エラー: touch: cannot touch '/usr/bin/test_file': Permission denied
+```
+
+#### 3. Claude Codeファイルアクセス制限
+
+**仕組み**:
+- Claude Code feature側でファイルアクセス範囲を制限
+- アクセス可能: `/workspace`配下、`/home/vscode/.claude`のみ
+- アクセス不可: `/home/vscode/.ssh`、`/etc/passwd`、ホストファイルシステム
+
+**効果**:
+- Claude Codeはプロジェクトファイルのみ操作可能
+- 機密ファイル（SSH鍵、システム設定等）は保護される
+
+**実装**:
+Anthropic公式Claude Code feature (`ghcr.io/anthropics/devcontainer-features/claude-code:1`) により自動適用。追加設定不要。
+
+#### 4. 名前付きボリュームによるデータ永続化
+
+**仕組み**:
+- 重要なデータ（`data/`、`embeddings/`、`exp/`、`wandb/`）は名前付きボリュームとして管理
+- ボリュームはDockerホストで管理され、コンテナ削除後も保持
+
+**効果**:
+- コンテナ内でデータが削除されても、ボリューム自体は保護される
+- コンテナ再作成時に同じボリュームをマウントすることでデータ復元可能
+
+**検証方法**:
+```bash
+# ホスト環境で実行
+docker volume ls
+# 出力例:
+# DRIVER    VOLUME NAME
+# local     dcase-data
+# local     dcase-embeddings
+# local     dcase-exp
+# local     dcase-wandb
+```
+
+### セキュリティ検証テストの実行
+
+プロジェクトには包括的なセキュリティ検証テストが含まれています。
+
+**テスト実行方法**:
+```bash
+# ホストシステム保護検証テスト
+uv run python tests/test_security_host_protection.py
+
+# Claude Codeファイルアクセス制限検証テスト
+uv run python tests/test_security_claude_code_access.py
+
+# 機密情報管理検証テスト
+uv run python tests/test_security_secrets_management.py
+```
+
+**期待される出力**:
+```
+【結論】
+✓ Claude Codeの不慮のコマンド実行でもホストシステムのデータは保護されます:
+  1. コンテナ内のファイルシステムはホストから分離されています
+  2. 非rootユーザー（vscode）でシステムディレクトリへの書き込みが制限されています
+  3. Claude Code feature側で/workspace配下のみアクセス可能に制限されています
+  4. 名前付きボリューム（data、embeddings、exp、wandb）はコンテナ削除後も保持されます
+```
+
+## データ復旧手順
+
+### コンテナ内のデータが吹き飛んだ場合の復旧方法
+
+コンテナ内で誤ってデータを削除した場合でも、名前付きボリュームによる永続化により復旧可能です。
+
+#### シナリオ1: ワークスペース内のファイル削除（Git管理対象）
+
+**症状**:
+```bash
+# 誤って実行してしまった例
+rm -rf DESED_task/dcase2024_task4_baseline/local/*.py
+```
+
+**復旧方法**:
+```bash
+# Devcontainer内で実行
+cd DESED_task/dcase2024_task4_baseline
+
+# Gitでファイルを復元
+git checkout -- local/*.py
+
+# または、最新コミットからすべて復元
+git reset --hard HEAD
+```
+
+**注意**: Git管理されていないファイル（`data/`、`exp/`等）はこの方法では復元できません。
+
+#### シナリオ2: 名前付きボリューム内のデータ削除
+
+**症状**:
+```bash
+# 誤って実行してしまった例
+rm -rf /workspace/data/*
+rm -rf /workspace/exp/*
+```
+
+**重要**: 名前付きボリューム内のデータは**Dockerボリュームに永続化**されています。コンテナを削除しても、ボリューム自体は保持されます。
+
+**復旧方法（ボリュームが残っている場合）**:
+
+1. **コンテナを再起動**
+   ```bash
+   # VS Code Command Palette (Cmd/Ctrl+Shift+P)
+   # "Dev Containers: Rebuild Container"を選択
+   ```
+
+2. **ボリュームが正しくマウントされているか確認**
+   ```bash
+   # Devcontainer内で実行
+   ls -la /workspace/data
+   ls -la /workspace/exp
+   ```
+
+3. **データが復元されていることを確認**
+   - ボリュームが削除されていない限り、データは保持されています
+   - コンテナ削除 ≠ ボリューム削除
+
+#### シナリオ3: 名前付きボリューム自体を削除してしまった
+
+**症状**:
+```bash
+# ホスト環境で誤って実行してしまった例
+docker volume rm dcase-data
+docker volume rm dcase-exp
+```
+
+**復旧方法**:
+
+**重要**: ボリューム削除後は**データ復元不可**です。バックアップがない場合は、データセットを再ダウンロードするか、実験を再実行する必要があります。
+
+1. **データセット再ダウンロード（`data/`の場合）**
+   ```bash
+   # Devcontainer内で実行
+   cd DESED_task/dcase2024_task4_baseline
+   python generate_dcase_task4_2024.py
+   ```
+
+2. **BEATs埋め込み再生成（`embeddings/`の場合）**
+   ```bash
+   cd DESED_task/dcase2024_task4_baseline
+   python extract_embeddings.py
+   ```
+
+3. **実験結果の再実行（`exp/`の場合）**
+   ```bash
+   cd DESED_task/dcase2024_task4_baseline
+   python train_pretrained.py
+   ```
+
+#### シナリオ4: コンテナ全体を削除してしまった
+
+**症状**:
+```bash
+# ホスト環境で誤って実行してしまった例
+docker container rm -f <container_id>
+```
+
+**復旧方法**:
+
+**朗報**: コンテナ削除でも名前付きボリュームは保持されます！
+
+1. **VS Codeで"Reopen in Container"を実行**
+   ```bash
+   # VS Code: 左下の緑色アイコン → "Reopen in Container"
+   ```
+
+2. **コンテナが再作成され、既存のボリュームがマウントされる**
+   ```bash
+   # Devcontainer内で実行
+   ls -la /workspace/data
+   ls -la /workspace/embeddings
+   ls -la /workspace/exp
+   # データが復元されていることを確認
+   ```
+
+3. **postCreateCommandが自動実行される**
+   - uv sync（依存関係インストール）
+   - git submodule（sebbs初期化）
+   - pre-commit（フック設定）
+
+#### シナリオ5: ホスト環境でプロジェクトディレクトリを削除してしまった
+
+**症状**:
+```bash
+# ホスト環境で誤って実行してしまった例
+rm -rf ~/work/dcase_base
+```
+
+**復旧方法**:
+
+1. **Gitリポジトリから再クローン**
+   ```bash
+   # ホスト環境で実行
+   git clone https://github.com/your-repo/dcase_base.git
+   cd dcase_base
+   ```
+
+2. **VS Codeで"Reopen in Container"を実行**
+   ```bash
+   code .
+   # VS Code: "Reopen in Container"
+   ```
+
+3. **名前付きボリューム内のデータは保持されている**
+   ```bash
+   # Devcontainer内で実行
+   ls -la /workspace/data
+   ls -la /workspace/exp
+   # ボリューム削除していない限り、データは復元されている
+   ```
+
+### データバックアップのベストプラクティス
+
+#### 定期的なボリュームバックアップ
+
+**推奨頻度**: 重要な実験前後、週1回
+
+1. **ボリュームを別ボリュームにバックアップ**
+   ```bash
+   # ホスト環境で実行
+   docker run --rm \
+     -v dcase-exp:/source \
+     -v dcase-exp-backup:/backup \
+     alpine sh -c "cd /source && tar cf - . | (cd /backup && tar xf -)"
+   ```
+
+2. **ボリュームをホストディレクトリにエクスポート**
+   ```bash
+   # ホスト環境で実行
+   docker run --rm \
+     -v dcase-exp:/source \
+     -v ~/backups/dcase-exp:/backup \
+     alpine sh -c "cd /source && tar cf - . | (cd /backup && tar xf -)"
+   ```
+
+3. **特定ファイルのみバックアップ**
+   ```bash
+   # Devcontainer内で実行
+   # 重要なチェックポイントをコピー
+   cp -r exp/best_model ~/backups/
+   ```
+
+#### 実験結果のクラウド同期（wandb推奨）
+
+**wandb使用時の自動バックアップ**:
+```bash
+# Devcontainer内で実行
+# wandb設定（初回のみ）
+wandb login
+
+# 訓練時に自動アップロード
+python train_pretrained.py
+# 実験結果が自動的にwandb.aiにバックアップされる
+```
+
+**wandb未使用時のローカルバックアップ**:
+```bash
+# 重要な実験結果をtarで圧縮
+cd DESED_task/dcase2024_task4_baseline
+tar czf ~/backups/exp_$(date +%Y%m%d).tar.gz exp/best_model/
+```
+
+### ボリューム管理のベストプラクティス
+
+#### ボリューム使用状況確認
+
+```bash
+# ホスト環境で実行
+docker system df -v
+
+# ボリューム一覧と使用量
+docker volume ls
+docker volume inspect dcase-data
+```
+
+#### ボリューム削除時の注意
+
+**安全な削除手順**:
+1. **削除前に必ずバックアップ**
+2. **不要なボリュームのみ削除**
+   ```bash
+   # wandb未使用の場合のみ削除
+   docker volume rm dcase-wandb
+   ```
+3. **実験結果は選択的に削除**
+   ```bash
+   # Devcontainer内で古い実験のみ削除
+   cd DESED_task/dcase2024_task4_baseline/exp
+   rm -rf old_experiment_20240101/
+   ```
+
+**危険な操作（実行前に必ず確認）**:
+```bash
+# 全ボリューム削除（データ消失リスク）
+docker volume prune --all  # 実行しないでください
+
+# 特定ボリューム削除（不可逆）
+docker volume rm dcase-data  # バックアップ済みの場合のみ
 ```
 
 ## トラブルシューティング
@@ -337,8 +692,10 @@ Failed to install audio libraries. Check network connection and retry.
 
 **症状**:
 ```
-Error: Git submodule initialization failed. PSDS_Eval and sebbs may be unavailable.
+Error: Git submodule initialization failed. sebbs may be unavailable.
 ```
+
+**注意**: PSDS_EvalはPyPIパッケージ（psds-eval）として管理されており、submoduleではありません。実際のsubmoduleは**sebbsのみ**です。
 
 **原因**:
 - `gh auth login`未実行

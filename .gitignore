@@ -156,9 +156,7 @@ cython_debug/
 outputs/
 wandb/
 
-.kiro
-.claude
 .serena
 
-tests
+# tests
 .devcontainer/*.md
