@@ -49,11 +49,13 @@ Follows DCASE baseline conventions with extensions for CMT, BEATs, and visualiza
 ### Visualization - `DESED_task/dcase2024_task4_baseline/visualize/`
 **Purpose**: Model analysis and interpretation tools
 **Structure**:
-- `visualize_umap.py`: UMAP embedding visualization
-- `visualize_reliability.py`: Reliability diagrams
-- `generate_analysis_report.py`: Comprehensive analysis output
+- `umap/`: Modularized UMAP visualization (feature_loader, umap_reducer, plot_generator)
+  - `tests/`: Unit tests for UMAP pipeline components
 - `get_features/`: Feature extraction for visualization
-- `visualization_utils.py`: Shared plotting utilities
+- `analyze_clip_confusion.py`: Clip-level confusion analysis
+- `check_feature_properties.py`: Feature distribution validation
+
+**Modularization Pattern**: Complex analysis tools (e.g., UMAP) extracted into subpackages with dedicated tests, following library structure conventions
 
 ### Data & Outputs - `DESED_task/dcase2024_task4_baseline/`
 **Storage** (not version-controlled):
