@@ -3,6 +3,7 @@ import random
 import warnings
 from collections import defaultdict
 from copy import deepcopy
+from datetime import datetime
 from math import ceil
 from pathlib import Path
 from typing import Any, TypeAlias
@@ -26,6 +27,9 @@ from desed_task.utils.scaler import TorchScaler
 
 # Import SEBBs wrapper layer for type-safe interface
 from local.sebbs_wrapper import SEBBsPredictor, SEBBsTuner
+
+# Import experiment directory management
+from local.experiment_dir import ExperimentConfig, ExperimentDirManager, ExecutionMode
 
 # Keep direct import for utilities
 from sebbs.sebbs.utils import sed_scores_from_sebbs
@@ -184,9 +188,16 @@ class SEDTask4(pl.LightningModule):
         fast_dev_run: bool = False,
         evaluation: bool = False,
         sed_teacher: Any | None = None,  # CRNN model
+        _test_state_dict: dict | None = None,  # Test state dict for mode detection
     ):
         super(SEDTask4, self).__init__()
         self.hparams.update(hparams)
+        self._test_state_dict = _test_state_dict  # Store for mode detection
+
+        # Set execution mode attributes BEFORE wandb initialization
+        # These are needed by ExperimentDirManager.detect_execution_mode()
+        self.fast_dev_run: bool = fast_dev_run
+        self.evaluation: bool = evaluation
 
         if self.hparams["wandb"]["use_wandb"]:
             self._init_wandb_project()
@@ -229,8 +240,6 @@ class SEDTask4(pl.LightningModule):
         self.test_data: Any | None = test_data  # Dataset
         self.train_sampler: Any | None = train_sampler  # Sampler
         self.scheduler: Any | None = scheduler  # LR scheduler
-        self.fast_dev_run: bool = fast_dev_run
-        self.evaluation: bool = evaluation
 
         self.num_workers: int = 1 if self.fast_dev_run else self.hparams["training"]["num_workers"]
 
@@ -424,30 +433,131 @@ class SEDTask4(pl.LightningModule):
             pass
 
     def _init_wandb_project(self) -> None:
-        wandb.init(project=PROJECT_NAME, name=self.hparams["wandb"]["wandb_dir"])
+        """Initialize wandb project with execution mode-aware directory management.
 
-        # wandb runディレクトリ内にcheckpointsディレクトリを作成
-        # 結果: wandb/run-20250102_123456-abcd1234/checkpoints/
-        if wandb.run is not None:
-            self._wandb_checkpoint_dir = os.path.join(wandb.run.dir, "checkpoints")
-            os.makedirs(self._wandb_checkpoint_dir, exist_ok=True)
-            print(f"Checkpoint directory: {self._wandb_checkpoint_dir}")
+        This method implements mode-aware wandb initialization:
+        - Detects execution mode (train/test/inference/feature_extraction)
+        - Legacy mode (--wandb_dir) takes priority over new mode
+        - Creates hierarchical experiment directory structure
+        - Manages artifact directories and manifest generation
+        - Skips wandb initialization for inference/feature_extraction modes
+        """
+        # Detect execution mode
+        self.execution_mode = ExperimentDirManager.detect_execution_mode(
+            self.hparams,
+            evaluation=self.evaluation,
+            test_state_dict=getattr(self, '_test_state_dict', None),
+            fast_dev_run=self.fast_dev_run
+        )
+        print(f"Detected execution mode: {self.execution_mode.value}")
 
-            # ハイパーパラメータをWandBに保存
-            wandb.config.update(self.hparams, allow_val_change=True)
-            print("WandB config updated with hyperparameters")
+        # Legacy mode: --wandb_dir が指定されている場合（後方互換性）
+        if self.hparams["wandb"]["wandb_dir"] != "None":
+            print("Using legacy wandb_dir mode (ignoring execution mode)")
+            wandb.init(
+                project=PROJECT_NAME,
+                name=self.hparams["wandb"]["wandb_dir"]
+            )
+            if wandb.run is not None:
+                self._wandb_checkpoint_dir = os.path.join(wandb.run.dir, "checkpoints")
+                os.makedirs(self._wandb_checkpoint_dir, exist_ok=True)
+                print(f"Checkpoint directory: {self._wandb_checkpoint_dir}")
 
-            # 設定ファイル自体をWandBに保存
-            if "config_file_path" in self.hparams and os.path.exists(
-                self.hparams["config_file_path"],
-            ):
-                wandb.save(
+                # ハイパーパラメータをWandBに保存
+                wandb.config.update(self.hparams, allow_val_change=True)
+                print("WandB config updated with hyperparameters")
+
+                # 設定ファイル自体をWandBに保存
+                if "config_file_path" in self.hparams and os.path.exists(
                     self.hparams["config_file_path"],
-                    base_path=os.path.dirname(self.hparams["config_file_path"]),
+                ):
+                    wandb.save(
+                        self.hparams["config_file_path"],
+                        base_path=os.path.dirname(self.hparams["config_file_path"]),
+                    )
+                    print(f"Configuration file saved to WandB: {self.hparams['config_file_path']}")
+            else:
+                self._wandb_checkpoint_dir = None
+            return
+
+        # New mode: ExperimentConfig を使用
+        if "experiment" in self.hparams:
+            exp_config = ExperimentConfig(**self.hparams["experiment"])
+
+            # wandB初期化の可否を判定
+            if not ExperimentDirManager.should_initialize_wandb(self.execution_mode, exp_config):
+                print(f"WandB disabled for {self.execution_mode.value} mode")
+                self._wandb_checkpoint_dir = None
+
+                # inferenceモード時は非wandBディレクトリを作成
+                base_dir = ExperimentDirManager.build_experiment_path(exp_config)
+                # Use microsecond precision for unique directory names in concurrent executions
+                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+                inference_dir = base_dir / f"run-{timestamp}"
+                inference_dir.mkdir(parents=True, exist_ok=True)
+
+                artifact_dirs = ExperimentDirManager.create_artifact_dirs(inference_dir)
+                self._inference_dir = str(inference_dir)
+
+                # manifest生成（run_id=None）
+                ExperimentDirManager.generate_manifest(
+                    inference_dir,
+                    run_id=None,
+                    config=self.hparams,
+                    mode=self.execution_mode
                 )
-                print(f"Configuration file saved to WandB: {self.hparams['config_file_path']}")
+                print(f"Inference directory created: {inference_dir}")
+                return
+
+            # wandB初期化（trainまたはtestモード）
+            base_dir = ExperimentDirManager.build_experiment_path(exp_config)
+            wandb.init(
+                project=PROJECT_NAME,
+                name=f"{exp_config.mode.value}/{exp_config.category}/{exp_config.method}/{exp_config.variant}",
+                dir=str(base_dir),
+                config=self.hparams,
+                tags=[exp_config.mode.value, exp_config.category, exp_config.method]
+            )
+
+            if wandb.run is not None:
+                experiment_dir = Path(wandb.run.dir)
+                artifact_dirs = ExperimentDirManager.create_artifact_dirs(experiment_dir)
+                self._wandb_checkpoint_dir = str(artifact_dirs["checkpoints"])
+                print(f"Checkpoint directory: {self._wandb_checkpoint_dir}")
+
+                # manifest生成（mode含む）
+                ExperimentDirManager.generate_manifest(
+                    experiment_dir,
+                    wandb.run.id,
+                    self.hparams,
+                    mode=self.execution_mode
+                )
+                print(f"Experiment directory: {experiment_dir}")
+
+                # ハイパーパラメータをWandBに保存
+                wandb.config.update(self.hparams, allow_val_change=True)
+                print("WandB config updated with hyperparameters")
+
+                # 設定ファイル自体をWandBに保存
+                if "config_file_path" in self.hparams and os.path.exists(
+                    self.hparams["config_file_path"],
+                ):
+                    wandb.save(
+                        self.hparams["config_file_path"],
+                        base_path=os.path.dirname(self.hparams["config_file_path"]),
+                    )
+                    print(f"Configuration file saved to WandB: {self.hparams['config_file_path']}")
+            else:
+                self._wandb_checkpoint_dir = None
         else:
-            self._wandb_checkpoint_dir = None
+            # Default fallback（既存動作）
+            wandb.init(project=PROJECT_NAME)
+            if wandb.run is not None:
+                self._wandb_checkpoint_dir = os.path.join(wandb.run.dir, "checkpoints")
+                os.makedirs(self._wandb_checkpoint_dir, exist_ok=True)
+                print(f"Checkpoint directory: {self._wandb_checkpoint_dir}")
+            else:
+                self._wandb_checkpoint_dir = None
 
     def lr_scheduler_step(self, scheduler: Any, optimizer_idx: int, metric: Any) -> None:
         scheduler.step()
