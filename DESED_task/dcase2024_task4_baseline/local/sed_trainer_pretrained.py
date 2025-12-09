@@ -25,11 +25,11 @@ from desed_task.evaluation.evaluation_measures import (
 from desed_task.utils.postprocess import ClassWiseMedianFilter
 from desed_task.utils.scaler import TorchScaler
 
+# Import experiment directory management
+from local.experiment_dir import ExecutionMode, ExperimentConfig, ExperimentDirManager
+
 # Import SEBBs wrapper layer for type-safe interface
 from local.sebbs_wrapper import SEBBsPredictor, SEBBsTuner
-
-# Import experiment directory management
-from local.experiment_dir import ExperimentConfig, ExperimentDirManager, ExecutionMode
 
 # Keep direct import for utilities
 from sebbs.sebbs.utils import sed_scores_from_sebbs
@@ -356,7 +356,7 @@ class SEDTask4(pl.LightningModule):
         If wandb isn't active or hparams disable it, this is a no-op.
         """
         try:
-            if not self.hparams.get("net", {}).get("use_wandb"):
+            if not self.hparams.get("wandb", {}).get("use_wandb"):
                 return
         except Exception:
             return
@@ -446,8 +446,8 @@ class SEDTask4(pl.LightningModule):
         self.execution_mode = ExperimentDirManager.detect_execution_mode(
             self.hparams,
             evaluation=self.evaluation,
-            test_state_dict=getattr(self, '_test_state_dict', None),
-            fast_dev_run=self.fast_dev_run
+            test_state_dict=getattr(self, "_test_state_dict", None),
+            fast_dev_run=self.fast_dev_run,
         )
         print(f"Detected execution mode: {self.execution_mode.value}")
 
@@ -456,7 +456,7 @@ class SEDTask4(pl.LightningModule):
             print("Using legacy wandb_dir mode (ignoring execution mode)")
             wandb.init(
                 project=PROJECT_NAME,
-                name=self.hparams["wandb"]["wandb_dir"]
+                name=self.hparams["wandb"]["wandb_dir"],
             )
             if wandb.run is not None:
                 self._wandb_checkpoint_dir = os.path.join(wandb.run.dir, "checkpoints")
@@ -492,7 +492,7 @@ class SEDTask4(pl.LightningModule):
                 # inferenceモード時は非wandBディレクトリを作成
                 base_dir = ExperimentDirManager.build_experiment_path(exp_config)
                 # Use microsecond precision for unique directory names in concurrent executions
-                timestamp = datetime.now().strftime('%Y%m%d_%H%M%S_%f')
+                timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
                 inference_dir = base_dir / f"run-{timestamp}"
                 inference_dir.mkdir(parents=True, exist_ok=True)
 
@@ -504,7 +504,7 @@ class SEDTask4(pl.LightningModule):
                     inference_dir,
                     run_id=None,
                     config=self.hparams,
-                    mode=self.execution_mode
+                    mode=self.execution_mode,
                 )
                 print(f"Inference directory created: {inference_dir}")
                 return
@@ -516,7 +516,7 @@ class SEDTask4(pl.LightningModule):
                 name=f"{exp_config.mode.value}/{exp_config.category}/{exp_config.method}/{exp_config.variant}",
                 dir=str(base_dir),
                 config=self.hparams,
-                tags=[exp_config.mode.value, exp_config.category, exp_config.method]
+                tags=[exp_config.mode.value, exp_config.category, exp_config.method],
             )
 
             if wandb.run is not None:
@@ -530,7 +530,7 @@ class SEDTask4(pl.LightningModule):
                     experiment_dir,
                     wandb.run.id,
                     self.hparams,
-                    mode=self.execution_mode
+                    mode=self.execution_mode,
                 )
                 print(f"Experiment directory: {experiment_dir}")
 
