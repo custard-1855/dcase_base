@@ -14,7 +14,6 @@ import sed_scores_eval
 import torch
 import torch.nn.functional as F
 import torchmetrics
-import wandb
 from codecarbon import OfflineEmissionsTracker
 from desed_task.data_augm import MixupAugmentor
 from desed_task.evaluation.evaluation_measures import (
@@ -35,6 +34,8 @@ from sed_scores_eval.base_modules.scores import create_score_dataframe, validate
 # データ不足の対策
 from torch.utils.data.dataloader import DataLoader, default_collate
 from torchaudio.transforms import AmplitudeToDB, MelSpectrogram
+
+import wandb
 
 from .classes_dict import (
     classes_labels_desed,
@@ -75,7 +76,7 @@ PSDSResult: TypeAlias = dict[str, float | dict[str, float]]
 
 
 class _NoneSafeIterator:
-    """DataLoaderから返されるNoneバッチを内部でスキップ"""
+    """DataLoaderから返されるNoneバッチを内部でスキップ."""
 
     def __init__(self, dataloader_iter):
         self.dataloader_iter = dataloader_iter
@@ -92,8 +93,9 @@ class _NoneSafeIterator:
 
 
 class SafeCollate:
-    """データセットから返される None 値をフィルタリングする collate_fn。
-    フィルタリング後にバッチが空になった場合は None を返す。
+    """データセットから返される None 値をフィルタリングする collate_fn.
+
+    フィルタリング後にバッチが空になった場合は None を返す.
     """
 
     def __call__(self, batch):
@@ -107,7 +109,8 @@ class SafeCollate:
 
 
 class SafeDataLoader(DataLoader):
-    """Noneを返す可能性があるバッチを自動的にスキップするDataLoader。
+    """Noneを返す可能性があるバッチを自動的にスキップするDataLoader.
+
     PyTorch Lightningなどのフレームワークで安全に使用できる。
     """
 
@@ -193,8 +196,11 @@ class SEDTask4(pl.LightningModule):
         self.cmt_enabled: bool = self.hparams.get("cmt", {}).get("enabled", False)
         self.phi_clip: float = float(self.hparams.get("cmt", {}).get("phi_clip", 0.5))
         self.phi_frame: float = float(self.hparams.get("cmt", {}).get("phi_frame", 0.5))
+        self.phi_neg: float = float(self.hparams.get("cmt", {}).get("phi_neg", 0.3))
+        self.phi_pos: float = float(self.hparams.get("cmt", {}).get("phi_pos", 0.7))
 
-        self.cmt_scale: bool = self.hparams.get("cmt", {}).get("scale", False)
+        self.non_zero_scale: bool = self.hparams.get("cmt", {}).get("non_zero_scale", False)
+        self.pos_neg_scale: bool = self.hparams.get("cmt", {}).get("pos_neg_scale", False)
         self.cmt_warmup_epochs: int = int(self.hparams.get("cmt", {}).get("warmup_epochs", 50))
         self.use_neg_sample: bool = self.hparams.get("cmt", {}).get("use_neg_sample", False)
 
@@ -450,7 +456,6 @@ class SEDTask4(pl.LightningModule):
         self.tracker_train.start()
 
         # Remove for debugging. Those warnings can be ignored during training otherwise.
-        # to_ignore = []
         to_ignore = [
             ".*Trying to infer the `batch_size` from an ambiguous collection.*",
             ".*invalid value encountered in divide*",
@@ -461,9 +466,13 @@ class SEDTask4(pl.LightningModule):
             warnings.filterwarnings("ignore", message)
 
     def update_ema(
-        self, alpha: float, global_step: int, model: torch.nn.Module, ema_model: torch.nn.Module
+        self,
+        alpha: float,
+        global_step: int,
+        model: torch.nn.Module,
+        ema_model: torch.nn.Module,
     ) -> None:
-        """Update teacher model parameters
+        """Update teacher model parameters.
 
         Args:
             alpha: float, the factor to be used between each updated step.
@@ -682,7 +691,7 @@ class SEDTask4(pl.LightningModule):
         raise NotImplementedError("E2E mode unpacking not yet implemented")
 
     def training_step(self, batch: BatchType, batch_indx: int) -> torch.Tensor:
-        """Apply the training for one batch (a step). Used during trainer.fit
+        """Apply the training for one batch (a step). Used during trainer.fit.
 
         Args:
             batch: torch.Tensor, batch input tensor
@@ -696,7 +705,7 @@ class SEDTask4(pl.LightningModule):
             but we use specific BatchType for type safety in this implementation.
 
         """
-        audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = self._unpack_batch(
+        audio, labels, padded_indxs, embeddings, valid_class_mask = self._unpack_batch(
             batch,
         )
 
@@ -870,7 +879,8 @@ class SEDTask4(pl.LightningModule):
         phi_clip: float = 0.5,
         phi_frame: float = 0.5,
     ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Apply Confident Mean Teacher postprocessing.
+        """Apply Confident Mean Teacher postprocessing only unlabeled data.
+
         y_w: (batch, classes)
         y_s: (batch, classes, frames)
         """
@@ -881,7 +891,6 @@ class SEDTask4(pl.LightningModule):
         y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s[index_weak:])
 
         # Step 2 & 3: Frame-level thresholding with Weak constraint
-        # Weakが1かつStrongが閾値を超えた場合のみ1
         y_s_binary = y_w_expanded * (y_s[index_weak:] > phi_frame).float()
 
         # Step 4: Median filtering
@@ -907,32 +916,88 @@ class SEDTask4(pl.LightningModule):
         return y_tilde_w, y_tilde_s
 
     def compute_cmt_confidence_weights(
-        self, y_w: torch.Tensor, y_s: torch.Tensor, y_tilde_w: torch.Tensor, y_tilde_s: torch.Tensor
+        self,
+        y_w: torch.Tensor,
+        y_s: torch.Tensor,
+        y_tilde_w: torch.Tensor,
+        y_tilde_s: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Compute confidence weights based on teacher's certainty.
+
         Correction: High confidence for both positive (near 1) and negative (near 0) predictions.
         """
         if self.use_neg_sample:
             # --- use neg_sample ---
             # Weak Confidence:
-            c_w = torch.where(y_tilde_w > self.cmt_phi_clip, y_w, 1.0 - y_w)  # type: ignore[operator]  # cmt_phi_clip is float attribute
+            c_w = torch.where(
+                y_tilde_w >= self.phi_pos,
+                y_tilde_w,  # pos以上: そのまま
+                torch.where(
+                    y_tilde_w <= self.phi_neg,
+                    1.0 - y_tilde_w,  # neg以下: 1-予測値
+                    0,  # 中間: 0
+                ),
+            )
 
             # Strong Confidence:
-            y_w_prob_expanded = y_w.unsqueeze(-1).expand_as(y_s)
-            conf_s_frame = torch.where(y_s > self.cmt_phi_frame, y_s, 1.0 - y_s)  # type: ignore[operator]  # cmt_phi_frame is float attribute
-            # c_w_expanded = c_w.unsqueeze(-1).expand_as(y_s)
-            # c_s = conf_s_frame * c_w_expanded
-            c_s = conf_s_frame * y_w_prob_expanded
+            c_s = torch.where(
+                y_tilde_s >= self.phi_pos,
+                y_tilde_s,  # pos以上: そのまま
+                torch.where(
+                    y_tilde_s <= self.phi_neg,
+                    1.0 - y_tilde_s,  # neg以下: 1-予測値
+                    0,  # 中間: 0
+                ),
+            )
+            # フレーム重みに対し,clip重みは乗算しない. 確率もかけない. フレーム単独の信頼度を使う.
+            # 負例や正例の影響が過度に強くなる懸念があるため
         else:
             # --- CMT ---
             c_w = y_w * y_tilde_w
             y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
             c_s = y_s * y_w_expanded * y_tilde_s
-        # neg_weight_scale = 0.5  # 0.1~0.5くらいで調整
-        # is_negative = (y_tilde_s < 0.5).float()
 
-        # scale_factor = is_negative * neg_weight_scale + (1.0 - is_negative) * 1.0
-        # c_s = c_s * scale_factor
+        # 実装予定
+        # 温度パラメータによる調整
+
+        if self.pos_neg_scale:  # 正例と負例の量を調整
+            # 正例と負例のマスクを作成
+            pos_mask_w = (y_tilde_w >= self.phi_pos).float()
+            neg_mask_w = (y_tilde_w <= self.phi_neg).float()
+
+            pos_mask_s = (y_tilde_s >= self.phi_pos).float()
+            neg_mask_s = (y_tilde_s <= self.phi_neg).float()
+
+            # 正例と負例の総重みを計算
+            pos_sum_w = (c_w * pos_mask_w).sum().clamp(min=1e-6)
+            neg_sum_w = (c_w * neg_mask_w).sum().clamp(min=1e-6)
+
+            pos_sum_s = (c_s * pos_mask_s).sum().clamp(min=1e-6)
+            neg_sum_s = (c_s * neg_mask_s).sum().clamp(min=1e-6)
+
+            # 少ない方にスケーリング (少ない方を1.0に、多い方を縮小)
+            scale_factor_w = torch.where(
+                pos_sum_w < neg_sum_w,
+                neg_sum_w / pos_sum_w,  # 正例が少ない → 負例を縮小
+                pos_sum_w / neg_sum_w,  # 負例が少ない → 正例を縮小
+            )
+
+            scale_factor_s = torch.where(
+                pos_sum_s < neg_sum_s,
+                neg_sum_s / pos_sum_s,
+                pos_sum_s / neg_sum_s,
+            )
+
+            # スケーリングを適用
+            if pos_sum_w < neg_sum_w:
+                c_w = c_w * torch.where(neg_mask_w.bool(), 1.0 / scale_factor_w, 1.0)
+            else:
+                c_w = c_w * torch.where(pos_mask_w.bool(), 1.0 / scale_factor_w, 1.0)
+
+            if pos_sum_s < neg_sum_s:
+                c_s = c_s * torch.where(neg_mask_s.bool(), 1.0 / scale_factor_s, 1.0)
+            else:
+                c_s = c_s * torch.where(pos_mask_s.bool(), 1.0 / scale_factor_s, 1.0)
 
         return c_w, c_s
 
@@ -950,8 +1015,9 @@ class SEDTask4(pl.LightningModule):
         bce_w = F.binary_cross_entropy(student_w, teacher_pseudo_w, reduction="none")
         weighted_bce_w = confidence_w * bce_w
 
-        if self.cmt_scale:
-            # 信頼度が0より大きいサンプルのみで平均を取る（重要）
+        if self.non_zero_scale:
+            # 非ゼロ正規化
+            # 信頼度が0より大きい(実際に使う)サンプルで平均を計算
             mask_w = (confidence_w > 0).float()
             num_nonzero_w = mask_w.sum().clamp(min=1.0)
             loss_w_con = weighted_bce_w.sum() / num_nonzero_w
@@ -962,7 +1028,7 @@ class SEDTask4(pl.LightningModule):
         bce_s = F.binary_cross_entropy(student_s, teacher_pseudo_s, reduction="none")
         weighted_bce_s = confidence_s * bce_s
 
-        if self.cmt_scale:
+        if self.non_zero_scale:  # 非ゼロ正規化
             mask_s = (confidence_s > 0).float()
             num_nonzero_s = mask_s.sum().clamp(min=1.0)
             loss_s_con = weighted_bce_s.sum() / num_nonzero_s
@@ -981,7 +1047,7 @@ class SEDTask4(pl.LightningModule):
         )
 
     def validation_step(self, batch: BatchType, batch_indx: int) -> None:
-        """Apply validation to a batch (step). Used during trainer.fit
+        """Apply validation to a batch (step). Used during trainer.fit.
 
         Args:
             batch: torch.Tensor, input batch tensor
@@ -990,7 +1056,7 @@ class SEDTask4(pl.LightningModule):
         Returns:
 
         """
-        audio, labels, padded_indxs, filenames, embeddings, valid_class_mask = self._unpack_batch(
+        audio, labels, _, filenames, embeddings, valid_class_mask = self._unpack_batch(
             batch,
         )
 
@@ -1386,7 +1452,7 @@ class SEDTask4(pl.LightningModule):
         return checkpoint
 
     def test_step(self, batch: BatchType, batch_indx: int) -> None:
-        """Apply Test to a batch (step), used only when (trainer.test is called)
+        """Apply Test to a batch (step), used only when (trainer.test is called).
 
         Args:
             batch: torch.Tensor, input batch tensor
@@ -1449,21 +1515,9 @@ class SEDTask4(pl.LightningModule):
                 for clip_id in desed_ground_truth.keys()
             }
 
-            # ========================================================================
-            # cSEBBs (change-point based Sound Event Bounding Boxes) のチューニング
-            # ========================================================================
-            # cSEBBsは、フレームレベルのスコアから変化点検出によりイベント境界を推定し、
-            # 適応的なセグメントマージによって最終的なイベント候補(bounding boxes)を生成する。
-            # ここでは、validation setを用いてハイパーパラメータをチューニング
-
             # # --- 1. DESEDクラス用のcSEBBsチューニング ---
             if not hasattr(self, "csebbs_predictor_desed"):
                 print("\n=== Tuning cSEBBs for DESED classes ===")
-                # ハイパーパラメータ:
-                #   - step_filter_length: 変化点検出用のステップフィルタ長
-                #   - merge_threshold_abs: セグメント統合の絶対閾値
-                #   - merge_threshold_rel: セグメント統合の相対閾値
-                # これらをグリッドサーチでPSDSが最大となるように最適化
                 self.csebbs_predictor_desed, _ = SEBBsTuner.tune_for_psds(
                     scores=desed_scores,
                     ground_truth=desed_ground_truth,
@@ -1645,14 +1699,7 @@ class SEDTask4(pl.LightningModule):
                         merge_threshold_rel=2.0,
                     )
 
-        # ========================================================================
         # Student modelのスコア生成とcSEBBs後処理
-        # ========================================================================
-
-        # batched_decode_preds()は以下を実行:
-        #   1. median filterによるスコアの平滑化
-        #   2. 複数の閾値でのバイナリ検出（PSDS計算用）
-        #   3. sed_scores_eval形式への変換
         (
             scores_unprocessed_student_strong,  # median filter適用前のスコア
             scores_postprocessed_student_strong,  # 検証用に有効化したが,本当は使用しない
@@ -1664,14 +1711,6 @@ class SEDTask4(pl.LightningModule):
             median_filter=self.median_filter,
             thresholds=list(self.test_buffer_psds_eval_student.keys()) + [0.5],
         )
-
-        # median filterの代わりにcSEBBsを使用してイベント境界を精緻化
-        # cSEBBsの利点:
-        #   - 変化点検出による正確なonset/offset推定
-        #   - 適応的なセグメントマージによるノイズ除去
-        #   - フレームレベル閾値の影響を受けないイベント検出
-        # 入力: median filter適用前のスコア（より細かい時間分解能を保持）
-        # 出力: cSEBBsにより生成されたイベント候補のスコア
 
         if self.sebbs_enabled:
             scores_postprocessed_student_strong = get_sebbs(
@@ -2293,7 +2332,7 @@ class SEDTask4(pl.LightningModule):
         )
 
     def on_test_start(self) -> None:
-        """Test開始時の初期化処理。
+        """Test開始時の初期化処理.
 
         cSEBBsのチューニングに必要なvalidationスコアを収集するため、
         test実行前に一度validationパスを実行
@@ -2452,11 +2491,6 @@ class SEDTask4(pl.LightningModule):
             if file_id in maestro_audio_durations
         }
 
-        # maestro_audio_durations_filtered = {
-        #     clip_id: sorted(events, key=lambda x: x[1])[-1][1]
-        #     for clip_id, events in maestro_ground_truth.items()
-        # }
-
         missing = set(maestro_ground_truth.keys()) - set(maestro_audio_durations_filtered.keys())
         if missing:
             warnings.warn(
@@ -2480,7 +2514,7 @@ def select_best_auroc(
     segment_length=1.0,
     **kwargs,
 ):
-    """cSEBBsのハイパーパラメータチューニングでAUROCを最大化する選択関数
+    """cSEBBsのハイパーパラメータチューニングでAUROCを最大化する選択関数.
 
     csebbs.tune()からのインターフェースに適合し、
     内部でsed_scores_eval.segment_based.aurocを使用する

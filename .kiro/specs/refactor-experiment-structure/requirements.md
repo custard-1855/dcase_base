@@ -34,6 +34,8 @@ Refactor experiment directory structure to use custom hierarchical layout instea
 5. The artifact management system shall store experiment configuration snapshots under `{experiment_dir}/config/`
 6. When an experiment completes, the artifact management system shall generate a manifest file listing all artifacts with metadata (timestamp, file size, content type)
 
+**注記**: Grad-CAM可視化スクリプトは本リファクタリングの対象外とし、変更後の構造を踏まえて別途実装する。既存の可視化スクリプト（UMAP等）は新しい構造に合わせて調整される可能性がある。
+
 ### Requirement 3: wandb統合とパス解決
 
 **Objective:** 開発者として、wandbの実験トラッキング機能を維持しながら、カスタムディレクトリ構造を使用したい。これにより、既存のワークフローが中断されない。
@@ -57,3 +59,21 @@ Refactor experiment directory structure to use custom hierarchical layout instea
 3. When configuration is loaded, the configuration system shall validate required naming parameters are present
 4. If naming parameters are missing, then the configuration system shall fall back to default values (category="default", method="baseline", variant="v1")
 5. The configuration system shall allow environment variable substitution in experiment paths (e.g., `$SCRATCH_DIR/experiments`)
+
+### Requirement 5: 実行モード別のwandBログ管理
+
+**Objective:** 研究者として、training実行とtest-only実行、feature-extraction実行を明確に区別したい。これにより、不要なwandBログファイルの生成を防ぎ、実験ログの整理が容易になる。
+
+**Background**: 現状では、`use_wandb=True` の場合、training、test-only、feature-extraction（推論・可視化）のすべてで新しいwandB runが作成される。これにより、実験目的と無関係なログが大量に生成され、実験の追跡が困難になっている。
+
+#### Acceptance Criteria
+
+1. The experiment mode management system shall recognize four distinct execution modes: `train`, `test`, `inference`, and `feature_extraction`
+2. When execution mode is `train`, the system shall create a new wandb run and directory under `experiments/train/{category}/{method}/{variant}/`
+3. When execution mode is `test`, the system shall either reuse the training run directory or create a minimal test-only directory under `experiments/test/{category}/{method}/{variant}/`, based on configuration
+4. When execution mode is `inference` or `feature_extraction`, the system shall disable wandb run creation and store artifacts under `experiments/inference/{category}/{method}/{variant}/` without wandb synchronization
+5. The manifest file shall record the execution mode (e.g., `"mode": "train"`) to distinguish experiment purposes
+6. When wandb is disabled for inference/feature_extraction modes, the system shall log a clear message (e.g., "WandB disabled for feature extraction mode")
+7. The configuration system shall support explicit mode specification in YAML config or via command-line argument (e.g., `--mode inference`)
+8. If execution mode is not explicitly specified, then the system shall infer mode from existing indicators: presence of `test_state_dict` (test mode), `evaluation=True` parameter (inference mode), or default to train mode
+9. When a test-only or inference run references a training experiment, the system shall provide a reference link in the manifest (e.g., `"parent_run_id": "..."`) for traceability
