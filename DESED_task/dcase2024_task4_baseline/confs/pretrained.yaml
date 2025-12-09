@@ -22,6 +22,16 @@ wandb:
   use_wandb: False
   wandb_dir: "None"
 
+# Experiment directory structure (NEW!)
+# Uncomment and configure to use hierarchical experiment organization
+# experiment:
+#   mode: train                    # Execution mode: train | test | inference | feature_extraction
+#   category: baseline             # Experiment category (e.g., baseline, ablation, optimization)
+#   method: cmt                    # Method name (e.g., cmt, beats, sebbs)
+#   variant: default               # Variant description (e.g., use_neg_sample, phi_0.5)
+#   base_dir: experiments          # Base directory for experiments (default: experiments)
+#   log_test_to_wandb: false       # Whether to create wandb runs in test mode (default: false)
+
 
 training:  
   batch_size: [12, 6, 6, 12, 24]    # [maestro, synth, strong, weak, unlabel]

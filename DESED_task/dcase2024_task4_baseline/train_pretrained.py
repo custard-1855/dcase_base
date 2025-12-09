@@ -18,11 +18,41 @@ from local.classes_dict import (
     classes_labels_maestro_real,
     maestro_desed_alias,
 )
+from local.experiment_dir import ExperimentConfig
 from local.resample_folder import resample_folder
 from local.sed_trainer_pretrained import SEDTask4
 from local.utils import calculate_macs, generate_tsv_wav_durations, process_tsvs
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
+
+
+def process_experiment_section(configs: dict) -> dict:
+    """Process experiment section in configs.
+
+    This function ensures experiment section exists and validates it.
+    It is called after loading YAML configuration in prepare_run().
+
+    Args:
+        configs: Configuration dictionary from YAML
+
+    Returns:
+        Modified configs with experiment section processed
+
+    Raises:
+        ValueError: If experiment config validation fails
+    """
+    # Initialize experiment section if missing
+    if "experiment" not in configs:
+        configs["experiment"] = {}
+
+    # Validate by creating ExperimentConfig instance
+    exp_config = ExperimentConfig(**configs["experiment"])
+
+    # Log the experiment structure
+    structure = f"{exp_config.mode.value}/{exp_config.category}/{exp_config.method}/{exp_config.variant}"
+    print(f"Experiment structure: {structure}")
+
+    return configs
 
 
 def resample_data_generate_durations(config_data, test_only=False, evaluation=False):
@@ -527,6 +557,7 @@ def single_run(
         scheduler=exp_scheduler,
         fast_dev_run=fast_dev_run,
         evaluation=evaluation,
+        _test_state_dict=test_state_dict,  # Task 3.4: Pass test_state_dict for mode detection
     )
 
     # callbacksの設定（desed_training作成後に移動）
@@ -722,12 +753,30 @@ def prepare_run(argv=None):
         default="None",
     )
 
+    # Execution mode (Task 3.2)
+    parser.add_argument(
+        "--mode",
+        choices=["train", "test", "inference", "feature_extraction"],
+        default=None,
+        help="Explicit execution mode (overrides auto-detection)",
+    )
+
     args = parser.parse_args(argv)
     with open(args.confs) as f:
         configs = yaml.safe_load(f)
 
     # WandB用に設定ファイルパスを保存
     configs["config_file_path"] = os.path.abspath(args.confs)
+
+    # Override experiment mode with CLI argument before processing (Task 3.2)
+    if args.mode is not None:
+        if "experiment" not in configs:
+            configs["experiment"] = {}
+        configs["experiment"]["mode"] = args.mode
+        print(f"Explicit mode specified: {args.mode}")
+
+    # Process experiment section (Task 3.1)
+    configs = process_experiment_section(configs)
 
     # CMT
     if args.cmt is not None:
@@ -751,11 +800,15 @@ def prepare_run(argv=None):
     if args.sebbs is not None:
         configs["sebbs"]["enabled"] = args.sebbs
 
-    # wandb
+    # wandb (Task 3.3 - Legacy mode compatibility)
     if args.use_wandb is not None:
         configs["wandb"]["use_wandb"] = args.use_wandb
     if args.wandb_dir is not None:
         configs["wandb"]["wandb_dir"] = args.wandb_dir
+
+        # Task 3.3: Log warning when legacy mode coexists with experiment section
+        if "experiment" in configs and args.wandb_dir != "None":
+            print("Using legacy wandb_dir mode (ignoring execution mode)")
 
     evaluation = False
     test_from_checkpoint = args.test_from_checkpoint

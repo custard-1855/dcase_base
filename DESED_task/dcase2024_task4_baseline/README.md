@@ -197,6 +197,181 @@ A different configuration YAML (for example `sed_2.yaml`) can be used in each ru
 4. download the baseline [pre-trained model checkpoint](https://zenodo.org/records/11280943/files/baseline_pretrained_2024.zip?download=1): `wget https://zenodo.org/records/11280943/files/baseline_pretrained_2024.zip?download=1` and unzip it.
 5. run the baseline: `python train_pretrained.py --eval_from_checkpoint <path_where_you_unzipped_baseline_zip>/baseline_pretrained_2024/epoch=259-step=30680.ckpt`.
 
+## Experiment Directory Structure
+
+### Overview
+
+The baseline now supports a hierarchical experiment directory structure that organizes all experiment artifacts (checkpoints, metrics, inference results, visualizations) under meaningful experiment names instead of wandb's default `run-{timestamp}-{id}` format. This feature provides better organization and traceability for research workflows.
+
+### Directory Layout
+
+Experiments are organized in a mode-based hierarchical structure:
+
+```
+experiments/
+├── train/              # Training experiments with wandb runs
+│   └── {category}/
+│       └── {method}/
+│           └── {variant}/
+│               └── run-{timestamp}-{id}/
+│                   ├── checkpoints/
+│                   ├── metrics/
+│                   ├── config/
+│                   ├── visualizations/
+│                   └── manifest.json
+├── test/               # Test-only experiments (minimal wandb logging or reuse training run)
+│   └── {category}/
+│       └── {method}/
+│           └── {variant}/
+│               └── run-{timestamp}-{id}/
+│                   ├── metrics/
+│                   └── manifest.json
+└── inference/          # Inference/feature extraction (wandb disabled)
+    └── {category}/
+        └── {method}/
+            └── {variant}/
+                └── run-{timestamp}/
+                    ├── inference/
+                    ├── visualizations/
+                    └── manifest.json
+```
+
+### Configuration
+
+To use the new experiment directory structure, add an `experiment` section to your YAML configuration file (e.g., `confs/pretrained.yaml`):
+
+```yaml
+experiment:
+  mode: train                    # Execution mode: train | test | inference | feature_extraction
+  category: baseline             # Experiment category (e.g., baseline, ablation, optimization)
+  method: cmt                    # Method name (e.g., cmt, beats, sebbs)
+  variant: use_neg_sample        # Variant description (e.g., use_neg_sample, phi_0.5)
+  base_dir: experiments          # Base directory for experiments (default: experiments)
+  log_test_to_wandb: false       # Whether to create wandb runs in test mode (default: false)
+```
+
+**Example for training experiment:**
+```yaml
+experiment:
+  mode: train
+  category: baseline
+  method: cmt
+  variant: use_neg_sample
+```
+
+**Example for inference experiment:**
+```yaml
+experiment:
+  mode: inference
+  category: baseline
+  method: cmt
+  variant: use_neg_sample
+```
+
+### Execution Modes
+
+The system recognizes four execution modes with different wandb behaviors:
+
+| Mode | Description | WandB Behavior | Directory Structure |
+|------|-------------|----------------|---------------------|
+| `train` | Training new models | **Enabled** - Creates new wandb run | `experiments/train/{category}/{method}/{variant}/` |
+| `test` | Test-only evaluation | **Conditional** - Based on `log_test_to_wandb` config | `experiments/test/{category}/{method}/{variant}/` |
+| `inference` | Inference/prediction | **Disabled** - No wandb run created | `experiments/inference/{category}/{method}/{variant}/` |
+| `feature_extraction` | Feature extraction/visualization | **Disabled** - No wandb run created | `experiments/inference/{category}/{method}/{variant}/` |
+
+**Mode detection priority:**
+1. Explicit specification via `--mode` CLI argument or YAML `experiment.mode` field
+2. Automatic inference from execution parameters:
+   - `evaluation=True` → `inference`
+   - `test_state_dict` present → `test`
+   - `fast_dev_run=True` → `train` (wandb usually disabled)
+3. Default → `train`
+
+### CLI Usage
+
+#### Training with new structure:
+```bash
+python train_pretrained.py --confs pretrained.yaml
+```
+This creates: `experiments/train/baseline/cmt/use_neg_sample/run-20250112_123456-abcd1234/`
+
+#### Explicit mode specification:
+```bash
+python train_pretrained.py --confs pretrained.yaml --mode inference
+```
+This creates: `experiments/inference/baseline/cmt/use_neg_sample/run-20250112_123456/` (no wandb run)
+
+#### Test-only evaluation:
+```bash
+python train_pretrained.py --test_from_checkpoint /path/to/checkpoint.ckpt --mode test
+```
+
+### Legacy Mode Support
+
+For backward compatibility, the existing `--wandb_dir` argument is still supported and takes priority over the new experiment structure:
+
+```bash
+python train_pretrained.py --wandb_dir "my_experiment_name"
+```
+
+**Priority order:**
+1. Legacy mode (`--wandb_dir` specified) → Uses legacy behavior
+2. New mode (YAML `experiment` section) → Uses hierarchical structure
+3. Default → Uses wandb default behavior
+
+⚠️ **Note:** When using `--wandb_dir`, the execution mode management and directory hierarchy are bypassed. This mode will be deprecated in future versions.
+
+### WandB Integration
+
+The hierarchical structure integrates seamlessly with wandb:
+
+- **Training mode**: Creates new wandb run with custom directory path (`experiments/train/...`)
+- **Test mode**: Optionally creates wandb run based on `log_test_to_wandb` config
+- **Inference/Feature Extraction mode**: Disables wandb initialization to avoid unnecessary log files
+
+When wandb is enabled, the system injects the custom directory path using `wandb.init(dir=...)`, while preserving all wandb cloud synchronization features.
+
+### Manifest File
+
+Each experiment directory contains a `manifest.json` file with metadata:
+
+```json
+{
+  "run_id": "20250112_123456-abcd1234",
+  "experiment_path": "experiments/train/baseline/cmt/use_neg_sample/run-20250112_123456-abcd1234",
+  "mode": "train",
+  "category": "baseline",
+  "method": "cmt",
+  "variant": "use_neg_sample",
+  "created_at": "2025-01-12T12:34:56Z",
+  "parent_run_id": null,
+  "config": {...}
+}
+```
+
+This manifest enables:
+- Quick lookup of experiments by run ID
+- Traceability of execution mode (train vs inference)
+- Configuration snapshots for reproducibility
+- Linking test/inference runs to parent training experiments (`parent_run_id`)
+
+### Migration Guide
+
+**For new experiments:**
+- Add the `experiment` section to your YAML config
+- Specify `mode`, `category`, `method`, and `variant`
+- Run experiments as usual with `python train_pretrained.py`
+
+**For existing experiments:**
+- No migration required - old experiments remain accessible
+- Continue using `--wandb_dir` for backward compatibility
+- Gradually adopt new structure for new experiments
+
+**Switching from legacy to new mode:**
+1. Remove `--wandb_dir` CLI argument
+2. Add `experiment` section to YAML config
+3. Run experiment - new directory structure will be created automatically
+
 ## (New !) 🧪🧪 Baseline System Hyper-Parameter Tuning via Optuna
 
 We provide an [Optuna](https://optuna.readthedocs.io/en/stable/index.html) based script for hyper-parameters tuning. 
