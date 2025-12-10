@@ -5,8 +5,6 @@ from torch import nn
 # import random
 from torch.distributions.beta import Beta
 
-# ========== Attention Network Building Blocks ==========
-
 
 class ResidualConvBlock(nn.Module):
     """残差接続付き畳み込みブロック"""
@@ -72,10 +70,7 @@ class SEBlock(nn.Module):
         return x * y.expand_as(x)
 
 
-# ========== MixStyle Function ==========
-
-
-def mix_style(content_feature):  # ok
+def mix_style(content_feature):
     """Args:
         content_feature (Tensor): スタイルを適用したい元の特徴量
             (batch_size, n_channels, n_frames, n_freq)
@@ -88,8 +83,6 @@ def mix_style(content_feature):  # ok
     if torch.rand(1).item() > p:
         return content_feature
 
-    # 試験的に周波数で混合
-    # 実験のため2に戻す
     content_mean = content_feature.mean(dim=(2), keepdim=True)
     content_var = content_feature.var(dim=(2), keepdim=True)
     content_std = (content_var + 1e-6).sqrt()

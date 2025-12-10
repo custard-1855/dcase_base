@@ -1035,7 +1035,6 @@ class SEDTask4(pl.LightningModule):
         if self.use_neg_sample:
             # --- use neg_sample ---
             # マスク生成
-            # マスク生成
             pos_mask_w_unlabeled = (y_tilde_w[index_weak:] == 1.0).float()
             neg_mask_w_unlabeled = (y_tilde_w[index_weak:] == 0.0).float()
 

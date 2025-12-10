@@ -1,5 +1,6 @@
 import torch
-import torch.nn as nn
+from torch import nn
+
 from .mixstyle import FrequencyAttentionMixStyle
 
 
@@ -43,10 +44,9 @@ class CNN(nn.Module):
         nb_filters=[64, 64, 64],
         pooling=[(1, 4), (1, 4), (1, 4)],
         normalization="batch",
-        **kwargs
+        **kwargs,
     ):
-        """
-            Initialization of CNN network s
+        """Initialization of CNN network s
 
         Args:
             n_in_channel: int, number of input channel
@@ -58,6 +58,7 @@ class CNN(nn.Module):
             nb_filters: number of filters
             pooling: list of tuples, time and frequency pooling
             normalization: choose between "batch" for BatchNormalization and "layer" for LayerNormalization.
+
         """
         super(CNN, self).__init__()
 
@@ -70,10 +71,13 @@ class CNN(nn.Module):
         for i in range(len(nb_filters)):
             nIn = n_in_channel if i == 0 else nb_filters[i - 1]
             nOut = nb_filters[i]
-            
+
             block = nn.Sequential()
-            block.add_module(f"conv{i}", nn.Conv2d(nIn, nOut, kernel_size[i], stride[i], padding[i]))
-            
+            block.add_module(
+                f"conv{i}",
+                nn.Conv2d(nIn, nOut, kernel_size[i], stride[i], padding[i]),
+            )
+
             if normalization == "batch":
                 block.add_module(f"batchnorm{i}", nn.BatchNorm2d(nOut, eps=0.001, momentum=0.99))
             elif normalization == "layer":
@@ -83,12 +87,12 @@ class CNN(nn.Module):
                 block.add_module(f"relu{i}", nn.LeakyReLU(0.2))
             elif activation.lower() == "relu":
                 block.add_module(f"relu{i}", nn.ReLU())
-            
+
             if conv_dropout > 0:
                 block.add_module(f"dropout{i}", nn.Dropout(conv_dropout))
-            
+
             block.add_module(f"pooling{i}", nn.AvgPool2d(pooling[i]))
-            
+
             self.conv_blocks.append(block)
 
         # --- FrequencyAttentionMixStyleレイヤーを定義 ---
@@ -109,14 +113,14 @@ class CNN(nn.Module):
         # self.cnn = cnn
 
     def forward(self, x):
-        """
-        Forward step of the CNN module
+        """Forward step of the CNN module.
 
         Args:
             x (Tensor): input batch of size (batch_size, n_channels, n_frames, n_freq)
 
         Returns:
             Tensor: batch embedded
+
         """
         # conv features
         # x = self.cnn(x)
@@ -124,13 +128,13 @@ class CNN(nn.Module):
         if self.training and self.mixstyle_type != "disabled":
             # 1. 1層目の前に適用
             x = self.attn_mixstyle_pre(x)
-            
+
             # 2. 1層目の畳み込みブロックを適用
             x = self.conv_blocks[0](x)
-            
+
             # 3. 1層目の後に適用
             x = self.attn_mixstyle_post1(x)
-            
+
             # 4. 2層目の畳み込みブロックを適用
             x = self.conv_blocks[1](x)
 
@@ -140,7 +144,7 @@ class CNN(nn.Module):
             # 6. 3層目以降の畳み込みブロックを適用
             for i in range(2, len(self.conv_blocks)):
                 x = self.conv_blocks[i](x)
-        else: 
-            for i in range(0, len(self.conv_blocks)):
+        else:
+            for i in range(len(self.conv_blocks)):
                 x = self.conv_blocks[i](x)
         return x
