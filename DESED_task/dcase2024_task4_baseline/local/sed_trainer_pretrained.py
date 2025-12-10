@@ -861,6 +861,9 @@ class SEDTask4(pl.LightningModule):
         tot_loss_supervised = loss_strong + loss_weak
 
         # ---Teacher Forward (No Grad) ---
+        # Set teacher to eval mode to disable augmentations (e.g., MixStyle)
+        # This ensures teacher provides stable, non-augmented predictions
+        self.sed_teacher.eval()
         with torch.no_grad():
             strong_preds_teacher, weak_preds_teacher = self.detect(
                 features,
@@ -868,6 +871,9 @@ class SEDTask4(pl.LightningModule):
                 embeddings=embeddings,
                 classes_mask=valid_class_mask,
             )
+        # Restore training mode for consistency with PyTorch Lightning
+        # Note: EMA updates work regardless of mode
+        self.sed_teacher.train()
 
         # --- Consistency Loss (Mean Teacher) ---
         weight = self.hparams["training"]["const_max"]
@@ -878,6 +884,10 @@ class SEDTask4(pl.LightningModule):
 
         # CMT
         if cmt_active:
+            # Compute relative index_weak after mask_consistency filtering
+            # mask_consistency excludes maestro data, so we need to adjust index
+            index_weak_relative = indx_weak - indx_maestro
+
             # Apply CMT processing
             with torch.no_grad():
                 if self.use_neg_sample:
@@ -888,7 +898,7 @@ class SEDTask4(pl.LightningModule):
                     ) = self.apply_cmt_postprocessing(
                         weak_preds_teacher[mask_consistency],
                         strong_preds_teacher[mask_consistency],
-                        index_weak=indx_weak,
+                        index_weak=index_weak_relative,
                     )
                     # Compute confidence weights
                     confidence_w, confidence_s = self.compute_cmt_confidence_weights(
@@ -896,14 +906,14 @@ class SEDTask4(pl.LightningModule):
                         strong_preds_teacher[mask_consistency],
                         teacher_pseudo_w,
                         teacher_pseudo_s,
-                        index_weak=indx_weak,
+                        index_weak=index_weak_relative,
                     )
                 else:
                     # Apply CMT postprocessing to teacher predictions
                     teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
                         weak_preds_teacher[mask_consistency],
                         strong_preds_teacher[mask_consistency],
-                        index_weak=indx_weak,
+                        index_weak=index_weak_relative,
                     )
 
                     # Compute confidence weights
@@ -912,7 +922,7 @@ class SEDTask4(pl.LightningModule):
                         strong_preds_teacher[mask_consistency],
                         teacher_pseudo_w,
                         teacher_pseudo_s,
-                        index_weak=indx_weak,
+                        index_weak=index_weak_relative,
                     )
 
             # Compute CMT consistency loss with confidence weighting
@@ -1034,40 +1044,37 @@ class SEDTask4(pl.LightningModule):
         """
         if self.use_neg_sample:
             # --- use neg_sample ---
-            # マスク生成
+            # Unlabeled部分のマスク生成
+            y_w_unlabeled = y_w[index_weak:]
+            y_s_unlabeled = y_s[index_weak:]
+
             pos_mask_w_unlabeled = (y_tilde_w[index_weak:] == 1.0).float()
             neg_mask_w_unlabeled = (y_tilde_w[index_weak:] == 0.0).float()
-
-            # Labeled部分は1.0マスク（全てのサンプルを同等に扱う）
-            ones_mask_w = torch.ones_like(y_w[:index_weak])
-
-            pos_mask_w = torch.cat((ones_mask_w, pos_mask_w_unlabeled), dim=0)
-            neg_mask_w = torch.cat(
-                (torch.zeros_like(y_w[:index_weak]), neg_mask_w_unlabeled),
-                dim=0,
-            )
-
-            # 信頼度計算
-            c_w_pos = pos_mask_w * y_w  # labeled部分: 1.0 * y_w = y_w
-            c_w_neg = neg_mask_w * (1.0 - y_w)  # labeled部分: 0
-            c_w = c_w_pos + c_w_neg
 
             pos_mask_s_unlabeled = (y_tilde_s[index_weak:] == 1.0).float()
             neg_mask_s_unlabeled = (y_tilde_s[index_weak:] == 0.0).float()
 
-            # Labeled部分は1.0マスク（全てのサンプルを同等に扱う）
-            ones_mask_s = torch.ones_like(y_s[:index_weak])
+            # Unlabeled部分の信頼度計算
+            c_w_pos_unlabeled = pos_mask_w_unlabeled * y_w_unlabeled
+            c_w_neg_unlabeled = neg_mask_w_unlabeled * (1.0 - y_w_unlabeled)
+            c_w_unlabeled = c_w_pos_unlabeled + c_w_neg_unlabeled
 
-            pos_mask_s = torch.cat((ones_mask_s, pos_mask_s_unlabeled), dim=0)
-            neg_mask_s = torch.cat(
-                (torch.zeros_like(y_s[:index_weak]), neg_mask_s_unlabeled),
-                dim=0,
-            )
+            c_s_pos_unlabeled = pos_mask_s_unlabeled * y_s_unlabeled
+            c_s_neg_unlabeled = neg_mask_s_unlabeled * (1.0 - y_s_unlabeled)
+            c_s_unlabeled = c_s_pos_unlabeled + c_s_neg_unlabeled
 
-            # 信頼度計算
-            c_s_pos = pos_mask_s * y_s  # labeled部分: 1.0 * y_w = y_w
-            c_s_neg = neg_mask_s * (1.0 - y_s)  # labeled部分: 0
-            c_s = c_s_pos + c_s_neg
+            # Labeled部分は常に信頼度1.0
+            c_w_labeled = torch.ones_like(y_w[:index_weak])
+            c_s_labeled = torch.ones_like(y_s[:index_weak])
+
+            # 結合（pos/negは後でスケーリングに使用）
+            c_w_pos = torch.cat((c_w_labeled, c_w_pos_unlabeled), dim=0)
+            c_w_neg = torch.cat((torch.zeros_like(y_w[:index_weak]), c_w_neg_unlabeled), dim=0)
+            c_w = torch.cat((c_w_labeled, c_w_unlabeled), dim=0)
+
+            c_s_pos = torch.cat((c_s_labeled, c_s_pos_unlabeled), dim=0)
+            c_s_neg = torch.cat((torch.zeros_like(y_s[:index_weak]), c_s_neg_unlabeled), dim=0)
+            c_s = torch.cat((c_s_labeled, c_s_unlabeled), dim=0)
 
         else:
             # --- CMT ---
@@ -1079,32 +1086,37 @@ class SEDTask4(pl.LightningModule):
         # 温度パラメータによる調整
 
         if self.use_neg_sample and self.pos_neg_scale:  # 正例と負例の量を調整
-            # 正例と負例の総重みを計算
-            pos_sum_w = c_w_pos.sum().clamp(min=1e-6)
-            neg_sum_w = c_w_neg.sum().clamp(min=1e-6)
+            # Unlabeled部分のみの正例と負例の総重みを計算
+            pos_sum_w_unlabeled = c_w_pos_unlabeled.sum().clamp(min=1e-6)
+            neg_sum_w_unlabeled = c_w_neg_unlabeled.sum().clamp(min=1e-6)
 
-            pos_sum_s = c_s_pos.sum().clamp(min=1e-6)
-            neg_sum_s = c_s_neg.sum().clamp(min=1e-6)
+            pos_sum_s_unlabeled = c_s_pos_unlabeled.sum().clamp(min=1e-6)
+            neg_sum_s_unlabeled = c_s_neg_unlabeled.sum().clamp(min=1e-6)
 
-            # 少ない方に合わせてスケーリング
-            if pos_sum_w < neg_sum_w:
+            # Unlabeled部分のみをスケーリング
+            if pos_sum_w_unlabeled < neg_sum_w_unlabeled:
                 # 負例が多い → 負例を縮小
-                scale_factor = neg_sum_w / pos_sum_w
-                c_w = c_w_pos + c_w_neg / scale_factor
+                scale_factor = neg_sum_w_unlabeled / pos_sum_w_unlabeled
+                c_w_unlabeled_scaled = c_w_pos_unlabeled + c_w_neg_unlabeled / scale_factor
             else:
                 # 正例が多い → 正例を縮小
-                scale_factor = pos_sum_w / neg_sum_w
-                c_w = c_w_pos / scale_factor + c_w_neg
+                scale_factor = pos_sum_w_unlabeled / neg_sum_w_unlabeled
+                c_w_unlabeled_scaled = c_w_pos_unlabeled / scale_factor + c_w_neg_unlabeled
 
-            if pos_sum_s < neg_sum_s:
-                scale_factor = neg_sum_s / pos_sum_s
-                c_s = c_s_pos + c_s_neg / scale_factor
+            if pos_sum_s_unlabeled < neg_sum_s_unlabeled:
+                scale_factor = neg_sum_s_unlabeled / pos_sum_s_unlabeled
+                c_s_unlabeled_scaled = c_s_pos_unlabeled + c_s_neg_unlabeled / scale_factor
             else:
-                scale_factor = pos_sum_s / neg_sum_s
-                c_s = c_s_pos / scale_factor + c_s_neg
+                scale_factor = pos_sum_s_unlabeled / neg_sum_s_unlabeled
+                c_s_unlabeled_scaled = c_s_pos_unlabeled / scale_factor + c_s_neg_unlabeled
 
-            self.log("train/cmt/pos_neg_ratio_weak", pos_sum_w / neg_sum_w)
-            self.log("train/cmt/pos_neg_ratio_strong", pos_sum_s / neg_sum_s)
+            # Labeledとスケール済みUnlabeledを結合
+            c_w = torch.cat((c_w_labeled, c_w_unlabeled_scaled), dim=0)
+            c_s = torch.cat((c_s_labeled, c_s_unlabeled_scaled), dim=0)
+
+            # ログを更新（スケール前の値を記録）
+            self.log("train/cmt/pos_neg_ratio_weak", pos_sum_w_unlabeled / neg_sum_w_unlabeled)
+            self.log("train/cmt/pos_neg_ratio_strong", pos_sum_s_unlabeled / neg_sum_s_unlabeled)
 
         return c_w, c_s
 
