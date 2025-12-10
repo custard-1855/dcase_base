@@ -1,8 +1,8 @@
 import warnings
 
 import torch
-import torch.nn as nn
 import torchaudio.transforms
+from torch import nn
 
 from .CNN import CNN
 from .RNN import BidirectionalGRU
@@ -36,8 +36,7 @@ class CRNN(nn.Module):
         dropstep_recurrent_len=5,
         **kwargs,
     ):
-        """
-            Initialization of CRNN model
+        """Initialization of CRNN model.
 
         Args:
             n_in_channel: int, number of input channel
@@ -53,6 +52,7 @@ class CRNN(nn.Module):
             cnn_integration: bool, integration of cnn
             freeze_bn:
             **kwargs: keywords arguments for CNN.
+
         """
         super(CRNN, self).__init__()
 
@@ -78,7 +78,10 @@ class CRNN(nn.Module):
             n_in_cnn = 1
 
         self.cnn = CNN(
-            n_in_channel=n_in_cnn, activation=activation, conv_dropout=dropout, **kwargs
+            n_in_channel=n_in_cnn,
+            activation=activation,
+            conv_dropout=dropout,
+            **kwargs,
         )
 
         self.train_cnn = train_cnn
@@ -111,7 +114,7 @@ class CRNN(nn.Module):
                 self.dense.append(nn.Linear(n_RNN_cell * 2, current_classes))
                 if self.attention:
                     self.dense_softmax.append(
-                        nn.Linear(n_RNN_cell * 2, current_classes)
+                        nn.Linear(n_RNN_cell * 2, current_classes),
                     )
 
         else:
@@ -139,19 +142,22 @@ class CRNN(nn.Module):
                 self.cat_tf = torch.nn.Linear(2 * nb_in, nb_in)
             elif self.aggregation_type == "global":
                 self.shrink_emb = torch.nn.Sequential(
-                    torch.nn.Linear(embedding_size, nb_in), torch.nn.LayerNorm(nb_in)
+                    torch.nn.Linear(embedding_size, nb_in),
+                    torch.nn.LayerNorm(nb_in),
                 )
                 self.cat_tf = torch.nn.Linear(2 * nb_in, nb_in)
-            elif self.aggregation_type == "interpolate":
-                self.cat_tf = torch.nn.Linear(nb_in + embedding_size, nb_in)
-            elif self.aggregation_type == "pool1d":
+            elif self.aggregation_type == "interpolate" or self.aggregation_type == "pool1d":
                 self.cat_tf = torch.nn.Linear(nb_in + embedding_size, nb_in)
             else:
                 self.cat_tf = torch.nn.Linear(2 * nb_in, nb_in)
 
-
     def _get_logits_one_head(
-        self, x, pad_mask, dense, dense_softmax, classes_mask=None
+        self,
+        x,
+        pad_mask,
+        dense,
+        dense_softmax,
+        classes_mask=None,
     ):
         strong = dense(x)  # [bs, frames, nclass]
         strong = self.sigmoid(strong)
@@ -159,7 +165,7 @@ class CRNN(nn.Module):
             classes_mask = ~classes_mask[:, None].expand_as(strong)
         if self.attention in [True, "legacy"]:
             sof = dense_softmax(x)  # [bs, frames, nclass]
-            if not pad_mask is None:
+            if pad_mask is not None:
                 sof = sof.masked_fill(pad_mask.transpose(1, 2), -1e30)  # mask attention
 
             if classes_mask is not None:
@@ -186,53 +192,57 @@ class CRNN(nn.Module):
             # maestro_synth, maestro_real and desed.
             # not sure which approach is better. We must try.
             for indx, c_classes in enumerate(self.nclass):
-                dense_softmax = (
-                    self.dense_softmax[indx] if hasattr(self, "dense_softmax") else None
-                )
+                dense_softmax = self.dense_softmax[indx] if hasattr(self, "dense_softmax") else None
                 c_strong, c_weak = self._get_logits_one_head(
-                    x, pad_mask, self.dense[indx], dense_softmax, classes_mask
+                    x,
+                    pad_mask,
+                    self.dense[indx],
+                    dense_softmax,
+                    classes_mask,
                 )
                 out_strong.append(c_strong)
                 out_weak.append(c_weak)
 
             # concatenate over class dimension
             return torch.cat(out_strong, 1), torch.cat(out_weak, 1)
-        else:
-            dense_softmax = (
-                self.dense_softmax if hasattr(self, "dense_softmax") else None
-            )
-            return self._get_logits_one_head(
-                x, pad_mask, self.dense, dense_softmax, classes_mask
-            )
+        dense_softmax = self.dense_softmax if hasattr(self, "dense_softmax") else None
+        return self._get_logits_one_head(
+            x,
+            pad_mask,
+            self.dense,
+            dense_softmax,
+            classes_mask,
+        )
 
     def apply_specaugment(self, x):
-
         if self.training:
-
             timemask = torchaudio.transforms.TimeMasking(
-                self.specaugm_t_l, True, self.specaugm_t_p
+                self.specaugm_t_l,
+                True,
+                self.specaugm_t_p,
             )
             freqmask = torchaudio.transforms.TimeMasking(
-                self.specaugm_f_l, True, self.specaugm_f_p
+                self.specaugm_f_l,
+                True,
+                self.specaugm_f_p,
             )  # use time masking also here
             x = timemask(freqmask(x.transpose(1, -1)).transpose(1, -1))
 
         return x
 
     def forward(self, x, pad_mask=None, embeddings=None, classes_mask=None, return_features=False):
-
         # input x: batch, time, freq?
         x = self.apply_specaugment(x)
         x = x.transpose(1, 2).unsqueeze(1)
-        #--- delta, delta delta ---
-            # 時間軸でのlog mel + MFCCは効果が薄い?
-            # log melのdelta, delta deltaをチャネル次元で重ねる
-            # 1がチャネル次元のはず
+        # --- delta, delta delta ---
+        # 時間軸でのlog mel + MFCCは効果が薄い?
+        # log melのdelta, delta deltaをチャネル次元で重ねる
+        # 1がチャネル次元のはず
         # delta = torchaudio.functional.compute_deltas(x)
         # delta2 = torchaudio.functional. compute_deltas(delta)
         # combined_tensor = torch.stack([x, delta, delta2], dim=1)
         # x = combined_tensor # 重ねた特徴量を入力にする
-        
+
         # x = x.transpose(2,3) # timeとfreqを入れ替え
 
         # input size : (batch_size, n_channels, n_frames, n_freq)
@@ -249,7 +259,7 @@ class CRNN(nn.Module):
 
         if freq != 1:
             warnings.warn(
-                f"Output shape is: {(bs, frames, chan * freq)}, from {freq} staying freq"
+                f"Output shape is: {(bs, frames, chan * freq)}, from {freq} staying freq",
             )
             x = x.permute(0, 2, 1, 3)
             x = x.contiguous().view(bs, frames, chan * freq)
@@ -264,27 +274,25 @@ class CRNN(nn.Module):
                     torch.cat(
                         (
                             x,
-                            self.shrink_emb(embeddings)
-                            .unsqueeze(1)
-                            .repeat(1, x.shape[1], 1),
+                            self.shrink_emb(embeddings).unsqueeze(1).repeat(1, x.shape[1], 1),
                         ),
                         -1,
-                    )
+                    ),
                 )
             elif self.aggregation_type == "frame":
                 # there can be some mismatch between seq length of cnn of crnn and the pretrained embeddings, we use an rnn
                 # as an encoder and we use the last state
                 last, _ = self.frame_embs_encoder(embeddings.transpose(1, 2))
                 embeddings = last[:, -1]
-                reshape_emb = (
-                    self.shrink_emb(embeddings).unsqueeze(1).repeat(1, x.shape[1], 1)
-                )
+                reshape_emb = self.shrink_emb(embeddings).unsqueeze(1).repeat(1, x.shape[1], 1)
 
             elif self.aggregation_type == "interpolate":
                 output_shape = (embeddings.shape[1], x.shape[1])
                 reshape_emb = (
                     torch.nn.functional.interpolate(
-                        embeddings.unsqueeze(1), size=output_shape, mode="nearest-exact"
+                        embeddings.unsqueeze(1),
+                        size=output_shape,
+                        mode="nearest-exact",
                     )
                     .squeeze(1)
                     .transpose(1, 2)
@@ -292,7 +300,8 @@ class CRNN(nn.Module):
 
             elif self.aggregation_type == "pool1d":
                 reshape_emb = torch.nn.functional.adaptive_avg_pool1d(
-                    embeddings, x.shape[1]
+                    embeddings,
+                    x.shape[1],
                 ).transpose(1, 2)
             else:
                 raise NotImplementedError
@@ -300,18 +309,21 @@ class CRNN(nn.Module):
         if self.use_embeddings:
             if self.dropstep_recurrent and self.training:
                 dropstep = torchaudio.transforms.TimeMasking(
-                    self.dropstep_recurrent_len, True, self.dropstep_recurrent
+                    self.dropstep_recurrent_len,
+                    True,
+                    self.dropstep_recurrent,
                 )
                 x = dropstep(x.transpose(1, -1)).transpose(1, -1)
                 reshape_emb = dropstep(reshape_emb.transpose(1, -1)).transpose(1, -1)
             x = self.cat_tf(self.dropout(torch.cat((x, reshape_emb), -1)))
-        else:
-            if self.dropstep_recurrent and self.training:
-                dropstep = torchaudio.transforms.TimeMasking(
-                    self.dropstep_recurrent_len, True, self.dropstep_recurrent
-                )
-                x = dropstep(x.transpose(1, 2)).transpose(1, 2)
-                x = self.dropout(x)
+        elif self.dropstep_recurrent and self.training:
+            dropstep = torchaudio.transforms.TimeMasking(
+                self.dropstep_recurrent_len,
+                True,
+                self.dropstep_recurrent,
+            )
+            x = dropstep(x.transpose(1, 2)).transpose(1, 2)
+            x = self.dropout(x)
 
         x = self.rnn(x)
 
@@ -320,18 +332,16 @@ class CRNN(nn.Module):
             x = self.dropout(x)
             strong, weak = self._get_logits(x, pad_mask, classes_mask)
             return {
-                'strong_probs': strong,
-                'weak_probs': weak,
-                'features': features
+                "strong_probs": strong,
+                "weak_probs": weak,
+                "features": features,
             }
 
         x = self.dropout(x)
         return self._get_logits(x, pad_mask, classes_mask)
 
     def train(self, mode=True):
-        """
-        Override the default train() to freeze the BN parameters
-        """
+        """Override the default train() to freeze the BN parameters"""
         super(CRNN, self).train(mode)
         if self.freeze_bn:
             print("Freezing Mean/Var of BatchNorm2D.")
