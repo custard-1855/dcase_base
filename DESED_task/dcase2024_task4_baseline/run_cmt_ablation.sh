@@ -21,7 +21,7 @@
 
 # デフォルト設定
 CATEGORY="ablation"
-METHOD="cmt_neg_sampling"
+METHOD="cmt_neg_sampling_100"
 BASE_DIR="experiments"
 
 # 引数解析
