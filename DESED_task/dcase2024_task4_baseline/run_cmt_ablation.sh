@@ -72,20 +72,20 @@ echo ""
 
 
 # 実験1: CMT + negative sampling
-echo "[1/5] Running: CMT with negative sampling"
+echo "[1/6] Running: CMT with negative sampling"
 uv run train_pretrained.py \
     --use_wandb \
     --category ${CATEGORY} \
     --method ${METHOD} \
-    --variant cmt_with_neg \
+    --variant neg \
     --base_dir ${BASE_DIR} \
     --cmt \
     --use_neg_sample \
-    2>&1 | tee ${LOG_DIR}/cmt_with_neg_${TIMESTAMP}.log
+    2>&1 | tee ${LOG_DIR}/neg_${TIMESTAMP}.log
 
 
 # 実験2: Baseline (CMT無効)
-echo "[2/5] Running: Baseline (No CMT)"
+echo "[2/6] Running: Baseline (No CMT)"
 uv run train_pretrained.py \
     --use_wandb \
     --category ${CATEGORY} \
@@ -99,7 +99,7 @@ echo "---"
 echo ""
 
 # 実験3: CMT (negative sampling無し)
-echo "[3/5] Running: CMT without negative sampling"
+echo "[3/6] Running: CMT without negative sampling"
 uv run train_pretrained.py \
     --use_wandb \
     --category ${CATEGORY} \
@@ -107,7 +107,7 @@ uv run train_pretrained.py \
     --variant cmt_no_neg \
     --base_dir ${BASE_DIR} \
     --cmt \
-    2>&1 | tee ${LOG_DIR}/cmt_no_neg_${TIMESTAMP}.log
+    2>&1 | tee ${LOG_DIR}/no_neg_${TIMESTAMP}.log
 
 echo ""
 echo "---"
@@ -115,31 +115,47 @@ echo ""
 
 
 # 実験4: CMT + negative sampling + non_zero_scale
-echo "[4/5] Running: CMT with negative sampling"
+echo "[4/6] Running: CMT with negative sampling"
 uv run train_pretrained.py \
     --use_wandb \
     --category ${CATEGORY} \
     --method ${METHOD} \
-    --variant cmt_with_neg_non_zero_scale \
+    --variant neg_non_zero \
     --base_dir ${BASE_DIR} \
     --cmt \
     --use_neg_sample \
     --non_zero_scale \
-    2>&1 | tee ${LOG_DIR}/cmt_with_neg_non_zero_scale${TIMESTAMP}.log
+    2>&1 | tee ${LOG_DIR}/neg_non-zero${TIMESTAMP}.log
 
 
-# 実験4: CMT + negative sampling + pos_neg_scale
-echo "[5/5] Running: CMT with negative sampling"
+# 実験5: CMT + negative sampling + pos_neg_scale
+echo "[5/6] Running: CMT with negative sampling"
 uv run train_pretrained.py \
     --use_wandb \
     --category ${CATEGORY} \
     --method ${METHOD} \
-    --variant cmt_with_neg_pos_neg_scale \
+    --variant neg_pos_neg \
     --base_dir ${BASE_DIR} \
     --cmt \
     --use_neg_sample \
     --pos_neg_scale \
-    2>&1 | tee ${LOG_DIR}/cmt_with_neg_pos_neg_scale${TIMESTAMP}.log
+    2>&1 | tee ${LOG_DIR}/neg_pos-neg${TIMESTAMP}.log
+
+
+# 実験6: CMT + negative sampling + non_zero_scale + pos_neg_scale
+echo "[6/6] Running: CMT with negative sampling + double scale"
+uv run train_pretrained.py \
+    --use_wandb \
+    --category ${CATEGORY} \
+    --method ${METHOD} \
+    --variant neg_non-zero_pos-neg \
+    --base_dir ${BASE_DIR} \
+    --cmt \
+    --use_neg_sample \
+    --non_zero_scale \
+    --pos_neg_scale \
+    2>&1 | tee ${LOG_DIR}/neg_non-zero_pos-neg${TIMESTAMP}.log
+
 
 
 echo ""
