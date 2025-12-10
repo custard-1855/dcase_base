@@ -773,6 +773,42 @@ def prepare_run(argv=None):
         "--mixstyle_type",
         default="disabled",
     )
+    parser.add_argument(
+        "--blend_type",
+        choices=["linear", "residual"],
+        default="linear",
+        help="Blending method for frequency attention",
+    )
+    parser.add_argument(
+        "--attn_input",
+        choices=["mixed", "content", "dual_stream"],
+        default="mixed",
+        help="Input feature for attention computation",
+    )
+    parser.add_argument(
+        "--n_heads",
+        type=int,
+        default=4,
+        help="Number of attention heads for Transformer-based MixStyle",
+    )
+    parser.add_argument(
+        "--ff_dim",
+        type=int,
+        default=256,
+        help="Feed-forward dimension for Transformer-based MixStyle",
+    )
+    parser.add_argument(
+        "--n_layers",
+        type=int,
+        default=1,
+        help="Number of Transformer layers for Transformer-based MixStyle",
+    )
+    parser.add_argument(
+        "--mixstyle_dropout",
+        type=float,
+        default=0.1,
+        help="Dropout rate for Transformer-based MixStyle (separate from net.dropout)",
+    )
 
     # SEBBs
     parser.add_argument(
@@ -885,6 +921,18 @@ def prepare_run(argv=None):
         configs["net"]["attn_deepen"] = args.attn_deepen
     if args.mixstyle_type is not None:
         configs["net"]["mixstyle_type"] = args.mixstyle_type
+    if args.blend_type is not None:
+        configs["net"]["blend_type"] = args.blend_type
+    if args.attn_input is not None:
+        configs["net"]["attn_input"] = args.attn_input
+    if args.n_heads is not None:
+        configs["net"]["n_heads"] = args.n_heads
+    if args.ff_dim is not None:
+        configs["net"]["ff_dim"] = args.ff_dim
+    if args.n_layers is not None:
+        configs["net"]["n_layers"] = args.n_layers
+    if args.mixstyle_dropout is not None:
+        configs["net"]["mixstyle_dropout"] = args.mixstyle_dropout
 
     # SEBBs
     if args.sebbs is not None:
