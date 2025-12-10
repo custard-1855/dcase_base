@@ -912,6 +912,7 @@ class SEDTask4(pl.LightningModule):
                         strong_preds_teacher[mask_consistency],
                         teacher_pseudo_w,
                         teacher_pseudo_s,
+                        index_weak=indx_weak,
                     )
 
             # Compute CMT consistency loss with confidence weighting
