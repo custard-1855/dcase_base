@@ -1,13 +1,23 @@
-import torch
-import torch.nn.functional as F
-from torch import nn
+"""MixStyle with Frequency Attention for Sound Event Detection.
 
-# import random
+This module implements various frequency-aware MixStyle augmentation techniques:
+1. Basic MixStyle augmentation (mix_style)
+2. CNN-based frequency attention MixStyle (FrequencyAttentionMixStyle)
+3. Transformer-based frequency attention MixStyle (FrequencyTransformerMixStyle)
+4. Cross-attention based MixStyle (CrossAttentionMixStyle)
+"""
+
+import torch
+from torch import nn
 from torch.distributions.beta import Beta
+
+# =============================================================================
+# Auxiliary Modules for Attention Networks
+# =============================================================================
 
 
 class ResidualConvBlock(nn.Module):
-    """残差接続付き畳み込みブロック"""
+    """Residual convolutional block with skip connection."""
 
     def __init__(self, channels, kernel_size=3):
         super().__init__()
@@ -21,15 +31,14 @@ class ResidualConvBlock(nn.Module):
         self.relu = nn.ReLU()
 
     def forward(self, x):
-        return self.relu(x + self.conv(x))  # 残差接続
+        return self.relu(x + self.conv(x))
 
 
 class MultiScaleConvBlock(nn.Module):
-    """マルチスケール畳み込みブロック（異なる受容野を並列処理）"""
+    """Multi-scale convolutional block with parallel branches of different kernel sizes."""
 
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        # 異なるkernel sizeで周波数パターンを捉える
         out_per_branch = out_channels // 3
         remainder = out_channels - (out_per_branch * 3)
 
@@ -43,107 +52,130 @@ class MultiScaleConvBlock(nn.Module):
         x1 = self.conv1(x)
         x3 = self.conv3(x)
         x5 = self.conv5(x)
-        out = torch.cat([x1, x3, x5], dim=1)  # チャネル方向に結合
+        out = torch.cat([x1, x3, x5], dim=1)
         return self.relu(self.bn(out))
 
 
-class SEBlock(nn.Module):
-    """Squeeze-and-Excitation Block (チャネルattention)"""
-
-    def __init__(self, channels, reduction=4):
-        super().__init__()
-        self.squeeze = nn.AdaptiveAvgPool1d(1)  # Global average pooling
-        self.excitation = nn.Sequential(
-            nn.Linear(channels, max(channels // reduction, 1)),
-            nn.ReLU(),
-            nn.Linear(max(channels // reduction, 1), channels),
-            nn.Sigmoid(),
-        )
-
-    def forward(self, x):
-        b, c, _ = x.size()
-        # Squeeze: グローバルな情報を集約
-        y = self.squeeze(x).view(b, c)
-        # Excitation: チャネル重要度を計算
-        y = self.excitation(y).view(b, c, 1)
-        # 元の特徴量に重み付け
-        return x * y.expand_as(x)
+# =============================================================================
+# Core MixStyle Function
+# =============================================================================
 
 
 def mix_style(content_feature):
-    """Args:
-        content_feature (Tensor): スタイルを適用したい元の特徴量
-            (batch_size, n_channels, n_frames, n_freq)
+    """Apply MixStyle augmentation by mixing statistics across the batch.
+
+    Args:
+        content_feature: Input features (batch_size, n_channels, n_frames, n_freq)
 
     Returns:
-        Tensor: スタイルが適用された新しい特徴量
+        Augmented features with mixed statistics
 
     """
-    p = 0.5
-    if torch.rand(1).item() > p:
+    # Probability of applying augmentation
+    AUGMENTATION_PROB = 0.5
+    if torch.rand(1).item() > AUGMENTATION_PROB:
         return content_feature
 
-    content_mean = content_feature.mean(dim=(2), keepdim=True)
-    content_var = content_feature.var(dim=(2), keepdim=True)
-    content_std = (content_var + 1e-6).sqrt()
+    # Compute mean and std along time dimension
+    EPSILON = 1e-6
+    content_mean = content_feature.mean(dim=2, keepdim=True)
+    content_var = content_feature.var(dim=2, keepdim=True)
+    content_std = (content_var + EPSILON).sqrt()
 
     content_mean, content_std = content_mean.detach(), content_std.detach()
-    content_normed = (content_feature - content_mean) / (content_std)
+    content_normed = (content_feature - content_mean) / content_std
 
-    # x_styleを内部で用意
+    # Shuffle batch to get different style statistics
     B = content_feature.size(0)
     perm = torch.randperm(B, device=content_feature.device)
-
     mu2, sig2 = content_mean[perm], content_std[perm]
 
-    # ランダムな比率で統計量を混ぜる
-    alpha = 0.1  # デフォルトは0.1
-    lam = Beta(alpha, alpha).sample((B, 1, 1, 1))
+    # Mix statistics with random ratio
+    BETA_ALPHA = 0.1
+    lam = Beta(BETA_ALPHA, BETA_ALPHA).sample((B, 1, 1, 1))
     lam = lam.to(device=content_feature.device)
 
     mixed_mean = lam * content_mean + (1 - lam) * mu2
     mixed_std = lam * content_std + (1 - lam) * sig2
 
-    # 元の特徴量を新しい統計量で正規化・スケールし直す
     return content_normed * mixed_std + mixed_mean
 
 
-class FrequencyAttentionMixStyle(nn.Module):
-    def __init__(self, channels, **kwargs):
-        """Args:
-        channels (int): 入力特徴量のチャンネル数
-        kwargs:
-            attn_type (str): attention network type
-                - "default": 浅い2層CNN
-                - "residual_deep": 残差接続で深いネットワーク
-                - "multiscale": マルチスケール畳み込み
-                - "se_deep": SE-Block組み込み深層ネットワーク
-                - "dilated_deep": Dilated Convolution
-            attn_deepen (int): 深さ（層数）
-            mixstyle_type (str): MixStyleとの組み合わせ方
-            blend_type (str): 出力の合成方法
-                - "linear": attn * x_mixed + (1 - attn) * x_content (default)
-                - "residual": x_content + attn * (x_mixed - x_content)
-            attn_input (str): attention計算の入力選択
-                - "mixed": x_mixed の周波数特徴から計算 (default)
-                - "content": x_content の周波数特徴から計算
-                - "dual_stream": 両方から計算して統合
+# =============================================================================
+# Main MixStyle Classes
+# =============================================================================
+
+
+class BasicMixStyleWrapper(nn.Module):
+    """Wrapper for pure MixStyle without attention mechanism.
+
+    This is used for baseline experiments (B0) that only apply
+    basic MixStyle augmentation without frequency-aware attention.
+    """
+
+    def __init__(self, channels=None, **kwargs):
+        """Initialize BasicMixStyleWrapper.
+
+        Args:
+            channels: Not used, but kept for API compatibility
+            **kwargs: Not used, but kept for API compatibility
 
         """
         super().__init__()
+        # No parameters needed - just wraps mix_style function
+
+    def forward(self, x_content):
+        """Forward pass applying pure MixStyle.
+
+        Args:
+            x_content: Input features (Batch, Channels, Frame, Frequency)
+
+        Returns:
+            Output features with pure MixStyle applied
+
+        """
+        return mix_style(x_content)
+
+
+class FrequencyAttentionMixStyle(nn.Module):
+    """CNN-based frequency attention MixStyle.
+
+    Args:
+        channels: Number of input channels
+        **kwargs: Configuration options
+            - attn_type: Attention network architecture
+                * "default": Shallow 2-layer CNN
+                * "residual_deep": Deep network with residual connections
+                * "multiscale": Multi-scale convolution
+                * "se_deep": Deep network with SE-Blocks
+                * "dilated_deep": Dilated convolution
+            - attn_deepen: Network depth (number of layers)
+            - mixstyle_type: How to combine with MixStyle
+            - blend_type: Output blending method
+                * "linear": attn * x_mixed + (1 - attn) * x_content (default)
+                * "residual": x_content + attn * (x_mixed - x_content)
+            - attn_input: Input for attention computation
+                * "mixed": Compute from x_mixed frequency features (default)
+                * "content": Compute from x_content frequency features
+                * "dual_stream": Compute from both and integrate
+
+    """
+
+    def __init__(self, channels, **kwargs):
+        super().__init__()
         self.channels = channels
 
-        # 実験設定変更用
+        # Configuration options
         self.attention_type = kwargs.get("attn_type", "default")
         self.deepen = kwargs.get("attn_deepen", 2)
         self.mixstyle_type = kwargs["mixstyle_type"]
         self.blend_type = kwargs.get("blend_type", "linear")
         self.attn_input = kwargs.get("attn_input", "mixed")
 
-        # チャネル数の計算
+        # Calculate intermediate channel dimensions
         specific_channels = channels if channels == 1 else channels // 2
 
-        # Attention Networkの構築（attention_typeに応じて切り替え）
+        # Build attention network
         self.attention_network = self._build_attention_network(
             channels,
             specific_channels,
@@ -151,7 +183,7 @@ class FrequencyAttentionMixStyle(nn.Module):
             int(self.deepen),
         )
 
-        # Dual-streamの場合は追加のネットワークを構築
+        # Build additional network for dual-stream mode
         if self.attn_input == "dual_stream":
             self.attention_network_content = self._build_attention_network(
                 channels,
@@ -159,51 +191,50 @@ class FrequencyAttentionMixStyle(nn.Module):
                 self.attention_type,
                 int(self.deepen),
             )
+            # Learnable gate for combining mixed and content streams
+            # Each channel can learn its own mixing weight
+            self.dual_stream_gate = nn.Parameter(torch.ones(channels, 1) * 0.5)
 
     def _build_attention_network(self, in_channels, mid_channels, attn_type, depth):
-        """Attention Networkを構築.
+        """Build attention network based on specified architecture.
 
         Args:
-            in_channels: 入力チャネル数
-            mid_channels: 中間層のチャネル数
-            attn_type: attentionのタイプ
-            depth: ネットワークの深さ
+            in_channels: Input channel dimension
+            mid_channels: Intermediate channel dimension
+            attn_type: Attention network type
+            depth: Network depth
 
         Returns:
-            nn.Module: 構築されたattention network
+            Constructed attention network module
 
         """
         if attn_type == "default":
-            # デフォルト: 浅い2層CNN
-            return nn.Sequential(
+            network = nn.Sequential(
                 nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
                 nn.ReLU(),
                 nn.Conv1d(mid_channels, in_channels, kernel_size=1),
             )
+            # Initialize final layer bias to 1.0 to avoid sigmoid saturation at 0.5
+            # sigmoid(1.0) = 0.73, providing bias towards mixed features
+            nn.init.constant_(network[-1].bias, 1.0)
+            return network
 
         if attn_type == "residual_deep":
-            # 残差接続で深いネットワーク
             layers = [
                 nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
                 nn.BatchNorm1d(mid_channels),
                 nn.ReLU(),
             ]
-
-            # 残差ブロックを複数積み重ね
             for _ in range(depth):
                 layers.append(ResidualConvBlock(mid_channels, kernel_size=3))
-
-            # 出力変換
             layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
-
-            return nn.Sequential(*layers)
+            network = nn.Sequential(*layers)
+            # Initialize final layer bias to 1.0
+            nn.init.constant_(network[-1].bias, 1.0)
+            return network
 
         if attn_type == "multiscale":
-            # マルチスケール畳み込み
-            layers = []
-            layers.append(MultiScaleConvBlock(in_channels, mid_channels))
-
-            # 追加の層
+            layers = [MultiScaleConvBlock(in_channels, mid_channels)]
             for _ in range(depth - 1):
                 layers.extend(
                     [
@@ -214,413 +245,354 @@ class FrequencyAttentionMixStyle(nn.Module):
                 )
 
             layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
+            network = nn.Sequential(*layers)
+            # Initialize final layer bias to 1.0
+            nn.init.constant_(network[-1].bias, 1.0)
+            return network
 
-            return nn.Sequential(*layers)
-
-        if attn_type == "se_deep":
-            # SE-Block組み込み深層ネットワーク
-            layers = [
-                nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
-                nn.BatchNorm1d(mid_channels),
-                nn.ReLU(),
-            ]
-
-            # SE Blockを挟みながら層を深くする
-            for _ in range(depth):
-                layers.extend(
-                    [
-                        nn.Conv1d(mid_channels, mid_channels, kernel_size=3, padding=1),
-                        nn.BatchNorm1d(mid_channels),
-                        nn.ReLU(),
-                        SEBlock(mid_channels, reduction=4),
-                    ],
-                )
-
-            layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
-
-            return nn.Sequential(*layers)
-
-        if attn_type == "dilated_deep":
-            # Dilated Convolution（広い受容野）
-            layers = [
-                nn.Conv1d(in_channels, mid_channels, kernel_size=3, padding=1),
-                nn.BatchNorm1d(mid_channels),
-                nn.ReLU(),
-            ]
-
-            # Dilationを増やしながら層を深くする
-            for i in range(depth):
-                dilation = 2**i  # 1, 2, 4, 8, ...
-                padding = dilation  # dilationに応じてpaddingを調整
-                layers.extend(
-                    [
-                        nn.Conv1d(
-                            mid_channels,
-                            mid_channels,
-                            kernel_size=3,
-                            padding=padding,
-                            dilation=dilation,
-                        ),
-                        nn.BatchNorm1d(mid_channels),
-                        nn.ReLU(),
-                    ],
-                )
-
-            layers.append(nn.Conv1d(mid_channels, in_channels, kernel_size=1))
-
-            return nn.Sequential(*layers)
-
-        raise ValueError(
+        msg = (
             f"Unknown attention_type: {attn_type}. "
-            f"Choose from ['default', 'residual_deep', 'multiscale', 'se_deep', 'dilated_deep']",
+            f"Choose from ['default', 'residual_deep', 'multiscale', 'se_deep', 'dilated_deep']"
         )
+        raise ValueError(msg)
 
     def forward(self, x_content):
-        """x_content (Tensor): スタイル適用対象の特徴量 (Batch, Channels, Frame, Frequency)."""
+        """Forward pass.
+
+        Args:
+            x_content: Input features (Batch, Channels, Frame, Frequency)
+
+        Returns:
+            Output features with frequency-aware MixStyle applied
+
+        """
         x_mixed = mix_style(x_content)
 
-        # Attention計算の入力を選択
+        # Select input for attention computation
         if self.attn_input == "mixed":
-            # 時間方向の平均をとり、周波数の静的な特徴を取得
             x_avg = x_mixed.mean(dim=2)  # (B, C, F)
             attn_logits = self.attention_network(x_avg)
 
         elif self.attn_input == "content":
-            # x_contentの周波数特徴から計算（ドメイン中立）
             x_avg = x_content.mean(dim=2)  # (B, C, F)
             attn_logits = self.attention_network(x_avg)
 
         elif self.attn_input == "dual_stream":
-            # 両方から計算して統合
             x_avg_mixed = x_mixed.mean(dim=2)  # (B, C, F)
             x_avg_content = x_content.mean(dim=2)  # (B, C, F)
 
             attn_logits_mixed = self.attention_network(x_avg_mixed)
             attn_logits_content = self.attention_network_content(x_avg_content)
 
-            # 2つのattention logitsを統合
-            attn_logits = attn_logits_mixed + attn_logits_content
+            # Learnable weighted combination instead of simple addition
+            # gate is (C, 1), expand to (1, C, 1) for broadcasting
+            gate = torch.sigmoid(self.dual_stream_gate).unsqueeze(0)  # (1, C, 1)
+            attn_logits = gate * attn_logits_mixed + (1 - gate) * attn_logits_content
 
         else:
-            raise ValueError(
+            msg = (
                 f"Unknown attn_input: {self.attn_input}. "
-                f"Choose from ['mixed', 'content', 'dual_stream']",
+                f"Choose from ['mixed', 'content', 'dual_stream']"
             )
+            raise ValueError(msg)
 
-        # Sigmoid関数で重みを0〜1の範囲に正規化
-        # (B, C, F) -> (B, C, 1, F) に変形してブロードキャスト可能に
-        attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)
+        # Compute attention weights and reshape for broadcasting
+        attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)  # (B, C, 1, F)
 
-        # 出力の合成方法を選択
+        # Blend outputs
         if self.blend_type == "linear":
-            # 線形補間（現在の実装）
             output = attn_weights * x_mixed + (1 - attn_weights) * x_content
 
         elif self.blend_type == "residual":
-            # 残差的な定式化
-            delta = x_mixed - x_content  # MixStyleによる変化量
+            delta = x_mixed - x_content
             output = x_content + attn_weights * delta
 
         else:
-            raise ValueError(
-                f"Unknown blend_type: {self.blend_type}. "
-                f"Choose from ['linear', 'residual']",
-            )
+            msg = f"Unknown blend_type: {self.blend_type}. Choose from ['linear', 'residual']"
+            raise ValueError(msg)
 
         return output
 
 
 class FrequencyTransformerMixStyle(nn.Module):
-    """Transformer-based Frequency Attention MixStyle.
+    """Transformer-based frequency attention MixStyle with self-attention.
 
-    周波数軸にself-attentionを適用して、周波数間の長距離依存をモデル化します。
+    Args:
+        channels: Number of input channels
+        n_freq: Frequency dimension size (for positional encoding)
+        **kwargs: Configuration options
+            - mixstyle_type: How to combine with MixStyle
+            - blend_type: Output blending method
+                * "linear": attn * x_mixed + (1 - attn) * x_content (default)
+                * "residual": x_content + attn * (x_mixed - x_content)
+            - attn_input: Input for attention computation
+                * "mixed": Compute from x_mixed (default)
+                * "content": Compute from x_content
+            - n_heads: Number of attention heads (default: 4)
+            - ff_dim: Feed-forward intermediate dimension (default: 256)
+            - n_layers: Number of transformer blocks (default: 1)
+            - mixstyle_dropout: Dropout probability (default: 0.1)
+
     """
 
     def __init__(self, channels, n_freq=None, **kwargs):
-        """Args:
-            channels (int): 入力特徴量のチャンネル数
-            n_freq (int, optional): 周波数次元のサイズ（Positional encodingで使用）
-            kwargs:
-                mixstyle_type (str): MixStyleとの組み合わせ方
-                blend_type (str): 出力の合成方法
-                    - "linear": attn * x_mixed + (1 - attn) * x_content (default)
-                    - "residual": x_content + attn * (x_mixed - x_content)
-                attn_input (str): attention計算の入力選択
-                    - "mixed": x_mixed の周波数特徴から計算 (default)
-                    - "content": x_content の周波数特徴から計算
-                n_heads (int): Multi-head attentionのヘッド数 (default: 4)
-                ff_dim (int): Feed-forwardの中間次元 (default: 256)
-                n_layers (int): Transformerブロックの層数 (default: 1)
-                mixstyle_dropout (float): Dropoutの確率 (default: 0.1)
-
-        """
         super().__init__()
         self.channels = channels
         self.mixstyle_type = kwargs["mixstyle_type"]
         self.blend_type = kwargs.get("blend_type", "linear")
         self.attn_input = kwargs.get("attn_input", "mixed")
 
-        # Transformer設定
+        # Transformer configuration
         self.n_heads = kwargs.get("n_heads", 4)
+        # Auto-adjust n_heads if channels < n_heads (embed_dim must be divisible by n_heads)
+        self.n_heads = min(self.n_heads, channels)
         self.ff_dim = kwargs.get("ff_dim", 256)
         self.n_layers = kwargs.get("n_layers", 1)
         self.dropout = kwargs.get("mixstyle_dropout", 0.1)
 
-        # Positional encoding（周波数位置の情報）
-        if n_freq is not None:
-            self.pos_encoding = nn.Parameter(torch.randn(1, 1, n_freq))
-        else:
-            self.pos_encoding = None
+        # Positional encoding for frequency dimension
+        self.pos_encoding = nn.Parameter(torch.randn(1, 1, n_freq)) if n_freq else None
 
-        # Transformer blocks
+        # Build transformer blocks
         self.transformer_blocks = nn.ModuleList(
             [
-                TransformerBlock(
-                    channels,
-                    self.n_heads,
-                    self.ff_dim,
-                    self.dropout,
-                )
+                TransformerBlock(channels, self.n_heads, self.ff_dim, self.dropout)
                 for _ in range(self.n_layers)
             ],
         )
 
-        # 出力投影（周波数重みを生成）
+        # Output projection to generate frequency weights
         self.output_projection = nn.Linear(channels, channels)
 
     def forward(self, x_content):
-        """x_content (Tensor): スタイル適用対象の特徴量 (Batch, Channels, Frame, Frequency)."""
+        """Forward pass.
+
+        Args:
+            x_content: Input features (Batch, Channels, Frame, Frequency)
+
+        Returns:
+            Output features with transformer-based frequency attention
+
+        """
         x_mixed = mix_style(x_content)
 
-        # Attention計算の入力を選択
+        # Select input for attention computation
         if self.attn_input == "mixed":
             x_avg = x_mixed.mean(dim=2)  # (B, C, F)
         elif self.attn_input == "content":
             x_avg = x_content.mean(dim=2)  # (B, C, F)
         else:
-            raise ValueError(
-                f"Unknown attn_input: {self.attn_input}. "
-                f"Choose from ['mixed', 'content']",
-            )
+            msg = f"Unknown attn_input: {self.attn_input}. Choose from ['mixed', 'content']"
+            raise ValueError(msg)
 
-        # Positional encoding
+        # Add positional encoding
         if self.pos_encoding is not None:
             x_avg = x_avg + self.pos_encoding
 
-        # (B, C, F) → (B, F, C) for attention
+        # Transpose for transformer: (B, C, F) -> (B, F, C)
         x_avg = x_avg.transpose(1, 2)
 
-        # Transformer blocks
+        # Apply transformer blocks
         for block in self.transformer_blocks:
             x_avg = block(x_avg)
 
-        # (B, F, C) → (B, C, F)
+        # Transpose back: (B, F, C) -> (B, C, F)
         x_avg = x_avg.transpose(1, 2)
 
-        # 周波数重みを生成
+        # Generate frequency weights
         freq_weights = torch.sigmoid(self.output_projection(x_avg.transpose(1, 2)))
         freq_weights = freq_weights.transpose(1, 2).unsqueeze(2)  # (B, C, 1, F)
 
-        # 出力の合成
+        # Blend outputs
         if self.blend_type == "linear":
             output = freq_weights * x_mixed + (1 - freq_weights) * x_content
         elif self.blend_type == "residual":
             delta = x_mixed - x_content
             output = x_content + freq_weights * delta
         else:
-            raise ValueError(
-                f"Unknown blend_type: {self.blend_type}. "
-                f"Choose from ['linear', 'residual']",
-            )
+            msg = f"Unknown blend_type: {self.blend_type}. Choose from ['linear', 'residual']"
+            raise ValueError(msg)
 
         return output
 
 
+# =============================================================================
+# Transformer Components
+# =============================================================================
+
+
 class TransformerBlock(nn.Module):
-    """Transformer Block with Multi-head Self-attention and Feed-forward."""
+    """Standard transformer block with multi-head self-attention and feed-forward."""
 
     def __init__(self, embed_dim, n_heads, ff_dim, dropout=0.1):
         super().__init__()
-
-        # Multi-head self-attention
         self.self_attn = nn.MultiheadAttention(
             embed_dim=embed_dim,
             num_heads=n_heads,
             dropout=dropout,
             batch_first=True,
         )
-
-        # Feed-forward network
         self.ff = nn.Sequential(
             nn.Linear(embed_dim, ff_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(ff_dim, embed_dim),
         )
-
-        # Layer normalization
         self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
-
-        # Dropout
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, x):
-        """x (Tensor): (Batch, Seq_len, Embed_dim)."""
-        # Self-attention with residual connection
+        """Forward pass.
+
+        Args:
+            x: Input tensor (Batch, Seq_len, Embed_dim)
+
+        Returns:
+            Output tensor with same shape
+
+        """
         attn_out, _ = self.self_attn(x, x, x)
         x = self.norm1(x + self.dropout1(attn_out))
-
-        # Feed-forward with residual connection
         ff_out = self.ff(x)
         x = self.norm2(x + self.dropout2(ff_out))
-
         return x
 
 
 class CrossAttentionMixStyle(nn.Module):
-    """Cross-Attention based Frequency Attention MixStyle.
+    """Cross-attention based frequency attention MixStyle.
 
-    x_content (Query) と x_mixed (Key/Value) 間でcross-attentionを行い、
-    MixStyleの効果を明示的に比較します。
+    Uses cross-attention between x_content (Query) and x_mixed (Key/Value)
+    to explicitly compare MixStyle effects.
+
+    Args:
+        channels: Number of input channels
+        n_freq: Frequency dimension size (for positional encoding)
+        **kwargs: Configuration options
+            - mixstyle_type: How to combine with MixStyle
+            - blend_type: Output blending method
+                * "linear": attn * x_mixed + (1 - attn) * x_content (default)
+                * "residual": x_content + attn * (x_mixed - x_content)
+            - n_heads: Number of attention heads (default: 4)
+            - ff_dim: Feed-forward intermediate dimension (default: 256)
+            - n_layers: Number of transformer blocks (default: 1)
+            - mixstyle_dropout: Dropout probability (default: 0.1)
+
     """
 
     def __init__(self, channels, n_freq=None, **kwargs):
-        """Args:
-            channels (int): 入力特徴量のチャンネル数
-            n_freq (int, optional): 周波数次元のサイズ（Positional encodingで使用）
-            kwargs:
-                mixstyle_type (str): MixStyleとの組み合わせ方
-                blend_type (str): 出力の合成方法
-                    - "linear": attn * x_mixed + (1 - attn) * x_content (default)
-                    - "residual": x_content + attn * (x_mixed - x_content)
-                n_heads (int): Multi-head attentionのヘッド数 (default: 4)
-                ff_dim (int): Feed-forwardの中間次元 (default: 256)
-                n_layers (int): Transformerブロックの層数 (default: 1)
-                mixstyle_dropout (float): Dropoutの確率 (default: 0.1)
-
-        """
         super().__init__()
         self.channels = channels
         self.mixstyle_type = kwargs["mixstyle_type"]
         self.blend_type = kwargs.get("blend_type", "linear")
 
-        # Transformer設定
+        # Transformer configuration
         self.n_heads = kwargs.get("n_heads", 4)
+        # Auto-adjust n_heads if channels < n_heads (embed_dim must be divisible by n_heads)
+        self.n_heads = min(self.n_heads, channels)
         self.ff_dim = kwargs.get("ff_dim", 256)
         self.n_layers = kwargs.get("n_layers", 1)
         self.dropout = kwargs.get("mixstyle_dropout", 0.1)
 
-        # Positional encoding（周波数位置の情報）
-        if n_freq is not None:
-            self.pos_encoding = nn.Parameter(torch.randn(1, 1, n_freq))
-        else:
-            self.pos_encoding = None
+        # Positional encoding for frequency dimension
+        self.pos_encoding = nn.Parameter(torch.randn(1, 1, n_freq)) if n_freq else None
 
-        # Cross-attention blocks
+        # Build cross-attention blocks
         self.cross_attn_blocks = nn.ModuleList(
             [
-                CrossAttentionBlock(
-                    channels,
-                    self.n_heads,
-                    self.ff_dim,
-                    self.dropout,
-                )
+                CrossAttentionBlock(channels, self.n_heads, self.ff_dim, self.dropout)
                 for _ in range(self.n_layers)
             ],
         )
 
-        # 出力投影（周波数重みを生成）
+        # Output projection to generate frequency weights
         self.output_projection = nn.Linear(channels, channels)
 
     def forward(self, x_content):
-        """x_content (Tensor): スタイル適用対象の特徴量 (Batch, Channels, Frame, Frequency)."""
+        """Forward pass.
+
+        Args:
+            x_content: Input features (Batch, Channels, Frame, Frequency)
+
+        Returns:
+            Output features with cross-attention based frequency attention
+
+        """
         x_mixed = mix_style(x_content)
 
-        # 時間方向の平均
+        # Average over time dimension for Query and Key/Value
         q = x_content.mean(dim=2)  # (B, C, F) - Query
         kv = x_mixed.mean(dim=2)  # (B, C, F) - Key/Value
 
-        # Positional encoding
+        # Add positional encoding
         if self.pos_encoding is not None:
             q = q + self.pos_encoding
             kv = kv + self.pos_encoding
 
-        # (B, C, F) → (B, F, C) for attention
+        # Transpose for attention: (B, C, F) -> (B, F, C)
         q = q.transpose(1, 2)
         kv = kv.transpose(1, 2)
 
-        # Cross-attention blocks
+        # Apply cross-attention blocks
         for block in self.cross_attn_blocks:
             q = block(q, kv)
 
-        # (B, F, C) → (B, C, F)
+        # Transpose back: (B, F, C) -> (B, C, F)
         q = q.transpose(1, 2)
 
-        # 周波数重みを生成
+        # Generate frequency weights
         freq_weights = torch.sigmoid(self.output_projection(q.transpose(1, 2)))
         freq_weights = freq_weights.transpose(1, 2).unsqueeze(2)  # (B, C, 1, F)
 
-        # 出力の合成
+        # Blend outputs
         if self.blend_type == "linear":
             output = freq_weights * x_mixed + (1 - freq_weights) * x_content
         elif self.blend_type == "residual":
             delta = x_mixed - x_content
             output = x_content + freq_weights * delta
         else:
-            raise ValueError(
-                f"Unknown blend_type: {self.blend_type}. "
-                f"Choose from ['linear', 'residual']",
-            )
+            msg = f"Unknown blend_type: {self.blend_type}. Choose from ['linear', 'residual']"
+            raise ValueError(msg)
 
         return output
 
 
 class CrossAttentionBlock(nn.Module):
-    """Cross-Attention Block with Feed-forward."""
+    """Cross-attention block with feed-forward network."""
 
     def __init__(self, embed_dim, n_heads, ff_dim, dropout=0.1):
         super().__init__()
-
-        # Multi-head cross-attention
         self.cross_attn = nn.MultiheadAttention(
             embed_dim=embed_dim,
             num_heads=n_heads,
             dropout=dropout,
             batch_first=True,
         )
-
-        # Feed-forward network
         self.ff = nn.Sequential(
             nn.Linear(embed_dim, ff_dim),
             nn.ReLU(),
             nn.Dropout(dropout),
             nn.Linear(ff_dim, embed_dim),
         )
-
-        # Layer normalization
         self.norm1 = nn.LayerNorm(embed_dim)
         self.norm2 = nn.LayerNorm(embed_dim)
-
-        # Dropout
         self.dropout1 = nn.Dropout(dropout)
         self.dropout2 = nn.Dropout(dropout)
 
     def forward(self, query, key_value):
-        """Cross-attention forward.
+        """Forward pass with cross-attention.
 
         Args:
-            query (Tensor): (Batch, Seq_len, Embed_dim)
-            key_value (Tensor): (Batch, Seq_len, Embed_dim)
+            query: Query tensor (Batch, Seq_len, Embed_dim)
+            key_value: Key/Value tensor (Batch, Seq_len, Embed_dim)
+
+        Returns:
+            Output tensor with same shape as query
 
         """
-        # Cross-attention with residual connection
         attn_out, _ = self.cross_attn(query, key_value, key_value)
         x = self.norm1(query + self.dropout1(attn_out))
-
-        # Feed-forward with residual connection
         ff_out = self.ff(x)
         x = self.norm2(x + self.dropout2(ff_out))
-
         return x

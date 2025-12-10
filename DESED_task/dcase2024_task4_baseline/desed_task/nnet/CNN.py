@@ -1,7 +1,12 @@
 import torch
 from torch import nn
 
-from .mixstyle import FrequencyAttentionMixStyle
+from .mixstyle import (
+    BasicMixStyleWrapper,
+    FrequencyAttentionMixStyle,
+    FrequencyTransformerMixStyle,
+    CrossAttentionMixStyle,
+)
 
 
 class GLU(nn.Module):
@@ -63,7 +68,11 @@ class CNN(nn.Module):
         super(CNN, self).__init__()
 
         self.nb_filters = nb_filters
-        self.mixstyle_type = kwargs["mixstyle_type"]
+        self.mixstyle_type = kwargs.get("mixstyle_type", "disabled")
+        self.pooling = pooling
+
+        # Get initial frequency dimension (default: 128 mel bins)
+        self.n_freq_bins = kwargs.get("n_freq_bins", 128)
 
         # --- 畳み込みブロックを個別に定義 ---
         # 単一のnn.Sequentialではなく、各ブロックをリストで管理
@@ -95,22 +104,70 @@ class CNN(nn.Module):
 
             self.conv_blocks.append(block)
 
-        # --- FrequencyAttentionMixStyleレイヤーを定義 ---
+        # --- MixStyleレイヤーを定義 ---
+        # Calculate n_freq for each position based on pooling
+        n_freq_pre = self.n_freq_bins  # Before any pooling
+        n_freq_post1 = n_freq_pre // pooling[0][1]  # After first conv+pooling
+        n_freq_post2 = n_freq_post1 // pooling[1][1]  # After second conv+pooling
+
         # 1層目の前
-        self.attn_mixstyle_pre = FrequencyAttentionMixStyle(channels=n_in_channel, **kwargs)
+        self.attn_mixstyle_pre = self._create_mixstyle_layer(
+            channels=n_in_channel,
+            n_freq=n_freq_pre,
+            **kwargs,
+        )
         # 1層目の後
-        self.attn_mixstyle_post1 = FrequencyAttentionMixStyle(channels=nb_filters[0], **kwargs)
+        self.attn_mixstyle_post1 = self._create_mixstyle_layer(
+            channels=nb_filters[0],
+            n_freq=n_freq_post1,
+            **kwargs,
+        )
         # 2層目の後
-        self.attn_mixstyle_post2 = FrequencyAttentionMixStyle(channels=nb_filters[1], **kwargs)
+        self.attn_mixstyle_post2 = self._create_mixstyle_layer(
+            channels=nb_filters[1],
+            n_freq=n_freq_post2,
+            **kwargs,
+        )
 
-        # # 128x862x64
-        # for i in range(len(nb_filters)):
-        #     conv(i, normalization=normalization, dropout=conv_dropout, activ=activation)
-        #     cnn.add_module(
-        #         "pooling{0}".format(i), nn.AvgPool2d(pooling[i])
-        #     )  # bs x tframe x mels
+    def _create_mixstyle_layer(self, channels, n_freq, **kwargs):
+        """Factory method to create appropriate MixStyle layer based on type.
 
-        # self.cnn = cnn
+        Args:
+            channels: Number of input channels
+            n_freq: Frequency dimension size (for Transformer/CrossAttention)
+            **kwargs: Configuration options including mixstyle_type
+
+        Returns:
+            Appropriate MixStyle layer instance
+        """
+        mixstyle_type = kwargs.get("mixstyle_type", "disabled")
+
+        if mixstyle_type == "disabled":
+            # No MixStyle augmentation
+            return nn.Identity()
+
+        if mixstyle_type == "resMix":
+            # B0: Pure MixStyle without attention (baseline)
+            return BasicMixStyleWrapper(channels=channels, **kwargs)
+
+        if mixstyle_type == "freqAttn":
+            # P1: CNN-based frequency attention
+            return FrequencyAttentionMixStyle(channels=channels, **kwargs)
+
+        if mixstyle_type == "freqTransformer":
+            # P2-1: Transformer-based frequency attention
+            return FrequencyTransformerMixStyle(channels=channels, n_freq=n_freq, **kwargs)
+
+        if mixstyle_type == "crossAttn":
+            # P2-2: Cross-attention based
+            return CrossAttentionMixStyle(channels=channels, n_freq=n_freq, **kwargs)
+
+        # Unknown type - raise error
+        msg = (
+            f"Unknown mixstyle_type: {mixstyle_type}. "
+            f"Choose from ['disabled', 'resMix', 'freqAttn', 'freqTransformer', 'crossAttn']"
+        )
+        raise ValueError(msg)
 
     def forward(self, x):
         """Forward step of the CNN module.
