@@ -746,13 +746,6 @@ def prepare_run(argv=None):
         default=False,
         help="Use negative sampling in CMT confidence weighting",
     )
-
-    parser.add_argument(
-        "--non_zero_scale",
-        action="store_true",
-        default=False,
-        help="Apply non-zero normalization to CMT confidence weights",
-    )
     parser.add_argument(
         "--pos_neg_scale",
         action="store_true",
@@ -909,8 +902,6 @@ def prepare_run(argv=None):
         configs["cmt"]["warmup_epochs"] = args.warmup_epochs
     if args.cmt is not None:
         configs["cmt"]["use_neg_sample"] = args.use_neg_sample
-    if args.cmt is not None:
-        configs["cmt"]["non_zero_scale"] = args.non_zero_scale
     if args.cmt is not None:
         configs["cmt"]["pos_neg_scale"] = args.pos_neg_scale
 
