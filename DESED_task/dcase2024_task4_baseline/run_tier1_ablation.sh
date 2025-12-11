@@ -18,7 +18,7 @@
 
 # 実験設定
 CATEGORY="ablation"
-METHOD="mixstyle_tier1_50"
+METHOD="mixstyle_tier1_150"
 BASE_DIR="experiments"
 
 # 引数解析
