@@ -219,7 +219,6 @@ class SEDTask4(pl.LightningModule):
         self.phi_neg: float = float(self.hparams.get("cmt", {}).get("phi_neg", 0.3))
         self.phi_pos: float = float(self.hparams.get("cmt", {}).get("phi_pos", 0.7))
 
-        self.non_zero_scale: bool = self.hparams.get("cmt", {}).get("non_zero_scale", False)
         self.pos_neg_scale: bool = self.hparams.get("cmt", {}).get("pos_neg_scale", False)
         self.cmt_warmup_epochs: int = int(self.hparams.get("cmt", {}).get("warmup_epochs", 50))
         self.use_neg_sample: bool = self.hparams.get("cmt", {}).get("use_neg_sample", False)
@@ -1141,26 +1140,12 @@ class SEDTask4(pl.LightningModule):
         # Weak Loss
         bce_w = F.binary_cross_entropy(student_w, teacher_pseudo_w, reduction="none")
         weighted_bce_w = confidence_w * bce_w
-
-        if self.non_zero_scale:
-            # 非ゼロ正規化
-            # 信頼度が0より大きい(実際に使う)サンプルで平均を計算
-            mask_w = (confidence_w > 0).float()
-            num_nonzero_w = mask_w.sum().clamp(min=1.0)
-            loss_w_con = weighted_bce_w.sum() / num_nonzero_w
-        else:
-            loss_w_con = weighted_bce_w.mean()
+        loss_w_con = weighted_bce_w.mean()
 
         # Strong Loss
         bce_s = F.binary_cross_entropy(student_s, teacher_pseudo_s, reduction="none")
         weighted_bce_s = confidence_s * bce_s
-
-        if self.non_zero_scale:  # 非ゼロ正規化
-            mask_s = (confidence_s > 0).float()
-            num_nonzero_s = mask_s.sum().clamp(min=1.0)
-            loss_s_con = weighted_bce_s.sum() / num_nonzero_s
-        else:
-            loss_s_con = weighted_bce_s.mean()
+        loss_s_con = weighted_bce_s.mean()
 
         self.log("train/cmt/confidence_weak_mean", confidence_w.mean())
         self.log("train/cmt/confidence_weak_std", confidence_w.std())
