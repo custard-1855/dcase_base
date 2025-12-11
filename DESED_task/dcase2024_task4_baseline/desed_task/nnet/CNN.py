@@ -3,7 +3,6 @@ from torch import nn
 
 from .mixstyle import (
     BasicMixStyleWrapper,
-    CrossAttentionMixStyle,
     FrequencyAttentionMixStyle,
     FrequencyTransformerMixStyle,
 )
