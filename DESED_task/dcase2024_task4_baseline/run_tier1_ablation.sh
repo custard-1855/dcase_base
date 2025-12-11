@@ -42,18 +42,18 @@ echo "Start Time: $(date)"
 echo "=========================================="
 echo ""
 
-################################################################################
-# B0: MixStyleのみ (ベースライン)
-################################################################################
-echo "[B0] Running: MixStyle Only (Baseline)"
-uv run train_pretrained.py \
-    --use_wandb \
-    --category ${CATEGORY} \
-    --method ${METHOD} \
-    --variant baseline \
-    --base_dir ${BASE_DIR} \
-    --mixstyle_type "resMix" \
-    2>&1 | tee ${LOG_DIR}/B0_${TIMESTAMP}.log
+# ################################################################################
+# # B0: MixStyleのみ (ベースライン)
+# ################################################################################
+# echo "[B0] Running: MixStyle Only (Baseline)"
+# uv run train_pretrained.py \
+#     --use_wandb \
+#     --category ${CATEGORY} \
+#     --method ${METHOD} \
+#     --variant baseline \
+#     --base_dir ${BASE_DIR} \
+#     --mixstyle_type "resMix" \
+#     2>&1 | tee ${LOG_DIR}/B0_${TIMESTAMP}.log
 
 ################################################################################
 # P1-1: Freq Attn (現在の実装) - linear, mixed, CNN
