@@ -1078,9 +1078,23 @@ class SEDTask4(pl.LightningModule):
 
         else:
             # --- CMT ---
-            c_w = y_w * y_tilde_w
-            y_w_expanded = y_w.unsqueeze(-1).expand_as(y_s)
-            c_s = y_s * y_w_expanded * y_tilde_s
+            # Unlabeled部分のみ計算（labeled部分はy_tildeが元のy_wなので除外）
+            y_w_unlabeled = y_w[index_weak:]
+            y_s_unlabeled = y_s[index_weak:]
+            y_tilde_w_unlabeled = y_tilde_w[index_weak:]
+            y_tilde_s_unlabeled = y_tilde_s[index_weak:]
+
+            c_w_unlabeled = y_w_unlabeled * y_tilde_w_unlabeled
+            y_w_expanded = y_w_unlabeled.unsqueeze(-1).expand_as(y_s_unlabeled)
+            c_s_unlabeled = y_s_unlabeled * y_w_expanded * y_tilde_s_unlabeled
+
+            # Labeled部分は常に信頼度1.0
+            c_w_labeled = torch.ones_like(y_w[:index_weak])
+            c_s_labeled = torch.ones_like(y_s[:index_weak])
+
+            # 結合
+            c_w = torch.cat((c_w_labeled, c_w_unlabeled), dim=0)
+            c_s = torch.cat((c_s_labeled, c_s_unlabeled), dim=0)
 
         # 実装予定
         # 温度パラメータによる調整
