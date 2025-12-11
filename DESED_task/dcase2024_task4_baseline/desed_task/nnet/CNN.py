@@ -3,9 +3,9 @@ from torch import nn
 
 from .mixstyle import (
     BasicMixStyleWrapper,
+    CrossAttentionMixStyle,
     FrequencyAttentionMixStyle,
     FrequencyTransformerMixStyle,
-    CrossAttentionMixStyle,
 )
 
 
@@ -139,6 +139,7 @@ class CNN(nn.Module):
 
         Returns:
             Appropriate MixStyle layer instance
+
         """
         mixstyle_type = kwargs.get("mixstyle_type", "disabled")
 
@@ -157,10 +158,6 @@ class CNN(nn.Module):
         if mixstyle_type == "freqTransformer":
             # P2-1: Transformer-based frequency attention
             return FrequencyTransformerMixStyle(channels=channels, n_freq=n_freq, **kwargs)
-
-        if mixstyle_type == "crossAttn":
-            # P2-2: Cross-attention based
-            return CrossAttentionMixStyle(channels=channels, n_freq=n_freq, **kwargs)
 
         # Unknown type - raise error
         msg = (
