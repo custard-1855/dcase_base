@@ -1,24 +1,8 @@
 #!/bin/bash
 
-################################################################################
-# Tier 1: MixStyle Ablation Study - 必須の比較実験
-#
-# 本スクリプトは、ablation_study_design.mdのTier 1実験を実行します。
-# 全7実験 × 3シード = 21実行
-#
-# Experiments:
-#   B0: MixStyleのみ (ベースライン)
-#   P1-1: Freq Attn (現在の実装) - linear, mixed, CNN
-#   P1-2: Freq Attn - residual, mixed, CNN (RQ2: Blend type効果)
-#   P1-3: Freq Attn - linear, content, CNN (RQ3: Attn input効果)
-#   P1-4: Freq Attn - linear, dual_stream, CNN (RQ3: Attn input効果)
-#   P2-1: Freq Transformer - linear, mixed, Transformer (RQ4: CNN vs Transformer)
-#   P2-2: Cross Attention - linear, -, Cross-Attn (RQ4: CNN vs Transformer)
-################################################################################
-
 # 実験設定
 CATEGORY="ablation"
-METHOD="mixstyle_tier1_150"
+METHOD="mixstyle_tier1_1"
 BASE_DIR="experiments"
 
 # 引数解析
@@ -69,8 +53,7 @@ uv run train_pretrained.py \
     --variant baseline \
     --base_dir ${BASE_DIR} \
     --mixstyle_type "resMix" \
-    --attn_type "default" \
-    2>&1 | tee ${LOG_DIR}/B0_seed${seed}_${TIMESTAMP}.log
+    2>&1 | tee ${LOG_DIR}/B0_${TIMESTAMP}.log
 
 ################################################################################
 # P1-1: Freq Attn (現在の実装) - linear, mixed, CNN
@@ -80,65 +63,13 @@ uv run train_pretrained.py \
     --use_wandb \
     --category ${CATEGORY} \
     --method ${METHOD} \
-    --variant linear_mixed_CNN \
+    --variant CNN \
     --base_dir ${BASE_DIR} \
     --mixstyle_type "freqAttn" \
     --attn_type "default" \
     --attn_deepen 2 \
-    --blend_type "linear" \
-    --attn_input "mixed" \
-    2>&1 | tee ${LOG_DIR}/P1-1_seed${seed}_${TIMESTAMP}.log
+    2>&1 | tee ${LOG_DIR}/P1-1_${TIMESTAMP}.log
 
-################################################################################
-# P1-2: Freq Attn - residual, mixed, CNN (RQ2: Blend type効果)
-################################################################################
-echo "[P1-2] Running: Freq Attn - residual, mixed, CNN"
-uv run train_pretrained.py \
-    --use_wandb \
-    --category ${CATEGORY} \
-    --method ${METHOD} \
-    --variant residual_mixed_CNN \
-    --base_dir ${BASE_DIR} \
-    --mixstyle_type "freqAttn" \
-    --attn_type "default" \
-    --attn_deepen 2 \
-    --blend_type "residual" \
-    --attn_input "mixed" \
-    2>&1 | tee ${LOG_DIR}/P1-2_seed${seed}_${TIMESTAMP}.log
-
-################################################################################
-# P1-3: Freq Attn - linear, content, CNN (RQ3: Attn input効果)
-################################################################################
-echo "[P1-3] Running: Freq Attn - linear, content, CNN"
-uv run train_pretrained.py \
-    --use_wandb \
-    --category ${CATEGORY} \
-    --method ${METHOD} \
-    --variant linear_content_CNN \
-    --base_dir ${BASE_DIR} \
-    --mixstyle_type "freqAttn" \
-    --attn_type "default" \
-    --attn_deepen 2 \
-    --blend_type "linear" \
-    --attn_input "content" \
-    2>&1 | tee ${LOG_DIR}/P1-3_seed${seed}_${TIMESTAMP}.log
-
-################################################################################
-# P1-4: Freq Attn - linear, dual_stream, CNN (RQ3: Attn input効果)
-################################################################################
-echo "[P1-4] Running: Freq Attn - linear, dual_stream, CNN"
-uv run train_pretrained.py \
-    --use_wandb \
-    --category ${CATEGORY} \
-    --method ${METHOD} \
-    --variant linear_dual_stream_CNN \
-    --base_dir ${BASE_DIR} \
-    --mixstyle_type "freqAttn" \
-    --attn_type "default" \
-    --attn_deepen 2 \
-    --blend_type "linear" \
-    --attn_input "dual_stream" \
-    2>&1 | tee ${LOG_DIR}/P1-4_seed${seed}_${TIMESTAMP}.log
 
 ################################################################################
 # P2-1: Freq Transformer - linear, mixed, Transformer (RQ4: CNN vs Transformer)
@@ -148,34 +79,14 @@ uv run train_pretrained.py \
     --use_wandb \
     --category ${CATEGORY} \
     --method ${METHOD} \
-    --variant linear_mixed_transformer \
+    --variant transformer \
     --base_dir ${BASE_DIR} \
     --mixstyle_type "freqTransformer" \
-    --blend_type "linear" \
-    --attn_input "mixed" \
     --n_layers 1 \
     --n_heads 4 \
     --ff_dim 256 \
     --mixstyle_dropout 0.1 \
-    2>&1 | tee ${LOG_DIR}/P2-1_seed${seed}_${TIMESTAMP}.log
-
-################################################################################
-# P2-2: Cross Attention - linear, -, Cross-Attn (RQ4: CNN vs Transformer)
-################################################################################
-echo "[P2-2] Running: Cross Attention (L=1, H=4)"
-uv run train_pretrained.py \
-    --use_wandb \
-    --category ${CATEGORY} \
-    --method ${METHOD} \
-    --variant linear_cross-attn \
-    --base_dir ${BASE_DIR} \
-    --mixstyle_type "crossAttn" \
-    --blend_type "linear" \
-    --n_layers 1 \
-    --n_heads 4 \
-    --ff_dim 256 \
-    --mixstyle_dropout 0.1 \
-    2>&1 | tee ${LOG_DIR}/P2-2_seed${seed}_${TIMESTAMP}.log
+    2>&1 | tee ${LOG_DIR}/P2-1_${TIMESTAMP}.log
 
 ################################################################################
 # 実験完了
