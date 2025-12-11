@@ -53,7 +53,7 @@ class MultiScaleConvBlock(nn.Module):
 
 
 # Core MixStyle Function
-def calc_weighted_stats(self, x, attn_map):
+def calc_weighted_stats(x, attn_map):
     """Attentionマップを重みとして平均と標準偏差を計算.
 
     x: [Batch, Channel, Time, Freq]
