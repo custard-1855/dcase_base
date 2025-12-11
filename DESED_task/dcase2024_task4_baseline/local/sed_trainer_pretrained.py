@@ -861,9 +861,6 @@ class SEDTask4(pl.LightningModule):
         tot_loss_supervised = loss_strong + loss_weak
 
         # ---Teacher Forward (No Grad) ---
-        # Set teacher to eval mode to disable augmentations (e.g., MixStyle)
-        # This ensures teacher provides stable, non-augmented predictions
-        self.sed_teacher.eval()
         with torch.no_grad():
             strong_preds_teacher, weak_preds_teacher = self.detect(
                 features,
@@ -871,9 +868,6 @@ class SEDTask4(pl.LightningModule):
                 embeddings=embeddings,
                 classes_mask=valid_class_mask,
             )
-        # Restore training mode for consistency with PyTorch Lightning
-        # Note: EMA updates work regardless of mode
-        self.sed_teacher.train()
 
         # --- Consistency Loss (Mean Teacher) ---
         weight = self.hparams["training"]["const_max"]
