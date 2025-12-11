@@ -2,7 +2,7 @@
 
 # 実験設定
 CATEGORY="ablation"
-METHOD="mixstyle_tier1_1"
+METHOD="mixstyle_only_150"
 BASE_DIR="experiments"
 
 # 引数解析
@@ -42,19 +42,6 @@ echo "Start Time: $(date)"
 echo "=========================================="
 echo ""
 
-# ################################################################################
-# # B0: MixStyleのみ (ベースライン)
-# ################################################################################
-# echo "[B0] Running: MixStyle Only (Baseline)"
-# uv run train_pretrained.py \
-#     --use_wandb \
-#     --category ${CATEGORY} \
-#     --method ${METHOD} \
-#     --variant baseline \
-#     --base_dir ${BASE_DIR} \
-#     --mixstyle_type "resMix" \
-#     2>&1 | tee ${LOG_DIR}/B0_${TIMESTAMP}.log
-
 ################################################################################
 # P1-1: Freq Attn (現在の実装) - linear, mixed, CNN
 ################################################################################
@@ -87,6 +74,21 @@ uv run train_pretrained.py \
     --ff_dim 256 \
     --mixstyle_dropout 0.1 \
     2>&1 | tee ${LOG_DIR}/P2-1_${TIMESTAMP}.log
+
+
+################################################################################
+# B0: MixStyleのみ (ベースライン)
+################################################################################
+echo "[B0] Running: MixStyle Only (Baseline)"
+uv run train_pretrained.py \
+    --use_wandb \
+    --category ${CATEGORY} \
+    --method ${METHOD} \
+    --variant baseline \
+    --base_dir ${BASE_DIR} \
+    --mixstyle_type "resMix" \
+    2>&1 | tee ${LOG_DIR}/B0_${TIMESTAMP}.log
+
 
 ################################################################################
 # 実験完了
