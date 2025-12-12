@@ -21,6 +21,26 @@
 
 set -e  # エラーが発生したら終了
 
+# スクリプトのディレクトリとプロジェクトベースディレクトリを取得
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PROJECT_BASE_DIR="$( cd "${SCRIPT_DIR}/../.." && pwd )"
+
+# スクリプトがsourceされているかどうかを判定
+if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
+    SOURCED=true
+else
+    SOURCED=false
+fi
+
+# 終了関数（sourceされている場合はreturn、そうでない場合はexit）
+exit_script() {
+    if [[ "$SOURCED" == true ]]; then
+        return $1
+    else
+        exit $1
+    fi
+}
+
 # デフォルト設定
 CATEGORY="ablation"
 METHOD="mixstyle_only_150"
@@ -29,7 +49,7 @@ OUTPUT_BASE="visualizations/umap"
 N_COMPONENTS=2
 FEATURE_TYPE="teacher"
 DEVICE="cuda"
-CONFIG="confs/pretrained.yaml"
+CONFIG="${SCRIPT_DIR}/confs/pretrained.yaml"
 BATCH_SIZE=32
 
 # 引数解析
@@ -84,20 +104,20 @@ while [[ $# -gt 0 ]]; do
             echo "  --device DEVICE          使用デバイス cpu or cuda (default: cuda)"
             echo "  --config CONFIG          設定ファイル (default: confs/pretrained.yaml)"
             echo "  --batch-size SIZE        バッチサイズ (default: 32)"
-            return 0
+            exit_script 0
             ;;
         *)
             echo "Unknown option: $1"
             echo "Use --help for usage information"
-            return 1
+            exit_script 1
             ;;
     esac
 done
 
-# ディレクトリ設定
-EXP_DIR="${BASE_DIR}/train/${CATEGORY}/${METHOD}"
-FEATURES_DIR="${OUTPUT_BASE}/features_${METHOD}"
-UMAP_DIR="${OUTPUT_BASE}/umap_${METHOD}_${N_COMPONENTS}d"
+# ディレクトリ設定（絶対パス）
+EXP_DIR="${PROJECT_BASE_DIR}/${BASE_DIR}/train/${CATEGORY}/${METHOD}"
+FEATURES_DIR="${PROJECT_BASE_DIR}/${OUTPUT_BASE}/features_${METHOD}"
+UMAP_DIR="${PROJECT_BASE_DIR}/${OUTPUT_BASE}/umap_${METHOD}_${N_COMPONENTS}d"
 
 # タイムスタンプ
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
@@ -135,16 +155,43 @@ for VARIANT in "${VARIANTS[@]}"; do
         continue
     fi
 
-    # last.ckptを使用（best.ckptがあればそちらを優先）
-    if [ -f "${VARIANT_DIR}/best.ckpt" ]; then
-        CHECKPOINT="${VARIANT_DIR}/best.ckpt"
+    # wandb配下のチェックポイントを探索
+    WANDB_DIR="${VARIANT_DIR}/wandb"
+    if [ ! -d "${WANDB_DIR}" ]; then
+        echo "警告: ${WANDB_DIR} が見つかりません"
+        continue
+    fi
+
+    # run-* ディレクトリを検索（最新のものを使用）
+    RUN_DIR=$(find "${WANDB_DIR}" -maxdepth 1 -type d -name "run-*" | sort -r | head -n 1)
+
+    if [ -z "${RUN_DIR}" ]; then
+        echo "警告: ${WANDB_DIR} にrun-*ディレクトリが見つかりません"
+        continue
+    fi
+
+    CHECKPOINT_DIR="${RUN_DIR}/files/checkpoints"
+
+    if [ ! -d "${CHECKPOINT_DIR}" ]; then
+        echo "警告: ${CHECKPOINT_DIR} が見つかりません"
+        continue
+    fi
+
+    # best.ckptを優先、なければlast.ckpt、それもなければ最新の.ckpt
+    if [ -f "${CHECKPOINT_DIR}/best.ckpt" ]; then
+        CHECKPOINT="${CHECKPOINT_DIR}/best.ckpt"
         echo "✓ ${VARIANT}: ${CHECKPOINT} (best)"
-    elif [ -f "${VARIANT_DIR}/last.ckpt" ]; then
-        CHECKPOINT="${VARIANT_DIR}/last.ckpt"
+    elif [ -f "${CHECKPOINT_DIR}/last.ckpt" ]; then
+        CHECKPOINT="${CHECKPOINT_DIR}/last.ckpt"
         echo "✓ ${VARIANT}: ${CHECKPOINT} (last)"
     else
-        echo "警告: ${VARIANT_DIR} にチェックポイントが見つかりません"
-        continue
+        # .ckptファイルを検索して最新のものを使用
+        CHECKPOINT=$(find "${CHECKPOINT_DIR}" -maxdepth 1 -type f -name "*.ckpt" | sort -r | head -n 1)
+        if [ -z "${CHECKPOINT}" ]; then
+            echo "警告: ${CHECKPOINT_DIR} にチェックポイントが見つかりません"
+            continue
+        fi
+        echo "✓ ${VARIANT}: ${CHECKPOINT} (found)"
     fi
 
     CHECKPOINTS+=("${CHECKPOINT}")
@@ -155,13 +202,13 @@ if [ ${#CHECKPOINTS[@]} -eq 0 ]; then
     echo ""
     echo "エラー: 有効なチェックポイントが見つかりませんでした"
     echo ""
-    echo "期待されるパス:"
+    echo "期待されるパス構造:"
     for VARIANT in "${VARIANTS[@]}"; do
-        echo "  - ${EXP_DIR}/${VARIANT}/best.ckpt"
-        echo "  - ${EXP_DIR}/${VARIANT}/last.ckpt"
+        echo "  - ${EXP_DIR}/${VARIANT}/wandb/run-*/files/checkpoints/best.ckpt"
+        echo "  - ${EXP_DIR}/${VARIANT}/wandb/run-*/files/checkpoints/last.ckpt"
     done
     echo ""
-    return 1
+    exit_script 1
 fi
 
 echo ""
@@ -193,7 +240,7 @@ for i in "${!CHECKPOINTS[@]}"; do
 
     echo "抽出中: ${MODEL_NAME}"
 
-    cd DESED_task/dcase2024_task4_baseline
+    cd "${SCRIPT_DIR}"
 
     uv run python visualize/extract_features.py \
         --checkpoints "${CHECKPOINT}" \
@@ -204,8 +251,6 @@ for i in "${!CHECKPOINTS[@]}"; do
         --batch_size ${BATCH_SIZE} \
         --device ${DEVICE} \
         2>&1 | tee "${MODEL_FEATURE_DIR}/extract_${TIMESTAMP}.log"
-
-    cd ../..
 
     echo ""
 done
@@ -223,7 +268,7 @@ echo ""
 mkdir -p "${UMAP_DIR}"
 
 # UMAP可視化実行
-cd DESED_task/dcase2024_task4_baseline
+cd "${SCRIPT_DIR}"
 
 uv run python visualize/visualize_umap.py \
     --input_dirs "${FEATURE_DIRS[@]}" \
@@ -236,8 +281,6 @@ uv run python visualize/visualize_umap.py \
     --random_state 42 \
     --verbose \
     2>&1 | tee "${UMAP_DIR}/umap_${TIMESTAMP}.log"
-
-cd ../..
 
 echo ""
 echo "UMAP可視化完了！"
