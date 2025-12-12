@@ -242,7 +242,7 @@ for i in "${!CHECKPOINTS[@]}"; do
 
     cd "${SCRIPT_DIR}"
 
-    uv run python visualize/extract_features.py \
+    PYTHONPATH=. uv run python visualize/extract_features.py \
         --checkpoints "${CHECKPOINT}" \
         --config "${CONFIG}" \
         --output_dir "${MODEL_FEATURE_DIR}" \
@@ -270,7 +270,7 @@ mkdir -p "${UMAP_DIR}"
 # UMAP可視化実行
 cd "${SCRIPT_DIR}"
 
-uv run python visualize/visualize_umap.py \
+PYTHONPATH=. uv run python visualize/visualize_umap.py \
     --input_dirs "${FEATURE_DIRS[@]}" \
     --output_dir "${UMAP_DIR}" \
     --feature_type ${FEATURE_TYPE} \

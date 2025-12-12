@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pytest
 
-from visualize.umap.plot_generator import PlotGenerator
+from visualize.umap_vis.plot_generator import PlotGenerator
 
 
 class TestPlotGenerator:

@@ -6,7 +6,7 @@ from typing import Any
 import numpy as np
 import pytest
 
-from visualize.umap.feature_loader import FeatureLoader
+from visualize.umap_vis.feature_loader import FeatureLoader
 
 
 class TestFeatureLoader:

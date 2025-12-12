@@ -24,7 +24,7 @@ from tqdm import tqdm
 from umap import UMAP
 
 # 共通ユーティリティをインポート
-from visualization_utils import (
+from visualize.visualization_utils import (
     ALL_CLASSES_27,
     combine_multiple_models,
     compute_dataset_statistics,

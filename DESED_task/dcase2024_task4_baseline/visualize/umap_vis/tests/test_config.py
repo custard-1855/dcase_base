@@ -90,13 +90,13 @@ class TestReadmeDocumentation:
     """README/使用例ドキュメントの妥当性テスト."""
 
     def test_visualize_readme_exists(self) -> None:
-        """visualize/umap/README.mdファイルが存在することを確認."""
-        readme_path = get_project_root() / "DESED_task" / "dcase2024_task4_baseline" / "visualize" / "umap" / "README.md"
+        """visualize/umap_vis/README.mdファイルが存在することを確認."""
+        readme_path = get_project_root() / "DESED_task" / "dcase2024_task4_baseline" / "visualize" / "umap_vis" / "README.md"
         assert readme_path.exists(), f"READMEファイルが存在しません: {readme_path}"
 
     def test_readme_contains_usage_examples(self) -> None:
         """READMEに3つのモードの使用例が含まれることを確認."""
-        readme_path = get_project_root() / "DESED_task" / "dcase2024_task4_baseline" / "visualize" / "umap" / "README.md"
+        readme_path = get_project_root() / "DESED_task" / "dcase2024_task4_baseline" / "visualize" / "umap_vis" / "README.md"
         with open(readme_path) as f:
             content = f.read()
 
@@ -107,7 +107,7 @@ class TestReadmeDocumentation:
 
     def test_readme_contains_class_list(self) -> None:
         """READMEに21クラスリストへの参照が含まれることを確認."""
-        readme_path = get_project_root() / "DESED_task" / "dcase2024_task4_baseline" / "visualize" / "umap" / "README.md"
+        readme_path = get_project_root() / "DESED_task" / "dcase2024_task4_baseline" / "visualize" / "umap_vis" / "README.md"
         with open(readme_path) as f:
             content = f.read()
 
@@ -117,18 +117,18 @@ class TestReadmeDocumentation:
 
     def test_readme_contains_command_examples(self) -> None:
         """READMEにコマンドライン例が含まれることを確認."""
-        readme_path = get_project_root() / "DESED_task" / "dcase2024_task4_baseline" / "visualize" / "umap" / "README.md"
+        readme_path = get_project_root() / "DESED_task" / "dcase2024_task4_baseline" / "visualize" / "umap_vis" / "README.md"
         with open(readme_path) as f:
             content = f.read()
 
         # コマンドライン例の存在確認
         assert "visualize_umap.py" in content, "スクリプト名が見つかりません"
-        assert "--mode" in content, "--mode引数の例が見つかりません"
+        assert "class_separation" in content or "domain_comparison" in content or "mixstyle_effect" in content, "モード（サブコマンド）の例が見つかりません"
         assert "--input" in content or "--inputs" in content, "入力引数の例が見つかりません"
 
     def test_readme_contains_yaml_config_example(self) -> None:
         """READMEにYAML設定ファイル使用例が含まれることを確認."""
-        readme_path = get_project_root() / "DESED_task" / "dcase2024_task4_baseline" / "visualize" / "umap" / "README.md"
+        readme_path = get_project_root() / "DESED_task" / "dcase2024_task4_baseline" / "visualize" / "umap_vis" / "README.md"
         with open(readme_path) as f:
             content = f.read()
 
