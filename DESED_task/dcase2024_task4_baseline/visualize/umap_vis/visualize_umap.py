@@ -15,15 +15,15 @@ from typing import Any, Optional
 
 import numpy as np
 import yaml
-from dcase_base.DESED_task.dcase2024_task4_baseline.local.classes_dict import (
+from local.classes_dict import (
     classes_labels_desed,
     classes_labels_maestro_real_eval,
 )
 from numpy.typing import NDArray
 
-from visualize.umap.feature_loader import FeatureLoader
-from visualize.umap.plot_generator import PlotGenerator
-from visualize.umap.umap_reducer import UMAPReducer
+from visualize.umap_vis.feature_loader import FeatureLoader
+from visualize.umap_vis.plot_generator import PlotGenerator
+from visualize.umap_vis.umap_reducer import UMAPReducer
 
 LOGGER = logging.getLogger(__name__)
 

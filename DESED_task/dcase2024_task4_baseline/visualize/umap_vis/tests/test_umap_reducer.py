@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from visualize.umap.umap_reducer import UMAPReducer
+from visualize.umap_vis.umap_reducer import UMAPReducer
 
 
 class TestUMAPReducer:

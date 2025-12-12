@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from visualize.umap.visualize_umap import UMAPVisualizer
+from visualize.umap_vis.visualize_umap import UMAPVisualizer
 
 
 class TestUMAPVisualizerDefaultConfig:

@@ -35,44 +35,44 @@ UMAP可視化システムは、学習された特徴表現を解析するため�
 ### 1. クラス分離の可視化
 モデルが特徴空間で異なるイベントクラスをどの程度分離できているかを可視化します。
 # studentモデルでの基本的な実行例
-python visualize/umap/visualize_umap.py \
-  --mode class_separation \
+python visualize/umap_vis/visualize_umap.py \
+  class_separation \
   --input inference_outputs/baseline/desed_validation.npz \
   --model_type student \
   --output_dir output/class_separation
 
 # teacherモデルの場合
-python visualize/umap/visualize_umap.py \
-  --mode class_separation \
+python visualize/umap_vis/visualize_umap.py \
+  class_separation \
   --input inference_outputs/baseline/desed_validation.npz \
   --model_type teacher
 ### 2. ドメイン比較
 異なるデータセット／ドメイン間での特徴分布を比較します。
 # DESEDとMAESTROドメインの比較
-python visualize/umap/visualize_umap.py \
-  --mode domain_comparison \
+python visualize/umap_vis/visualize_umap.py \
+  domain_comparison \
   --inputs inference_outputs/baseline/desed_validation.npz \
            inference_outputs/baseline/maestro_validation.npz \
   --model_type student
 
 # 合成DESEDと実DESEDデータの比較
-python visualize/umap/visualize_umap.py \
-  --mode domain_comparison \
+python visualize/umap_vis/visualize_umap.py \
+  domain_comparison \
   --inputs inference_outputs/baseline/desed_synthetic.npz \
            inference_outputs/baseline/desed_real.npz \
   --model_type teacher
 ### 3. MixStyle効果の比較
 MixStyle適用の前後で特徴分布がどう変化するかを可視化します。
 # MixStyle有無で訓練したモデルを比較
-python visualize/umap/visualize_umap.py \
-  --mode mixstyle_effect \
+python visualize/umap_vis/visualize_umap.py \
+  mixstyle_effect \
   --before inference_outputs/baseline_no_mixstyle/desed_validation.npz \
   --after inference_outputs/baseline_with_mixstyle/desed_validation.npz \
   --model_type student
 ### 4. UMAPパラメータのカスタマイズ
 異なる可視化ニーズのために、UMAP次元削減パラメータをカスタマイズ可能です。
-python visualize/umap/visualize_umap.py \
-  --mode class_separation \
+python visualize/umap_vis/visualize_umap.py \
+  class_separation \
   --input data.npz \
   --n_neighbors 30 \
   --min_dist 0.05 \
@@ -81,22 +81,22 @@ python visualize/umap/visualize_umap.py \
 ### 5. YAML設定ファイルの利用
 実験設定を一貫して適用するため、YAML設定ファイルが利用できます。
 # デフォルト設定ファイルを使用
-python visualize/umap/visualize_umap.py \
-  --mode class_separation \
+python visualize/umap_vis/visualize_umap.py \
+  class_separation \
   --input data.npz \
   --config config/umap_visualization.yaml
 
 # 特定パラメータの上書き
-python visualize/umap/visualize_umap.py \
-  --mode class_separation \
+python visualize/umap_vis/visualize_umap.py \
+  class_separation \
   --input data.npz \
   --config config/umap_visualization.yaml \
   --dpi 600 \
   --figsize 16 10
 ### 6. カスタムプロットスタイリング
 論文向けにプロットの外観を調整できます。
-python visualize/umap/visualize_umap.py \
-  --mode class_separation \
+python visualize/umap_vis/visualize_umap.py \
+  class_separation \
   --input data.npz \
   --palette tab20 \
   --figsize 14 10 \
@@ -131,9 +131,13 @@ python visualize/umap/visualize_umap.py \
 class_separation_student_20250108_143052.png
 class_separation_student_20250108_143052.pdf
 ## コマンドライン引数
+### サブコマンド（モード選択）
+可視化モードはサブコマンドとして位置引数で指定します：
+- `class_separation`: クラス分離性可視化
+- `domain_comparison`: ドメイン比較
+- `mixstyle_effect`: MixStyle効果比較
+
 ### 共通引数
-22:54
-- --mode: 可視化モード（class_separation, domain_comparison, mixstyle_effect）
 - --model_type: 可視化対象モデル（studentまたはteacher、デフォルト: student）
 - --output_dir: プロット出力先ディレクトリ
 - --config: YAML設定ファイルのパス
