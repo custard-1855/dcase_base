@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
-"""
-固定データセットから推論を実行し、特徴量を抽出するスクリプト
+"""固定データセットから推論を実行し、特徴量を抽出するスクリプト
 
 使用法:
     python extract_inference_features.py \
@@ -19,18 +18,23 @@ import numpy as np
 import pandas as pd
 import torch
 import yaml
-from tqdm import tqdm
-
-from local.classes_dict import (
+from dcase_base.DESED_task.dcase2024_task4_baseline.desed_task.dataio.datasets import (
+    StronglyAnnotatedSet,
+    UnlabeledSet,
+)
+from dcase_base.DESED_task.dcase2024_task4_baseline.desed_task.nnet.CRNN import CRNN
+from dcase_base.DESED_task.dcase2024_task4_baseline.desed_task.utils.encoder import (
+    CatManyHotEncoder,
+    ManyHotEncoder,
+)
+from dcase_base.DESED_task.dcase2024_task4_baseline.local.classes_dict import (
     classes_labels_desed,
     classes_labels_maestro_real,
     maestro_desed_alias,
 )
-from local.sed_trainer_pretrained import SEDTask4
-from local.utils import process_tsvs
-from desed_task.dataio.datasets import StronglyAnnotatedSet, UnlabeledSet
-from desed_task.nnet.CRNN import CRNN
-from desed_task.utils.encoder import CatManyHotEncoder, ManyHotEncoder
+from dcase_base.DESED_task.dcase2024_task4_baseline.local.sed_trainer_pretrained import SEDTask4
+from dcase_base.DESED_task.dcase2024_task4_baseline.local.utils import process_tsvs
+from tqdm import tqdm
 
 
 def get_embeddings_name(config, name):
@@ -74,20 +78,17 @@ def split_maestro(config, maestro_dev_df):
     np.random.seed(config["training"]["seed"])
     split_f = config["training"]["maestro_split"]
 
-    for indx, scene_name in enumerate([
-        "cafe_restaurant",
-        "city_center",
-        "grocery_store",
-        "metro_station",
-        "residential_area",
-    ]):
-        mask = (
-            maestro_dev_df["filename"].apply(lambda x: "_".join(x.split("_")[:-1]))
-            == scene_name
-        )
-        filenames = (
-            maestro_dev_df[mask]["filename"].apply(lambda x: x.split("-")[0]).unique()
-        )
+    for indx, scene_name in enumerate(
+        [
+            "cafe_restaurant",
+            "city_center",
+            "grocery_store",
+            "metro_station",
+            "residential_area",
+        ],
+    ):
+        mask = maestro_dev_df["filename"].apply(lambda x: "_".join(x.split("_")[:-1])) == scene_name
+        filenames = maestro_dev_df[mask]["filename"].apply(lambda x: x.split("-")[0]).unique()
         np.random.shuffle(filenames)
 
         pivot = int(split_f * len(filenames))
@@ -96,25 +97,17 @@ def split_maestro(config, maestro_dev_df):
 
         if indx == 0:
             mask_train = (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_train)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_train)
             )
             mask_valid = (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_valid)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_valid)
             )
         else:
             mask_train = mask_train | (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_train)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_train)
             )
             mask_valid = mask_valid | (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_valid)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_valid)
             )
 
     maestro_train_df = maestro_dev_df[mask_train].reset_index(drop=True)
@@ -130,7 +123,7 @@ def create_datasets(config, encoder, dataset_config):
     # クラスマスクの準備
     mask_events_desed = set(classes_labels_desed.keys())
     mask_events_maestro_real = set(classes_labels_maestro_real.keys()).union(
-        set(["Speech", "Dog", "Dishes"])
+        set(["Speech", "Dog", "Dishes"]),
     )
 
     # ===== DESED Validation =====
@@ -211,7 +204,7 @@ def extract_features_from_dataset(
     dataset_name,
     has_targets,
     device,
-    batch_size=16
+    batch_size=16,
 ):
     """データセットから特徴量を抽出"""
     dataloader = torch.utils.data.DataLoader(
@@ -256,7 +249,7 @@ def extract_features_from_dataset(
                 mels_preprocessed,
                 embeddings=embeddings,
                 classes_mask=mask,
-                return_features=True
+                return_features=True,
             )
 
             # Teacher推論
@@ -264,16 +257,16 @@ def extract_features_from_dataset(
                 mels_preprocessed,
                 embeddings=embeddings,
                 classes_mask=mask,
-                return_features=True
+                return_features=True,
             )
 
             # 特徴量を時間平均（RNN出力: (batch, frames, 384) -> (batch, 384)）
-            features_student = out_student['features'].mean(dim=1).cpu().numpy()
-            features_teacher = out_teacher['features'].mean(dim=1).cpu().numpy()
+            features_student = out_student["features"].mean(dim=1).cpu().numpy()
+            features_teacher = out_teacher["features"].mean(dim=1).cpu().numpy()
 
             # Weak probs（attention pooling済み: (batch, 27)）
-            probs_student = out_student['weak_probs'].cpu().numpy()
-            probs_teacher = out_teacher['weak_probs'].cpu().numpy()
+            probs_student = out_student["weak_probs"].cpu().numpy()
+            probs_teacher = out_teacher["weak_probs"].cpu().numpy()
 
             # バッファに追加
             all_features_student.append(features_student)
@@ -296,17 +289,16 @@ def extract_features_from_dataset(
     probs_student = np.concatenate(all_probs_student, axis=0)
     probs_teacher = np.concatenate(all_probs_teacher, axis=0)
 
-
     result = {
-        'features_student': features_student,
-        'features_teacher': features_teacher,
-        'probs_student': probs_student,
-        'probs_teacher': probs_teacher,
-        'filenames': np.array(all_filenames) if all_filenames else None,
+        "features_student": features_student,
+        "features_teacher": features_teacher,
+        "probs_student": probs_student,
+        "probs_teacher": probs_teacher,
+        "filenames": np.array(all_filenames) if all_filenames else None,
     }
 
     if has_targets:
-        result['targets'] = np.concatenate(all_targets, axis=0)
+        result["targets"] = np.concatenate(all_targets, axis=0)
 
     return result
 
@@ -316,28 +308,28 @@ def main():
     parser.add_argument(
         "--checkpoint",
         required=True,
-        help="チェックポイントファイルのパス"
+        help="チェックポイントファイルのパス",
     )
     parser.add_argument(
         "--dataset_config",
         required=True,
-        help="固定データセット定義JSONのパス"
+        help="固定データセット定義JSONのパス",
     )
     parser.add_argument(
         "--output_dir",
         required=True,
-        help="出力ディレクトリ"
+        help="出力ディレクトリ",
     )
     parser.add_argument(
         "--batch_size",
         type=int,
         default=16,
-        help="バッチサイズ"
+        help="バッチサイズ",
     )
     parser.add_argument(
         "--device",
         default=str("cuda" if torch.cuda.is_available() else "cpu"),
-        help="デバイス (cuda/cpu)"
+        help="デバイス (cuda/cpu)",
     )
     args = parser.parse_args()
 
@@ -351,7 +343,7 @@ def main():
     print(f"デバイス: {args.device}")
 
     # JSON定義の読み込み
-    with open(args.dataset_config, "r") as f:
+    with open(args.dataset_config) as f:
         dataset_config = json.load(f)
 
     # Checkpointからハイパーパラメータとstate_dictを抽出
@@ -363,7 +355,7 @@ def main():
 
     # データパス情報を上書き (dataset_config["config_path"]から)
     config_path = dataset_config["config_path"]
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         data_config = yaml.safe_load(f)
     config["data"] = data_config["data"]
     print(f"データパス設定を {config_path} から読み込み")
@@ -388,7 +380,7 @@ def main():
         train_sampler=None,
         scheduler=None,
         fast_dev_run=False,
-        evaluation=True  # 推論モード
+        evaluation=True,  # 推論モード
     )
 
     # State dictをロード
@@ -413,9 +405,9 @@ def main():
 
     # 各データセットから特徴量を抽出
     for dataset_name, dataset in datasets.items():
-        print(f"\n{'='*60}")
+        print(f"\n{'=' * 60}")
         print(f"処理中: {dataset_name}")
-        print(f"{'='*60}")
+        print(f"{'=' * 60}")
 
         has_targets = dataset_config["datasets"][dataset_name]["has_targets"]
 
@@ -425,7 +417,7 @@ def main():
             dataset_name,
             has_targets,
             args.device,
-            args.batch_size
+            args.batch_size,
         )
 
         # .npz形式で保存
@@ -445,9 +437,9 @@ def main():
     with open(metadata_path, "w") as f:
         json.dump(metadata, f, indent=2)
 
-    print(f"\n{'='*60}")
+    print(f"\n{'=' * 60}")
     print("完了")
-    print(f"{'='*60}")
+    print(f"{'=' * 60}")
     print(f"出力ディレクトリ: {args.output_dir}")
 
 
