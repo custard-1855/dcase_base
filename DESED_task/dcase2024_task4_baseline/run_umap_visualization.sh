@@ -84,18 +84,18 @@ while [[ $# -gt 0 ]]; do
             echo "  --device DEVICE          使用デバイス cpu or cuda (default: cuda)"
             echo "  --config CONFIG          設定ファイル (default: confs/pretrained.yaml)"
             echo "  --batch-size SIZE        バッチサイズ (default: 32)"
-            exit 0
+            return 0
             ;;
         *)
             echo "Unknown option: $1"
             echo "Use --help for usage information"
-            exit 1
+            return 1
             ;;
     esac
 done
 
 # ディレクトリ設定
-EXP_DIR="${BASE_DIR}/${CATEGORY}_${METHOD}"
+EXP_DIR="${BASE_DIR}/train/${CATEGORY}/${METHOD}"
 FEATURES_DIR="${OUTPUT_BASE}/features_${METHOD}"
 UMAP_DIR="${OUTPUT_BASE}/umap_${METHOD}_${N_COMPONENTS}d"
 
@@ -161,7 +161,7 @@ if [ ${#CHECKPOINTS[@]} -eq 0 ]; then
         echo "  - ${EXP_DIR}/${VARIANT}/last.ckpt"
     done
     echo ""
-    exit 1
+    return 1
 fi
 
 echo ""
