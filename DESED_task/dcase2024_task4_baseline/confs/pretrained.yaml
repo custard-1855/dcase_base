@@ -156,4 +156,4 @@ net:
   # for MixStyle
   attn_type: default
   attn_deepen: 2
-  mixstyle_type: disable
+  mixstyle_type: disabled
