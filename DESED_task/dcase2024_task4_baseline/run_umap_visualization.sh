@@ -23,7 +23,7 @@ set -e  # エラーが発生したら終了
 
 # スクリプトのディレクトリとプロジェクトベースディレクトリを取得
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_BASE_DIR="$( cd "${SCRIPT_DIR}/../.." && pwd )"
+PROJECT_BASE_DIR="${SCRIPT_DIR}"
 
 # スクリプトがsourceされているかどうかを判定
 if [[ "${BASH_SOURCE[0]}" != "${0}" ]]; then
