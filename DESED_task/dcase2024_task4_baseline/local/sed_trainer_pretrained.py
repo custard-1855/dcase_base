@@ -2523,10 +2523,6 @@ class SEDTask4(pl.LightningModule):
                 print("\n✓ Validation pass complete")
                 print(f"  Collected scores for {len(self.val_tune_sebbs_student)} clips")
 
-            # 重要: validation_epoch_end()は呼び出さない
-            # 理由: validation_epoch_end()内でバッファがクリアされてしまい、
-            #       test_step内でのcSEBBsチューニングに使えなくなるため
-
         if self.evaluation:
             os.makedirs(os.path.join(self.exp_dir, "codecarbon"), exist_ok=True)
             self.tracker_eval = OfflineEmissionsTracker(

@@ -1,9 +1,9 @@
 """MixStyle with Frequency Attention for Sound Event Detection.
 
-This module implements various frequency-wise MixStyle augmentation techniques:
-1. Basic MixStyle augmentation (mix_style)
-2. CNN-based frequency attention MixStyle (FrequencyAttentionMixStyle)
-3. Transformer-based frequency attention MixStyle (FrequencyTransformerMixStyle)
+このモジュールには以下の三つが含まれます:
+1. MixStyleのみ (mix_style)
+2. + 軽量なCNNによる重み付け (FrequencyAttentionMixStyle)
+3. + Transformerによる重み付け (FrequencyTransformerMixStyle)
 """
 
 import torch
@@ -13,8 +13,6 @@ from torch.distributions.beta import Beta
 
 # Auxiliary Modules for Attention Networks
 class ResidualConvBlock(nn.Module):
-    """Residual convolutional block with skip connection."""
-
     def __init__(self, channels, kernel_size=3):
         super().__init__()
         self.conv = nn.Sequential(
@@ -31,8 +29,6 @@ class ResidualConvBlock(nn.Module):
 
 
 class MultiScaleConvBlock(nn.Module):
-    """Multi-scale convolutional block with parallel branches of different kernel sizes."""
-
     def __init__(self, in_channels, out_channels):
         super().__init__()
         out_per_branch = out_channels // 3
@@ -62,12 +58,10 @@ def calc_weighted_stats(x, attn_map):
     EPSILON = 1e-6
     attn_sum = attn_map.sum(dim=(2), keepdim=True) + EPSILON
 
-    # 1. 重み付き平均 (Weighted Mean)
-    # \mu = \sum(x * w) / \sum(w)
+    # 1. 重み付き平均
     mean = (x * attn_map).sum(dim=(2), keepdim=True) / attn_sum
 
-    # 2. 重み付き分散 (Weighted Variance)
-    # \sigma^2 = \sum(w * (x - \mu)^2) / \sum(w)
+    # 2. 重み付き分散
     var = ((x - mean) ** 2 * attn_map).sum(dim=(2), keepdim=True) / attn_sum
     std = torch.sqrt(var + EPSILON)
 
@@ -75,7 +69,7 @@ def calc_weighted_stats(x, attn_map):
 
 
 def mix_style(x, attn_map, use_attn):
-    """Apply MixStyle augmentation by mixing statistics across the batch.
+    """バッチ間で統計量を混合し,データ拡張を実施.
 
     Args:
         x: Input features (batch_size, n_channels, n_frames, n_freq)
@@ -84,12 +78,10 @@ def mix_style(x, attn_map, use_attn):
         Augmented features with mixed statistics
 
     """
-    # Probability of applying augmentation
     AUGMENTATION_PROB = 0.5
     if torch.rand(1).item() > AUGMENTATION_PROB:
         return x
 
-    # Compute mean and std along time dimension
     if use_attn == "able":
         x_mean, x_std = calc_weighted_stats(x, attn_map)
     else:
@@ -100,12 +92,12 @@ def mix_style(x, attn_map, use_attn):
 
     x_normed = (x - x_mean) / x_std
 
-    # Shuffle batch to get different style statistics
+    # バッチ内で異なる統計量を得る
     B = x.size(0)
     perm = torch.randperm(B, device=x.device)
     mu2, sig2 = x_mean[perm], x_std[perm]
 
-    # Mix statistics with random ratio
+    # Beta分布に基づき混合
     BETA_ALPHA = 0.1
     lam = Beta(BETA_ALPHA, BETA_ALPHA).sample((B, 1, 1, 1))
     lam = lam.to(device=x.device)
@@ -120,8 +112,8 @@ def mix_style(x, attn_map, use_attn):
 class BasicMixStyleWrapper(nn.Module):
     """Wrapper for pure MixStyle without attention mechanism.
 
-    This is used for baseline experiments (B0) that only apply
-    basic MixStyle augmentation without frequency-aware attention.
+    This is used for baseline experiments that only apply
+    basic MixStyle augmentation without frequency-wise attention.
     """
 
     def __init__(self, channels=None, **kwargs):
@@ -135,17 +127,17 @@ class BasicMixStyleWrapper(nn.Module):
         super().__init__()
         # No parameters needed - just wraps mix_style function
 
-    def forward(self, x_content):
+    def forward(self, x):
         """Forward pass applying pure MixStyle.
 
         Args:
-            x_content: Input features (Batch, Channels, Frame, Frequency)
+            x: Input features (Batch, Channels, Frame, Frequency)
 
         Returns:
             Output features with pure MixStyle applied
 
         """
-        return mix_style(x_content, None, None)
+        return mix_style(x, None, None)
 
 
 class FrequencyAttentionMixStyle(nn.Module):
@@ -183,6 +175,8 @@ class FrequencyAttentionMixStyle(nn.Module):
 
     def _build_attention_network(self, in_channels, mid_channels, attn_type, depth):
         """Build attention network based on specified architecture.
+
+        以前の検証で他二つは精度向上が見られなかったが,実装の正確性に不安がある.
 
         Args:
             in_channels: Input channel dimension
@@ -242,26 +236,28 @@ class FrequencyAttentionMixStyle(nn.Module):
         )
         raise ValueError(msg)
 
-    def forward(self, x_content):
+    def forward(self, x):
         """Forward pass.
 
         Args:
-            x_content: Input features (Batch, Channels, Frame, Frequency)
+            x: Input features (Batch, Channels, Frame, Frequency)
 
         Returns:
-            Output features with frequency-aware MixStyle applied
+            Output features with frequency-wise MixStyle applied
 
         """
-        x_avg = x_content.mean(dim=2)  # (B, C, F)
+        x_avg = x.mean(dim=2)  # (B, C, F)
         attn_logits = self.attention_network(x_avg)
 
         attn_weights = torch.sigmoid(attn_logits).unsqueeze(-2)  # (B, C, 1, F)
-        x_mixed = mix_style(x_content, attn_weights, "able")
-        return x_content + x_mixed
+        x_mixed = mix_style(x, attn_weights, "able")
+        return x + x_mixed
 
 
 class FrequencyTransformerMixStyle(nn.Module):
     """Transformer-based frequency attention MixStyle with self-attention.
+
+    Self-attentionを検証したかったが,純粋な実装より精度低下. 実装が怪しい
 
     Args:
         channels: Number of input channels

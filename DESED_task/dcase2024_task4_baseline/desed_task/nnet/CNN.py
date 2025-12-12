@@ -50,7 +50,7 @@ class CNN(nn.Module):
         normalization="batch",
         **kwargs,
     ):
-        """Initialization of CNN network s
+        """Initialization of CNN networks.
 
         Args:
             n_in_channel: int, number of input channel
