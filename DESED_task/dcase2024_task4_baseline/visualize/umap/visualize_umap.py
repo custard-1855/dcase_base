@@ -15,7 +15,7 @@ from typing import Any, Optional
 
 import numpy as np
 import yaml
-from local.classes_dict import (
+from dcase_base.DESED_task.dcase2024_task4_baseline.local.classes_dict import (
     classes_labels_desed,
     classes_labels_maestro_real_eval,
 )
