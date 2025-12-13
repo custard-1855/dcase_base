@@ -165,3 +165,4 @@ experiments/
 *.md
 .kiro/
 .claude/
+.devcontainer/
