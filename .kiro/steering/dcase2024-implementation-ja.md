@@ -19,15 +19,18 @@
 #### 図1: システム全体俯瞰図
 
 ```mermaid
-graph TB
+graph LR
     subgraph データ準備
-        D1[(データセット<br/>DESED / MAESTRO Real)]:::dataset
-        D2[音声波形<br/>44kHz → 16kHz リサンプリング]:::audio
+        direction TB
+        D1[(DESED / MAESTRO Real)]:::dataset
+        D2[音声 リサンプリング<br/>44kHz → 16kHz]:::audio
+        D1 --> D2
     end
 
     subgraph 特徴抽出
+        direction TB
         F1[Mel-spectrogram<br/>128 bins, 10Hz]:::feature
-        F2[BEATs埋め込み<br/>事前計算HDF5]:::beats
+        F2[BEATs 埋め込み]:::beats
         F3[結合特徴量]:::feature
     end
 
@@ -42,47 +45,24 @@ graph TB
         M2 -.->|擬似ラベル| M1
     end
 
-    subgraph 後処理
-        P1[フレーム予測<br/>確率曲線 T×10]:::pred
-        P2[cSEBBs<br/>変化点検出]:::csebbs
-        P3[中央値フィルタ]:::csebbs
-        P4[イベント統合]:::csebbs
-    end
-
     subgraph 評価
+        direction TB
+        P1[フレーム予測]:::pred
+        P4[イベント統合]:::csebbs
         E1[イベント検出結果<br/>開始 / 終了時刻、クラス]:::result
-        E2[PSDS評価<br/>PSDS1 / PSDS2]:::eval
+        E2[PSDS1, PSDS2, mpAUC]:::eval
+        P1 --> P4 --> E1 --> E2
     end
 
-    D1 --> D2
     D2 --> F1
     D2 -.->|事前計算| F2
     F1 --> F3
-    F2 -.->|オプション| F3
-
+    F2 -.-> F3
     F3 --> M1
     L1 -.->|勾配降下| M1
-
     M1 --> P1
-    P1 --> P2
-    P2 --> P3
-    P3 --> P4
-    P4 --> E1
-
-    E1 --> E2
-
-    classDef dataset fill:#E3F2FD,stroke:#90CAF9,color:#000
-    classDef audio fill:#BBDEFB,stroke:#64B5F6,color:#000
-    classDef feature fill:#90CAF9,stroke:#42A5F5,color:#000
-    classDef beats fill:#64B5F6,stroke:#2196F3,color:#000
-    classDef student fill:#42A5F5,stroke:#1E88E5,color:#fff,stroke-width:2px
-    classDef teacher fill:#2196F3,stroke:#1976D2,color:#fff,stroke-width:2px
-    classDef loss fill:#90CAF9,stroke:#42A5F5,color:#000
-    classDef pred fill:#64B5F6,stroke:#2196F3,color:#000
-    classDef csebbs fill:#42A5F5,stroke:#1E88E5,color:#fff
-    classDef result fill:#1E88E5,stroke:#1565C0,color:#fff,stroke-width:2px
-    classDef eval fill:#1976D2,stroke:#0D47A1,color:#fff
 ```
+
 
 **各フェーズの概要**:
 1. **データ準備**: DESEDデータセット（強・弱・未ラベル）の読み込みと音声リサンプリング
@@ -437,22 +417,11 @@ graph TB
         TR4[Early Stopping<br/>Validation PSDS監視]:::train
     end
 
-    subgraph 後処理最適化
-        OPT1[optuna_pretrained.py<br/>cSEBBsパラメータ探索]:::optuna
-        OPT2[Optunaダッシュボード<br/>試行履歴可視化]:::optuna
-        OPT3[ベストパラメータ<br/>YAML保存]:::config
-    end
-
     subgraph 最終評価
         EV1[推論実行<br/>Public Evalセット]:::eval
         EV2[cSEBBs適用<br/>最適パラメータ使用]:::eval
         EV3[PSDS計算<br/>公式スクリプト]:::eval
         EV4[結果レポート<br/>PSDS1, PSDS2, F1]:::result
-    end
-
-    subgraph モデル分析オプション
-        AN1[visualize_umap.py<br/>埋め込み可視化]:::analysis
-        AN2[analyze_clip_confusion.py<br/>誤検出分析]:::analysis
     end
 
     E1 --> E2
@@ -468,17 +437,10 @@ graph TB
     TR1 --> TR3
     TR1 --> TR4
 
-    TR3 --> OPT1
-    OPT1 --> OPT2
-    OPT1 --> OPT3
-
-    TR3 & OPT3 --> EV1
+    TR3 --> EV1
     EV1 --> EV2
     EV2 --> EV3
     EV3 --> EV4
-
-    TR3 -.->|オプション| AN1
-    TR3 -.->|オプション| AN2
 
     classDef setup fill:#E3F2FD,stroke:#90CAF9,color:#000,stroke-width:2px
     classDef data fill:#BBDEFB,stroke:#64B5F6,color:#000

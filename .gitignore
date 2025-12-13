@@ -161,3 +161,7 @@ experiments/
 
 # tests
 .devcontainer/*.md
+
+*.md
+.kiro/
+.claude/
