@@ -1,0 +1,22 @@
+class_name,desed_validation,desed_unlabeled,maestro_training,maestro_validation,total,fallback
+Alarm_bell_ringing,150,,,,150,No
+Blender,150,,,,150,No
+Cat,150,,,,150,No
+Dishes,150,,,,150,No
+Dog,150,,,,150,No
+Electric_shaver_toothbrush,150,,,,150,No
+Frying,150,,,,150,No
+Running_water,150,,,,150,No
+Speech,150,,,,150,No
+Vacuum_cleaner,150,,,,150,No
+people talking,,,150,150,300,No
+children voices,,,150,150,300,No
+metro leaving,,,150,150,300,No
+birds_singing,,,150,150,300,No
+metro approaching,,,150,150,300,No
+cutlery and dishes,,,150,150,300,No
+footsteps,,,150,150,300,No
+brakes_squeaking,,,150,150,300,No
+wind_blowing,,,150,150,300,No
+large_vehicle,,,150,150,300,No
+car,,,150,150,300,No

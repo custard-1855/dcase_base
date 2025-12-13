@@ -5,68 +5,55 @@ pretrained:
   extracted_embeddings_dir: ./embeddings
 
 cmt:
-  enabled: false              # CMTを有効化
-  phi_clip: 0.5             # クリップレベル閾値 (論文では0.5)
-  phi_frame: 0.7            # フレームレベル閾値 (論文では0.7)
-  median_filter_size: 7     # メディアンフィルタのサイズ (デフォルト7)
+  enabled: False
+  phi_clip: 0.5
+  phi_frame: 0.5
+  phi_neg: 0.3
+  phi_pos: 0.7
+  warmup_epochs: 0
+  use_neg_sample: False
+  pos_neg_scale: False
+
+sebbs:
+  enabled: false
+
+wandb:
+  use_wandb: True
+
+# Experiment directory structure
+experiment:
+  mode: train                    # Execution mode: train | test | inference | feature_extraction
+  category: baseline             # Experiment category (e.g., baseline, ablation, optimization)
+  method: baseline               # Method name (e.g., baseline, cmt, beats, sebbs)
+  variant: default               # Variant description (e.g., use_neg_sample, phi_0.5)
+  base_dir: experiments          # Base directory for experiments (default: experiments)
+  log_test_to_wandb: false       # Whether to create wandb runs in test mode (default: false)
 
 
-training:
-  # # ===== 論文ベースのConfident Mean Teacher設定 =====
-  
-  # # 基本的なConfident Teacher設定
-  # use_confident_teacher: true
-  # confidence_threshold: 0.8        # 初期閾値（高めに設定）
-  # dynamic_confidence: true         # 動的調整有効
-  # min_confidence_threshold: 0.6    # 最終閾値（適度に下げる）
-  # confidence_loss_weight: 0.7      # バランス調整（0.8→0.7）
-  # apply_confidence_to_weak: true   # 弱予測にも適用
-  
-  # # 論文ベースの信頼度重み付き一貫性損失
-  # use_paper_consistency_loss: true    # 🔥 NEW: 論文の一貫性損失
-  # consistency_loss_weight: 1.0       # フレーム一貫性損失重み
-  # weak_consistency_weight: 0.5       # クリップ一貫性損失重み
-  # include_weak_consistency: true     # クリップレベル損失含む
-  
-  # # 論文ベースの閾値処理
-  # use_paper_thresholding: true       # 🔥 NEW: 論文の閾値処理
-  # phi_clip: 0.5                      # クリップレベル閾値 φclip
-  # phi_frame: 0.5                     # フレームレベル閾値 φframe
-  
-  # # PSDS1/PSDS2バランス戦略
-  # balance_psds: true                 # バランス調整有効
-  # fp_suppression_strength: 0.1       # FP抑制強度
-  # fp_suppression_weight: 0.15        # FP抑制重み（0.1→0.15）
-  # # negative_confidence_boost: 1.2   # 🚧 未実装（将来的に追加予定）
-  
-  # 学習率とスケジューリング（既存のPyTorch Lightning設定を使用）
-  # lr_scheduler: cosine            # 🚧 未実装（デフォルトスケジューラを使用）
-  # warmup_epochs: 20               # 🚧 未実装（n_epochs_warmupを使用）
-  
-  # バッチサイズ（論文推奨）
+training:  
   batch_size: [12, 6, 6, 12, 24]    # [maestro, synth, strong, weak, unlabel]
   batch_size_val: 24
   
   # Mean Teacher設定
-  ema_factor: 0.999                 # EMA係数（標準）
-  self_sup_loss: bce                # 🔥 CHANGED: BCE損失（論文準拠）
+  ema_factor: 0.999
+  self_sup_loss: mse
   
   # 損失重み調整
-  const_max: 2.5                    # 自己教師学習最大重み（2→2.5）
-  n_epochs_warmup: 30               # ウォームアップ期間（50→30）
+  const_max: 2
+  n_epochs_warmup: 50
   epoch_decay: 100
   
   # 訓練制御
   num_workers: 6
-  n_epochs: 300                     # エポック数（10→200）
-  early_stop_patience: 200           # 早期停止（200→50）
+  n_epochs: 150
+  early_stop_patience: 150
   accumulate_batches: 1
   gradient_clip: 5.0
   
   # 検証設定
   val_thresholds: [0.5]
   n_test_thresholds: 50
-  validation_interval: 10           # 検証間隔短縮（10→5）
+  validation_interval: 10
   
   # データ分割
   weak_split: 0.9
@@ -144,7 +131,7 @@ feats:
 net:
   dropout: 0.2
   rnn_layers: 1
-  n_in_channel: 1
+  n_in_channel: 1 # 3 #stack用に変更
   nclass: 27
   attention: True
   n_RNN_cell: 192
@@ -154,7 +141,7 @@ net:
   padding: [1, 1, 1, 1, 1, 1, 1]
   stride: [1, 1, 1, 1, 1, 1, 1]
   nb_filters: [ 16, 32, 64, 128, 128, 128, 128 ]
-  pooling: [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ] ]
+  pooling:  [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ] ] # for log mel
   dropstep_recurrent: 0.3
   dropstep_recurrent_len: 16
   use_embeddings: True
@@ -166,3 +153,7 @@ net:
   specaugm_f_p: 0.0
   specaugm_f_l: 10
   median_filter: [3, 9, 9, 5, 5, 5, 9, 7, 11, 9, 7, 3, 9, 13, 7, 1, 13, 3, 13, 7, 5, 5, 1, 13, 17, 13, 15]
+  # for MixStyle
+  attn_type: default
+  attn_deepen: 2
+  mixstyle_type: disabled
