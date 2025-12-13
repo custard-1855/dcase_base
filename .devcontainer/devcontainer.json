@@ -6,7 +6,8 @@
   // Build configuration
   // Requirement 1.2: Reference to Dockerfile in the same directory
   "build": {
-    "dockerfile": "Dockerfile"
+    "dockerfile": "Dockerfile",
+    "context": ".."
   },
 
   // Devcontainer features - Automated tool installations
