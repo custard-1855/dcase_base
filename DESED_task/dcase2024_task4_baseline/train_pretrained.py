@@ -1,7 +1,6 @@
 import argparse
 import os
 
-
 import desed
 import numpy as np
 import pandas as pd
@@ -9,23 +8,54 @@ import pytorch_lightning as pl
 import torch
 import torchaudio
 import yaml
-from local.classes_dict import (classes_labels_desed,
-                                classes_labels_maestro_real,
-                                maestro_desed_alias)
-from local.resample_folder import resample_folder
-from local.sed_trainer_pretrained import SEDTask4
-from local.utils import (calculate_macs, generate_tsv_wav_durations,
-                         process_tsvs)
-from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
-from pytorch_lightning.loggers import TensorBoardLogger
-
 from desed_task.dataio import ConcatDatasetBatchSampler
-from desed_task.dataio.datasets import (StronglyAnnotatedSet, UnlabeledSet,
-                                        WeakSet)
+from desed_task.dataio.datasets import StronglyAnnotatedSet, UnlabeledSet, WeakSet
 from desed_task.nnet.CRNN import CRNN
 from desed_task.utils.encoder import CatManyHotEncoder, ManyHotEncoder
 from desed_task.utils.schedulers import ExponentialWarmup
+from local.classes_dict import (
+    classes_labels_desed,
+    classes_labels_maestro_real,
+    maestro_desed_alias,
+)
+from local.experiment_dir import ExperimentConfig
+from local.resample_folder import resample_folder
+from local.sed_trainer_pretrained import SEDTask4
+from local.utils import calculate_macs, generate_tsv_wav_durations, process_tsvs
+from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
 
+
+def process_experiment_section(configs: dict) -> dict:
+    """Process experiment section in configs.
+
+    This function ensures experiment section exists and validates it.
+    It is called after loading YAML configuration in prepare_run().
+
+    Args:
+        configs: Configuration dictionary from YAML
+
+    Returns:
+        Modified configs with experiment section processed
+
+    Raises:
+        ValueError: If experiment config validation fails
+
+    """
+    # Initialize experiment section if missing
+    if "experiment" not in configs:
+        configs["experiment"] = {}
+
+    # Validate by creating ExperimentConfig instance
+    exp_config = ExperimentConfig(**configs["experiment"])
+
+    # Log the experiment structure
+    structure = (
+        f"{exp_config.mode.value}/{exp_config.category}/{exp_config.method}/{exp_config.variant}"
+    )
+    print(f"Experiment structure: {structure}")
+
+    return configs
 
 
 def resample_data_generate_durations(config_data, test_only=False, evaluation=False):
@@ -48,14 +78,17 @@ def resample_data_generate_durations(config_data, test_only=False, evaluation=Fa
     for dset in dsets:
         print(f"Resampling {dset} to 16 kHz.")
         computed = resample_folder(
-            config_data[dset + "_44k"], config_data[dset], target_fs=config_data["fs"]
+            config_data[dset + "_44k"],
+            config_data[dset],
+            target_fs=config_data["fs"],
         )
 
     if not evaluation:
         for base_set in ["synth_val", "test"]:
             if not os.path.exists(config_data[base_set + "_dur"]) or computed:
                 generate_tsv_wav_durations(
-                    config_data[base_set + "_folder"], config_data[base_set + "_dur"]
+                    config_data[base_set + "_folder"],
+                    config_data[base_set + "_dur"],
                 )
 
 
@@ -97,7 +130,6 @@ def get_embeddings_name(config, name):
 
 
 def split_maestro(config, maestro_dev_df):
-
     np.random.seed(config["training"]["seed"])
     split_f = config["training"]["maestro_split"]
     for indx, scene_name in enumerate(
@@ -107,16 +139,10 @@ def split_maestro(config, maestro_dev_df):
             "grocery_store",
             "metro_station",
             "residential_area",
-        ]
+        ],
     ):
-
-        mask = (
-            maestro_dev_df["filename"].apply(lambda x: "_".join(x.split("_")[:-1]))
-            == scene_name
-        )
-        filenames = (
-            maestro_dev_df[mask]["filename"].apply(lambda x: x.split("-")[0]).unique()
-        )
+        mask = maestro_dev_df["filename"].apply(lambda x: "_".join(x.split("_")[:-1])) == scene_name
+        filenames = maestro_dev_df[mask]["filename"].apply(lambda x: x.split("-")[0]).unique()
         np.random.shuffle(filenames)
 
         pivot = int(split_f * len(filenames))
@@ -124,33 +150,27 @@ def split_maestro(config, maestro_dev_df):
         filenames_valid = filenames[pivot:]
         if indx == 0:
             mask_train = (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_train)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_train)
             )
             mask_valid = (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_valid)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_valid)
             )
             train_split = maestro_dev_df[mask_train]
             valid_split = maestro_dev_df[mask_valid]
         else:
             mask_train = (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_train)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_train)
             )
             mask_valid = (
-                maestro_dev_df["filename"]
-                .apply(lambda x: x.split("-")[0])
-                .isin(filenames_valid)
+                maestro_dev_df["filename"].apply(lambda x: x.split("-")[0]).isin(filenames_valid)
             )
             train_split = pd.concat(
-                [train_split, maestro_dev_df[mask_train]], ignore_index=True
+                [train_split, maestro_dev_df[mask_train]],
+                ignore_index=True,
             )
             valid_split = pd.concat(
-                [valid_split, maestro_dev_df[mask_valid]], ignore_index=True
+                [valid_split, maestro_dev_df[mask_valid]],
+                ignore_index=True,
             )
 
     return train_split, valid_split
@@ -166,8 +186,7 @@ def single_run(
     evaluation=False,
     callbacks=None,
 ):
-    """
-    Running sound event detection baselin
+    """Running sound event detection baselin
 
     Args:
         config (dict): the dictionary of configuration params
@@ -178,6 +197,7 @@ def single_run(
             to be loaded to test the model.
         fast_dev_run (bool, optional): whether to use a run with only one batch at train and validation, useful
             for development purposes.
+
     """
     config.update({"log_dir": log_dir})
 
@@ -185,24 +205,6 @@ def single_run(
     seed = config["training"]["seed"]
     if seed:
         pl.seed_everything(seed, workers=True)
-
-    # missing_filesディレクトリのファイル名一覧を取得
-    #missing_files_dir = os.path.join(os.path.dirname(__file__), "missing_files")
-    #print("[DEBUG] mising_file_dir: ", missing_files_dir)
-    #if os.path.exists(missing_files_dir):
-    #    missing_files = set(os.listdir(missing_files_dir))
-    #else:
-    #     missing_files = set()
-
-
-    #def filter_missing(df, missing_files=missing_files):
-        # filename列がmissing_files集合に含まれていない行だけ残す
-    #    if "filename" in df.columns:
-    #        before = len(df)
-    #        df = df[~df["filename"].isin(missing_files)].reset_index(drop=True)
-    #        print(f"filter_missing: {before-len(df)} files removed")
-    #    return df
-
 
     def filter_nonexistent_files(df, folder):
         # folder: ファイルが格納されているディレクトリ
@@ -216,7 +218,7 @@ def single_run(
 
     mask_events_desed = set(classes_labels_desed.keys())
     mask_events_maestro_real = set(classes_labels_maestro_real.keys()).union(
-        set(["Speech", "Dog", "Dishes"])
+        set(["Speech", "Dog", "Dishes"]),
     )
 
     if not config["pretrained"]["freezed"]:
@@ -229,7 +231,7 @@ def single_run(
         assert config["pretrained"]["extracted_embeddings_dir"] is not None, (
             "If e2e is false, you have to download pretrained embeddings from {}"
             "and set in the config yaml file the path to the downloaded directory".format(
-                "REPLACE ME"
+                "REPLACE ME",
             )
         )
 
@@ -289,14 +291,16 @@ def single_run(
         assert config["data"]["fs"] == 16000, "this pretrained model is trained on 16k"
         feature_extraction = None  # integrated in the model
         desed.download_from_url(
-            config["pretrained"]["url"], config["pretrained"]["dest"]
+            config["pretrained"]["url"],
+            config["pretrained"]["dest"],
         )
         # use PANNs as additional feature
         from local.panns.models import Cnn14_16k
 
         pretrained = Cnn14_16k()
         pretrained.load_state_dict(
-            torch.load(config["pretrained"]["dest"])["model"], strict=False
+            torch.load(config["pretrained"]["dest"])["model"],
+            strict=False,
         )
     else:
         pretrained = None
@@ -319,7 +323,8 @@ def single_run(
         )
 
         maestro_real_devtest_tsv = pd.read_csv(
-            config["data"]["real_maestro_val_tsv"], sep="\t"
+            config["data"]["real_maestro_val_tsv"],
+            sep="\t",
         )
         # optionally we can map to desed some maestro classes
         maestro_real_devtest = StronglyAnnotatedSet(
@@ -335,7 +340,7 @@ def single_run(
             test=True,
         )
         devtest_dataset = torch.utils.data.ConcatDataset(
-            [desed_devtest_dataset, maestro_real_devtest]
+            [desed_devtest_dataset, maestro_real_devtest],
         )
     else:
         devtest_dataset = UnlabeledSet(
@@ -354,16 +359,74 @@ def single_run(
     ##### model definition  ############
     sed_student = CRNN(**config["net"])
 
+    # Validation dataset creation (needed for both training and evaluation modes)
+    # This is required for cSEBBs tuning even in evaluation-only mode
+    weak_df = pd.read_csv(config["data"]["weak_tsv"], sep="\t")
+    train_weak_df = weak_df.sample(
+        frac=config["training"]["weak_split"],
+        random_state=config["training"]["seed"],
+    )
+    valid_weak_df = weak_df.drop(train_weak_df.index).reset_index(drop=True)
+    train_weak_df = train_weak_df.reset_index(drop=True)
+
+    synth_df_val = pd.read_csv(config["data"]["synth_val_tsv"], sep="\t")
+
+    synth_val = StronglyAnnotatedSet(
+        config["data"]["synth_val_folder"],
+        synth_df_val,
+        encoder,
+        return_filename=True,
+        pad_to=config["data"]["audio_max_len"],
+        feats_pipeline=feature_extraction,
+        embeddings_hdf5_file=get_embeddings_name(config, "synth_val"),
+        embedding_type=config["net"]["embedding_type"],
+        mask_events_other_than=mask_events_desed,
+    )
+
+    weak_val = WeakSet(
+        config["data"]["weak_folder"],
+        valid_weak_df,
+        encoder,
+        pad_to=config["data"]["audio_max_len"],
+        return_filename=True,
+        feats_pipeline=feature_extraction,
+        embeddings_hdf5_file=get_embeddings_name(config, "weak_val"),
+        embedding_type=config["net"]["embedding_type"],
+        mask_events_other_than=mask_events_desed,
+    )
+
+    maestro_real_train_df = pd.read_csv(
+        config["data"]["real_maestro_train_tsv"],
+        sep="\t",
+    )
+    maestro_real_train_df, maestro_real_valid_df = split_maestro(
+        config,
+        maestro_real_train_df,
+    )
+
+    maestro_real_valid = StronglyAnnotatedSet(
+        config["data"]["real_maestro_train_folder"],
+        maestro_real_valid_df,
+        encoder,
+        pad_to=config["data"]["audio_max_len"],
+        return_filename=True,
+        feats_pipeline=feature_extraction,
+        embeddings_hdf5_file=get_embeddings_name(config, "maestro_real_train"),
+        embedding_type=config["net"]["embedding_type"],
+        mask_events_other_than=mask_events_maestro_real,
+    )
+
+    valid_dataset = torch.utils.data.ConcatDataset([synth_val, weak_val, maestro_real_valid])
+
     if test_state_dict is None:
         ##### data prep train valid ##########
         synth_df = pd.read_csv(config["data"]["synth_tsv"], sep="\t")
         print(f"[Debug] synth_df length: {len(synth_df)}")
         print(f"[Debug] synth_df shape: {synth_df.shape}")
 
-        #synth_df = filter_missing(synth_df) # データ欠損対策
+        # synth_df = filter_missing(synth_df) # データ欠損対策
         print(f"[Debug] synth_df length: {len(synth_df)}")
         print(f"[Debug] synth_df shape: {synth_df.shape}")
-
 
         synth_set = StronglyAnnotatedSet(
             config["data"]["synth_folder"],
@@ -378,7 +441,7 @@ def single_run(
 
         strong_df = pd.read_csv(config["data"]["strong_tsv"], sep="\t")
         strnog_df = filter_nonexistent_files(strong_df, config["data"]["strong_folder"])
-        #strong_df = filter_missing(strong_df) # データ欠損対策
+        # strong_df = filter_missing(strong_df) # データ欠損対策
         strong_set = StronglyAnnotatedSet(
             config["data"]["strong_folder"],
             strong_df,
@@ -387,17 +450,8 @@ def single_run(
             feats_pipeline=feature_extraction,
             embeddings_hdf5_file=get_embeddings_name(config, "strong_train"),
             embedding_type=config["net"]["embedding_type"],
-            mask_events_other_than=mask_events_desed
+            mask_events_other_than=mask_events_desed,
         )
-
-        weak_df = pd.read_csv(config["data"]["weak_tsv"], sep="\t")
-        #weak_df = filter_missing(weak_df) # データ欠損対策
-        train_weak_df = weak_df.sample(
-            frac=config["training"]["weak_split"],
-            random_state=config["training"]["seed"],
-        )
-        valid_weak_df = weak_df.drop(train_weak_df.index).reset_index(drop=True)
-        train_weak_df = train_weak_df.reset_index(drop=True)
 
         weak_set = WeakSet(
             config["data"]["weak_folder"],
@@ -420,47 +474,13 @@ def single_run(
             mask_events_other_than=mask_events_desed,
         )
 
-        synth_df_val = pd.read_csv(config["data"]["synth_val_tsv"], sep="\t")
-        #synth_df_val = filter_missing(synth_df_val) # データ欠損対策
-        
-
-        synth_val = StronglyAnnotatedSet(
-            config["data"]["synth_val_folder"],
-            synth_df_val,
-            encoder,
-            return_filename=True,
-            pad_to=config["data"]["audio_max_len"],
-            feats_pipeline=feature_extraction,
-            embeddings_hdf5_file=get_embeddings_name(config, "synth_val"),
-            embedding_type=config["net"]["embedding_type"],
-            mask_events_other_than=mask_events_desed,
-        )
-
-        weak_val = WeakSet(
-            config["data"]["weak_folder"],
-            valid_weak_df,
-            encoder,
-            pad_to=config["data"]["audio_max_len"],
-            return_filename=True,
-            feats_pipeline=feature_extraction,
-            embeddings_hdf5_file=get_embeddings_name(config, "weak_val"),
-            embedding_type=config["net"]["embedding_type"],
-            mask_events_other_than=mask_events_desed,
-        )
-
-        maestro_real_train = pd.read_csv(
-            config["data"]["real_maestro_train_tsv"], sep="\t"
-        )
-
-        maestro_real_train, maestro_real_valid = split_maestro(
-            config, maestro_real_train
-        )
-        maestro_real_train = process_tsvs(
-            maestro_real_train, alias_map=maestro_desed_alias
+        maestro_real_train_processed = process_tsvs(
+            maestro_real_train_df,
+            alias_map=maestro_desed_alias,
         )
         maestro_real_train = StronglyAnnotatedSet(
             config["data"]["real_maestro_train_folder"],
-            maestro_real_train,
+            maestro_real_train_processed,
             encoder,
             pad_to=config["data"]["audio_max_len"],
             feats_pipeline=feature_extraction,
@@ -468,19 +488,6 @@ def single_run(
             embedding_type=config["net"]["embedding_type"],
             mask_events_other_than=mask_events_maestro_real,
         )
-
-        maestro_real_valid = StronglyAnnotatedSet(
-            config["data"]["real_maestro_train_folder"],
-            maestro_real_valid,
-            encoder,
-            pad_to=config["data"]["audio_max_len"],
-            return_filename=True,
-            feats_pipeline=feature_extraction,
-            embeddings_hdf5_file=get_embeddings_name(config, "maestro_real_train"),
-            embedding_type=config["net"]["embedding_type"],
-            mask_events_other_than=mask_events_maestro_real,
-        )
-
 
         strong_full_set = torch.utils.data.ConcatDataset([strong_set, synth_set])
         # this gives best configuration see https://github.com/DCASE-REPO/DESED_task/issues/92
@@ -491,8 +498,6 @@ def single_run(
         samplers = [torch.utils.data.RandomSampler(x) for x in tot_train_data]
         batch_sampler = ConcatDatasetBatchSampler(samplers, batch_sizes)
 
-        valid_dataset = torch.utils.data.ConcatDataset([synth_val, weak_val, maestro_real_valid])
-
         ##### training params and optimizers ############
         epoch_len = min(
             [
@@ -502,7 +507,7 @@ def single_run(
                     * config["training"]["accumulate_batches"]
                 )
                 for indx in range(len(tot_train_data))
-            ]
+            ],
         )
 
         if config["pretrained"]["freezed"] or not config["pretrained"]["e2e"]:
@@ -515,8 +520,13 @@ def single_run(
         tot_steps = config["training"]["n_epochs"] * epoch_len
         decay_steps = config["training"]["epoch_decay"] * epoch_len
         exp_scheduler = {
-            "scheduler": ExponentialWarmup(opt, config["opt"]["lr"], exp_steps,
-                                           start_annealing=decay_steps, max_steps=tot_steps),
+            "scheduler": ExponentialWarmup(
+                opt,
+                config["opt"]["lr"],
+                exp_steps,
+                start_annealing=decay_steps,
+                max_steps=tot_steps,
+            ),
             "interval": "step",
         }
         logger = TensorBoardLogger(
@@ -525,36 +535,17 @@ def single_run(
         )
         logger.log_hyperparams(config)
         print(f"experiment dir: {logger.log_dir}")
-
-        if callbacks is None:
-            callbacks = [
-                EarlyStopping(
-                    monitor="val/obj_metric",
-                    patience=config["training"]["early_stop_patience"],
-                    verbose=True,
-                    mode="max",
-                ),
-                ModelCheckpoint(
-                    logger.log_dir,
-                    monitor="val/obj_metric",
-                    save_top_k=1,
-                    mode="max",
-                    save_last=True,
-                ),
-            ]
     else:
         train_dataset = None
-        valid_dataset = None
         batch_sampler = None
         opt = None
         exp_scheduler = None
         logger = True
-        callbacks = None
 
     # calulate multiply–accumulate operation (MACs)
-    #macs, _ = calculate_macs(sed_student, config, test_dataset)
-    #print(f"---------------------------------------------------------------")
-    #print(f"Total number of multiply–accumulate operation (MACs): {macs}\n")
+    # macs, _ = calculate_macs(sed_student, config, test_dataset)
+    # print(f"---------------------------------------------------------------")
+    # print(f"Total number of multiply–accumulate operation (MACs): {macs}\n")
 
     desed_training = SEDTask4(
         config,
@@ -569,7 +560,39 @@ def single_run(
         scheduler=exp_scheduler,
         fast_dev_run=fast_dev_run,
         evaluation=evaluation,
+        _test_state_dict=test_state_dict,  # Task 3.4: Pass test_state_dict for mode detection
     )
+
+    # callbacksの設定（desed_training作成後に移動）
+    if test_state_dict is None:
+        # wandbが有効な場合はwandのcheckpointディレクトリを使用
+        if (
+            hasattr(desed_training, "_wandb_checkpoint_dir")
+            and desed_training._wandb_checkpoint_dir
+        ):
+            checkpoint_dir = desed_training._wandb_checkpoint_dir
+            print(f"Using wandb checkpoint directory: {checkpoint_dir}")
+        else:
+            checkpoint_dir = logger.log_dir
+            print(f"Using default checkpoint directory: {checkpoint_dir}")
+
+        callbacks = [
+            EarlyStopping(
+                monitor="val/obj_metric",
+                patience=config["training"]["early_stop_patience"],
+                verbose=True,
+                mode="max",
+            ),
+            ModelCheckpoint(
+                checkpoint_dir,
+                monitor="val/obj_metric",
+                save_top_k=1,
+                mode="max",
+                save_last=True,
+            ),
+        ]
+    else:
+        callbacks = None
 
     # Not using the fast_dev_run of Trainer because creates a DummyLogger so cannot check problems with the Logger
     if fast_dev_run:
@@ -616,44 +639,35 @@ def single_run(
         enable_progress_bar=config["training"]["enable_progress_bar"],
     )
 
-    #train_dataloaders = SafeDataLoader(train_dataset, batch_size=64, num_workers=4)
-    # debug obj_metric
-    #val_loader = SafeDataLoader(valid_dataset, batch_size=32)
-    #for batch in val_loader:
-    #    print(f"[Debug] {batch}")
-    #    break  # 1バッチだけ表示
-
     if test_state_dict is None:
         # start tracking energy consumption
         trainer.fit(desed_training, ckpt_path=checkpoint_resume)
         print(f"callback: {trainer.callbacks}")
-        
+
         # ModelCheckpointのインスタンスからbest_model_pathを取得
         best_path = None
         for cb in trainer.callbacks:
             if isinstance(cb, ModelCheckpoint):
                 best_path = cb.best_model_path
                 break
-       # best_path = trainer.checkpoint_callback.best_model_path
-        print(f"best model: {best_path}")# ModelCheckpointのインスタンスからbest_model_pathを取得
+        print(f"best model: {best_path}")
         torch.serialization.add_safe_globals([np._core.multiarray.scalar])
-        # False以外の解決策が欲しい
         test_state_dict = torch.load(best_path, weights_only=False)["state_dict"]
 
     desed_training.load_state_dict(test_state_dict)
-
-    #test_loader = SafeDataLoader(test_dataset)
     results = trainer.test(desed_training)[0]
 
     if "test/teacher/psds1/sed_scores_eval" in results:
-        return (results["test/teacher/psds1/sed_scores_eval"]
-            + results["test/teacher/segment_mpauc/sed_scores_eval"])
+        return (
+            results["test/teacher/psds1/sed_scores_eval"]
+            + results["test/teacher/segment_mpauc/sed_scores_eval"]
+        )
 
 
 def prepare_run(argv=None):
     parser = argparse.ArgumentParser("Training a SED system for DESED Task")
     parser.add_argument(
-        "--conf_file",
+        "--confs",
         default="./confs/pretrained.yaml",
         help="The configuration file with all the experiment parameters.",
     )
@@ -668,13 +682,14 @@ def prepare_run(argv=None):
         help="Allow the training to be resumed, take as input a previously saved model (.ckpt).",
     )
     parser.add_argument(
-        "--test_from_checkpoint", default=None, help="Test the model specified"
+        "--test_from_checkpoint",
+        default=None,
+        help="Test the model specified",
     )
     parser.add_argument(
         "--gpus",
         default="1",
-        help="The number of GPUs to train on, or the gpu to use, default='0', "
-        "so uses one GPU",
+        help="The number of GPUs to train on, or the gpu to use, default='0', so uses one GPU",
     )
     parser.add_argument(
         "--fast_dev_run",
@@ -684,12 +699,239 @@ def prepare_run(argv=None):
         "It uses very few batches and epochs so it won't give any meaningful result.",
     )
     parser.add_argument(
-        "--eval_from_checkpoint", default=None, help="Evaluate the model specified"
+        "--eval_from_checkpoint",
+        default=None,
+        help="Evaluate the model specified",
+    )
+    # 実験管理用
+    # CMT
+    parser.add_argument(
+        "--cmt",
+        action="store_true",
+        default=False,
+    )
+    parser.add_argument(
+        "--phi_frame",
+        default=0.5,
+        type=float,
+        help="Frame-level threshold for CMT",
+    )
+    parser.add_argument(
+        "--phi_clip",
+        default=None,
+        type=float,
+        help="Clip-level threshold for CMT",
+    )
+    parser.add_argument(
+        "--phi_neg",
+        default=None,
+        type=float,
+        help="Negative sample threshold for CMT confidence weighting",
+    )
+    parser.add_argument(
+        "--phi_pos",
+        default=None,
+        type=float,
+        help="Positive sample threshold for CMT confidence weighting",
+    )
+    parser.add_argument(
+        "--warmup_epochs",
+        default=0,
+        type=int,
+        help="Number of warmup epochs for CMT",
+    )
+    parser.add_argument(
+        "--use_neg_sample",
+        action="store_true",
+        default=False,
+        help="Use negative sampling in CMT confidence weighting",
+    )
+    parser.add_argument(
+        "--pos_neg_scale",
+        action="store_true",
+        default=False,
+        help="Balance positive and negative samples in CMT",
+    )
+
+    # MixStyle
+    parser.add_argument(
+        "--attn_type",
+        default="default",
+    )
+    parser.add_argument(
+        "--attn_deepen",
+        default=2,
+    )
+    parser.add_argument(
+        "--mixstyle_type",
+        default="disabled",
+    )
+    parser.add_argument(
+        "--blend_type",
+        choices=["linear", "residual"],
+        default="linear",
+        help="Blending method for frequency attention",
+    )
+    parser.add_argument(
+        "--attn_input",
+        choices=["mixed", "content", "dual_stream"],
+        default="mixed",
+        help="Input feature for attention computation",
+    )
+    parser.add_argument(
+        "--n_heads",
+        type=int,
+        default=4,
+        help="Number of attention heads for Transformer-based MixStyle",
+    )
+    parser.add_argument(
+        "--ff_dim",
+        type=int,
+        default=256,
+        help="Feed-forward dimension for Transformer-based MixStyle",
+    )
+    parser.add_argument(
+        "--n_layers",
+        type=int,
+        default=1,
+        help="Number of Transformer layers for Transformer-based MixStyle",
+    )
+    parser.add_argument(
+        "--mixstyle_dropout",
+        type=float,
+        default=0.1,
+        help="Dropout rate for Transformer-based MixStyle (separate from net.dropout)",
+    )
+
+    # SEBBs
+    parser.add_argument(
+        "--sebbs",
+        action="store_true",
+        default=False,
+    )
+
+    # wandb
+    parser.add_argument(
+        "--use_wandb",
+        action="store_true",
+        default=False,
+    )
+
+    # Experiment structure (新方式)
+    parser.add_argument(
+        "--mode",
+        choices=["train", "test", "inference", "feature_extraction"],
+        default=None,
+        help="Execution mode (train/test/inference/feature_extraction)",
+    )
+    parser.add_argument(
+        "--category",
+        type=str,
+        default=None,
+        help="Experiment category (e.g., baseline, ablation, optimization)",
+    )
+    parser.add_argument(
+        "--method",
+        type=str,
+        default=None,
+        help="Method name (e.g., cmt, beats, sebbs)",
+    )
+    parser.add_argument(
+        "--variant",
+        type=str,
+        default=None,
+        help="Variant description (e.g., use_neg_sample, phi_0.5)",
+    )
+    parser.add_argument(
+        "--base_dir",
+        type=str,
+        default=None,
+        help="Base directory for experiments (default: experiments)",
+    )
+    parser.add_argument(
+        "--log_test_to_wandb",
+        action="store_true",
+        default=False,
+        help="Create wandb runs in test mode",
     )
 
     args = parser.parse_args(argv)
-    with open(args.conf_file, "r") as f:
+    with open(args.confs) as f:
         configs = yaml.safe_load(f)
+
+    # WandB用に設定ファイルパスを保存
+    configs["config_file_path"] = os.path.abspath(args.confs)
+
+    # Override experiment parameters with CLI arguments
+    if "experiment" not in configs:
+        configs["experiment"] = {}
+
+    if args.mode is not None:
+        configs["experiment"]["mode"] = args.mode
+
+    if args.category is not None:
+        configs["experiment"]["category"] = args.category
+
+    if args.method is not None:
+        configs["experiment"]["method"] = args.method
+
+    if args.variant is not None:
+        configs["experiment"]["variant"] = args.variant
+
+    if args.base_dir is not None:
+        configs["experiment"]["base_dir"] = args.base_dir
+
+    if args.log_test_to_wandb:
+        configs["experiment"]["log_test_to_wandb"] = True
+
+    # Process experiment section (Task 3.1)
+    configs = process_experiment_section(configs)
+
+    # CMT
+    if args.cmt is not None:
+        configs["cmt"]["enabled"] = args.cmt
+    if args.cmt is not None:
+        configs["cmt"]["phi_frame"] = args.phi_frame
+    if args.phi_clip is not None:
+        configs["cmt"]["phi_clip"] = args.phi_clip
+    if args.phi_neg is not None:
+        configs["cmt"]["phi_neg"] = args.phi_neg
+    if args.phi_pos is not None:
+        configs["cmt"]["phi_pos"] = args.phi_pos
+    if args.cmt is not None:
+        configs["cmt"]["warmup_epochs"] = args.warmup_epochs
+    if args.cmt is not None:
+        configs["cmt"]["use_neg_sample"] = args.use_neg_sample
+    if args.cmt is not None:
+        configs["cmt"]["pos_neg_scale"] = args.pos_neg_scale
+
+    # MixStyle
+    if args.attn_type is not None:
+        configs["net"]["attn_type"] = args.attn_type
+    if args.attn_deepen is not None:
+        configs["net"]["attn_deepen"] = args.attn_deepen
+    if args.mixstyle_type is not None:
+        configs["net"]["mixstyle_type"] = args.mixstyle_type
+    if args.blend_type is not None:
+        configs["net"]["blend_type"] = args.blend_type
+    if args.attn_input is not None:
+        configs["net"]["attn_input"] = args.attn_input
+    if args.n_heads is not None:
+        configs["net"]["n_heads"] = args.n_heads
+    if args.ff_dim is not None:
+        configs["net"]["ff_dim"] = args.ff_dim
+    if args.n_layers is not None:
+        configs["net"]["n_layers"] = args.n_layers
+    if args.mixstyle_dropout is not None:
+        configs["net"]["mixstyle_dropout"] = args.mixstyle_dropout
+
+    # SEBBs
+    if args.sebbs is not None:
+        configs["sebbs"]["enabled"] = args.sebbs
+
+    # wandb
+    if args.use_wandb:
+        configs["wandb"]["use_wandb"] = True
 
     evaluation = False
     test_from_checkpoint = args.test_from_checkpoint
@@ -705,8 +947,7 @@ def prepare_run(argv=None):
         configs_ckpt = checkpoint["hyper_parameters"]
         configs_ckpt["data"] = configs["data"]
         print(
-            f"loaded model: {test_from_checkpoint} \n"
-            f"at epoch: {checkpoint['epoch']}"
+            f"loaded model: {test_from_checkpoint} \nat epoch: {checkpoint['epoch']}",
         )
         test_model_state_dict = checkpoint["state_dict"]
 

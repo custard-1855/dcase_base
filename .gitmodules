@@ -1,0 +1,3 @@
+[submodule "sebbs"]
+	path = DESED_task/dcase2024_task4_baseline/sebbs
+	url = https://github.com/merlresearch/sebbs.git
