@@ -166,3 +166,4 @@ experiments/
 .kiro/
 .claude/
 .devcontainer/
+.DS_Store
