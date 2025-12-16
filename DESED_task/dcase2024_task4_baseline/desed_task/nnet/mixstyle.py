@@ -81,14 +81,15 @@ def mix_style(x, attn_map, use_attn):
     AUGMENTATION_PROB = 0.5
     if torch.rand(1).item() > AUGMENTATION_PROB:
         return x
+    EPSILON = 1e-6
 
     if use_attn == "able":
-        x_mean, x_std = calc_weighted_stats(x, attn_map)
-    else:
-        EPSILON = 1e-6
-        x_mean = x.mean(dim=(2), keepdim=True)
-        x_var = x.var(dim=(2), keepdim=True)
-        x_std = (x_var + EPSILON).sqrt()
+        x = x * attn_map
+        # x_mean, x_std = calc_weighted_stats(x, attn_map)
+
+    x_mean = x.mean(dim=(2), keepdim=True)
+    x_var = x.var(dim=(2), keepdim=True)
+    x_std = (x_var + EPSILON).sqrt()
 
     x_normed = (x - x_mean) / x_std
 
