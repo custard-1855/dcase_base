@@ -146,7 +146,7 @@ class CNN(nn.Module):
             # No MixStyle augmentation
             return nn.Identity()
 
-        if mixstyle_type == "resMix":
+        if mixstyle_type == "only_mix":
             # B0: Pure MixStyle without attention (baseline)
             return BasicMixStyleWrapper(channels=channels, **kwargs)
 
@@ -154,14 +154,10 @@ class CNN(nn.Module):
             # P1: CNN-based frequency attention
             return FrequencyAttentionMixStyle(channels=channels, **kwargs)
 
-        if mixstyle_type == "freqTransformer":
-            # P2-1: Transformer-based frequency attention
-            return FrequencyTransformerMixStyle(channels=channels, n_freq=n_freq, **kwargs)
-
         # Unknown type - raise error
         msg = (
             f"Unknown mixstyle_type: {mixstyle_type}. "
-            f"Choose from ['disabled', 'resMix', 'freqAttn', 'freqTransformer', 'crossAttn']"
+            f"Choose from ['disabled', 'resMix', 'freqAttn']"
         )
         raise ValueError(msg)
 
