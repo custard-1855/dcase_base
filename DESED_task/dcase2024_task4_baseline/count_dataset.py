@@ -217,21 +217,27 @@ def print_class_statistics(class_counts: dict[str, int], indent: str = "   ", to
             print(f"{indent}  {cls}: {count} ({percentage:.1f}%)")
 
 
-def convert_path(config_path: str, base_path: str = None) -> str:
+def convert_path(config_path: str, base_path: str = "ssh") -> str:
     """設定ファイルのパスを実際のパスに変換
 
     Args:
         config_path: 設定ファイルに記載されているパス
-        base_path: ローカル環境でのデータベースパス（Noneの場合は./data/data/dcase/dataset/に変換）
+        base_path:
+            - "ssh": SSH環境用（設定ファイルのパスをそのまま使用）
+            - "local": ローカル環境用（./data/data/dcase/dataset/に変換）
+            - その他の文字列: カスタムベースパスに変換
 
     Returns:
         実際のパス
 
     """
-    if base_path is None:
+    if base_path == "ssh":
+        # SSH環境: 設定ファイルのパスをそのまま使用
+        return config_path
+    if base_path == "local":
         # ローカル環境: 相対パスに変換
         return config_path.replace("/mnt/data/data/dcase/dataset/", "./data/data/dcase/dataset/")
-    # 指定されたベースパスに変換
+    # カスタムパス: 指定されたベースパスに変換
     return config_path.replace("/mnt/data/data/dcase/dataset/", f"{base_path}/")
 
 
@@ -341,10 +347,21 @@ def main():
     with open(config_path) as f:
         config = yaml.safe_load(f)
 
-    # データベースパスを設定
-    base_path = None  # ローカル環境（./data/data/dcase/dataset/に変換）
+    # 環境設定（自動検出）
+    # "ssh"    : SSH環境（/mntのパスをそのまま使用）
+    # "local"  : ローカル環境（./data/data/dcase/dataset/に変換）
+    # その他   : カスタムパスを指定
+    import os
+
+    if os.path.exists("/mnt/data/data/dcase/dataset/"):
+        base_path = "ssh"  # SSH環境を自動検出
+    else:
+        base_path = "local"  # ローカル環境
 
     print(f"\n設定ファイル: {config_path}")
+    print(
+        f"環境: {'SSH (/mntのパスを使用)' if base_path == 'ssh' else 'ローカル (./data/data/dcase/dataset/を使用)'}"
+    )
     print(f"Weak split: {config['training']['weak_split']}")
     print(f"MAESTRO split: {config['training']['maestro_split']}")
     print(f"Seed: {config['training']['seed']}")
