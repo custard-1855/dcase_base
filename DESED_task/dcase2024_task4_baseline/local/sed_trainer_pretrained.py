@@ -15,6 +15,7 @@ import sed_scores_eval
 import torch
 import torch.nn.functional as F
 import torchmetrics
+import wandb
 from codecarbon import OfflineEmissionsTracker
 from desed_task.data_augm import MixupAugmentor
 from desed_task.evaluation.evaluation_measures import (
@@ -38,8 +39,6 @@ from sed_scores_eval.base_modules.scores import create_score_dataframe, validate
 # データ不足の対策
 from torch.utils.data.dataloader import DataLoader, default_collate
 from torchaudio.transforms import AmplitudeToDB, MelSpectrogram
-
-import wandb
 
 from .classes_dict import (
     classes_labels_desed,
@@ -877,8 +876,6 @@ class SEDTask4(pl.LightningModule):
 
         # CMT
         if cmt_active:
-            # Compute relative index_weak after mask_consistency filtering
-            # mask_consistency excludes maestro data, so we need to adjust index
             index_weak_relative = indx_weak - indx_maestro
 
             # Apply CMT processing

@@ -166,3 +166,7 @@ experiments/
 .kiro/
 .claude/
 .devcontainer/
+.DS_Store
+visualizations
+*.tex
+mem/
