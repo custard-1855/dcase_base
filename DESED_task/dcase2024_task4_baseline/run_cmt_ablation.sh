@@ -53,26 +53,22 @@ mkdir -p ${LOG_DIR}
 # タイムスタンプ
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
-echo "=========================================="
-echo "CMT Negative Sampling Experiments (新方式)"
-echo "Category: ${CATEGORY}"
-echo "Method: ${METHOD}"
-echo "Base Directory: ${BASE_DIR}"
-echo "Start Time: $(date)"
-echo "=========================================="
+# 実験1: Baseline (CMT無効)
+echo "[1/4] Running: Baseline (No CMT)"
+uv run train_pretrained.py \
+    --use_wandb \
+    --category ${CATEGORY} \
+    --method ${METHOD} \
+    --variant baseline \
+    --base_dir ${BASE_DIR} \
+    2>&1 | tee ${LOG_DIR}/baseline_${TIMESTAMP}.log
+
+echo ""
+echo "---"
 echo ""
 
-# ================================================================================
-# アブレーション実験
-# ================================================================================
-echo "=========================================="
-echo "Ablation Study"
-echo "=========================================="
-echo ""
-
-
-# 実験1: CMT (negative sampling無し)
-echo "[1/5] Running: CMT without negative sampling"
+# 実験2: CMT (negative sampling無し)
+echo "[2/4] Running: CMT without negative sampling"
 uv run train_pretrained.py \
     --use_wandb \
     --category ${CATEGORY} \
@@ -86,8 +82,8 @@ echo ""
 echo "---"
 echo ""
 
-# 実験2: CMT + negative sampling
-echo "[2/5] Running: CMT with negative sampling"
+# 実験3: CMT + negative sampling
+echo "[3/4] Running: CMT with negative sampling"
 uv run train_pretrained.py \
     --use_wandb \
     --category ${CATEGORY} \
@@ -98,23 +94,8 @@ uv run train_pretrained.py \
     --use_neg_sample \
     2>&1 | tee ${LOG_DIR}/neg_${TIMESTAMP}.log
 
-
-# 実験3: Baseline (CMT無効)
-echo "[3/5] Running: Baseline (No CMT)"
-uv run train_pretrained.py \
-    --use_wandb \
-    --category ${CATEGORY} \
-    --method ${METHOD} \
-    --variant baseline \
-    --base_dir ${BASE_DIR} \
-    2>&1 | tee ${LOG_DIR}/baseline_${TIMESTAMP}.log
-
-echo ""
-echo "---"
-echo ""
-
 # 実験4: CMT + negative sampling + pos_neg_scale
-echo "[5/6] Running: CMT with negative sampling"
+echo "[4/4] Running: CMT with negative sampling"
 uv run train_pretrained.py \
     --use_wandb \
     --category ${CATEGORY} \
