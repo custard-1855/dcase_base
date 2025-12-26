@@ -53,19 +53,6 @@ mkdir -p ${LOG_DIR}
 # タイムスタンプ
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
-echo "=========================================="
-echo "Ablation Study: Set A × Set B"
-echo "Category: ${CATEGORY}"
-echo "Method: ${METHOD}"
-echo "Base Directory: ${BASE_DIR}"
-echo "Start Time: $(date)"
-echo "=========================================="
-echo ""
-echo "Set A: [normal, CMT, CMT+neg+scale]"
-echo "Set B: [MixStyle, SEBBs, MixStyle+SEBBs]"
-echo "Total: 9 experiments"
-echo ""
-
 # ================================================================================
 # Set A: normal (MeanTeacher) × Set B
 # ================================================================================
@@ -251,15 +238,4 @@ echo ""
 echo "Results are saved in:"
 echo "  - Experiments: ${BASE_DIR}/train/${CATEGORY}/${METHOD}/"
 echo "  - Logs: ${LOG_DIR}/"
-echo ""
-echo "Summary of experiments:"
-echo "  1. normal + MixStyle"
-echo "  2. normal + SEBBs"
-echo "  3. normal + MixStyle + SEBBs"
-echo "  4. CMT + MixStyle"
-echo "  5. CMT + SEBBs"
-echo "  6. CMT + MixStyle + SEBBs"
-echo "  7. CMT + neg + pos_neg_scale + MixStyle"
-echo "  8. CMT + neg + pos_neg_scale + SEBBs"
-echo "  9. CMT + neg + pos_neg_scale + MixStyle + SEBBs"
 echo ""
