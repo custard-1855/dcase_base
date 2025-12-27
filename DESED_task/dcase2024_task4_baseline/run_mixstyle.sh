@@ -2,7 +2,7 @@
 
 # 実験設定
 CATEGORY="ablation"
-METHOD="mixstyle_change_attn_150"
+METHOD="mixstyle_150"
 BASE_DIR="experiments"
 
 # 引数解析
@@ -36,14 +36,8 @@ mkdir -p ${LOG_DIR}
 # タイムスタンプ
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
-echo "=========================================="
-echo "Tier 1: MixStyle Ablation Study"
-echo "Start Time: $(date)"
-echo "=========================================="
-echo ""
-
 ################################################################################
-# P1: Freq Attn (現在の実装) - linear, mixed, CNN
+# 1: CNNあり
 ################################################################################
 uv run train_pretrained.py \
     --use_wandb \
@@ -53,6 +47,18 @@ uv run train_pretrained.py \
     --base_dir ${BASE_DIR} \
     --mixstyle_type "freqAttn" \
     --attn_type "default" \
-    --attn_deepen 2 \
-    2>&1 | tee ${LOG_DIR}/P1_${TIMESTAMP}.log
+    2>&1 | tee ${LOG_DIR}/1_${TIMESTAMP}.log
+
+################################################################################
+# 2: CNNなし, MixStyleのみ
+################################################################################
+uv run train_pretrained.py \
+    --use_wandb \
+    --category ${CATEGORY} \
+    --method ${METHOD} \
+    --variant nomal \
+    --base_dir ${BASE_DIR} \
+    --mixstyle_type "only_mix" \
+    --attn_type "default" \
+    2>&1 | tee ${LOG_DIR}/2_${TIMESTAMP}.log
 

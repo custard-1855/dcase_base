@@ -759,10 +759,6 @@ def prepare_run(argv=None):
         default="default",
     )
     parser.add_argument(
-        "--attn_deepen",
-        default=2,
-    )
-    parser.add_argument(
         "--mixstyle_type",
         default="disabled",
     )
@@ -908,8 +904,6 @@ def prepare_run(argv=None):
     # MixStyle
     if args.attn_type is not None:
         configs["net"]["attn_type"] = args.attn_type
-    if args.attn_deepen is not None:
-        configs["net"]["attn_deepen"] = args.attn_deepen
     if args.mixstyle_type is not None:
         configs["net"]["mixstyle_type"] = args.mixstyle_type
     if args.blend_type is not None:
