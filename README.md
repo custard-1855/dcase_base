@@ -24,10 +24,10 @@ $ uv run generate_dcase_task4_2024.py --basedir="/mnt"
 $ uv run extract_embeddings.py --output_dir ./embeddings
 ```
 
-<!-- 
-未検証
-データやBEATsのckptダウンロードが足りない
- -->
+### BEATs
+- `BEATs_iter3_plus_AS2M.pt`をダウンロード
+- GithubのリンクからOneDriveに移動し, ダウンロードを押下
+- cf. https://github.com/microsoft/unilm/blob/master/beats/README.md
 
 
 ## 実験
@@ -41,8 +41,21 @@ $ . ./run_mixstyle.sh
 $ uv run train_pretrained.py
 ```
 
-### wandb
+<!-- ### wandb
 ```bash
 $ export WANDB_MODE=offline
 # $ WANDB_MODE=disabled 
-```
+``` -->
+
+### args
+- およそshファイルに記載の通り.
+- 以下で補足する.
+
+#### MixStyle
+- mixstyle_type
+  - disabled: MixStyleなし
+  - only_mix: CNNなし
+  - freqAttn: CNNあり
+- attn_type
+  - 今後の拡張のため定義
+  - 今回はデフォルト値のみ使用
