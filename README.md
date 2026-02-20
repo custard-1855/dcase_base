@@ -11,7 +11,7 @@ $ git clone https://github.com/custard-1855/dcase_base.git
 $ curl -LsSf https://astral.sh/uv/0.7.12/install.sh | sh # uvをインストール
 $ sudo apt install sox
 $ uv sync # ライブラリインストール
-$ . ./venv/bin/activate # 仮想環境を起動
+$ . ./.venv/bin/activate # 仮想環境を起動
 $ cd dcase_base/DESED_task/dcase2024_task4_baseline # 作業ディレクトリに移動
 ```
 
