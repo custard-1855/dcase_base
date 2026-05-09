@@ -46,3 +46,10 @@ $ uv run train_pretrained.py
 $ export WANDB_MODE=offline
 # $ WANDB_MODE=disabled 
 ```
+
+## 引用
+本検討は電子情報通信学会にて発表しています.
+```
+竹本志恩, 川原亮一, “実環境を見据えた音による行動認識モデルの精度向上に関する一検討,” 信学技報, vol. 125, no. 385, NS2025-226, pp. 31-36, 2026 年 3 月.
+```
+
