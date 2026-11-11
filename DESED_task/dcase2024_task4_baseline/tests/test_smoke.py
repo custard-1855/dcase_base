@@ -5,6 +5,8 @@
 
 学習を通すテストは合成データ (tests/conftest.py) を使い, CPU 上で
 学習 2 epoch -> validation -> ベスト ckpt のロード -> dev-test 評価 まで実行する.
+推論のテストは, そこで保存された ckpt を --test_from_checkpoint (dev-test の再評価) と
+--eval_from_checkpoint (ラベルなし音声へのスコア出力) に渡す.
 """
 
 import copy
@@ -78,7 +80,9 @@ def _run(config, tmp_path, monkeypatch, extra_args=()):
     with open(conf_file, "w") as f:
         yaml.safe_dump(copy.deepcopy(config), f)
 
-    argv = ["--confs", str(conf_file), "--gpus", "0", "--fast_dev_run", *extra_args]
+    argv = ["--confs", str(conf_file), "--gpus", "0", *extra_args]
+    if not any(a in extra_args for a in ("--test_from_checkpoint", "--eval_from_checkpoint")):
+        argv.append("--fast_dev_run")
     configs, args, test_state_dict, evaluation = train_pretrained.prepare_run(argv)
     return train_pretrained.single_run(
         configs,
@@ -124,3 +128,49 @@ def test_train_and_test_end_to_end(synthetic_config, tmp_path, monkeypatch, extr
     if "--use_wandb" in extra_args:
         run_dirs = list((tmp_path / "experiments" / "train" / "smoke" / "all").rglob("manifest.json"))
         assert run_dirs, "experiments/train/{category}/{method}/{variant}/ に manifest が無い"
+
+
+@pytest.fixture(scope="module")
+def trained_checkpoint(synthetic_config, tmp_path_factory):
+    """推論テスト用に, 合成データで 1 回だけ学習して得た ckpt (cSEBBs 有効)."""
+    tmp_path = tmp_path_factory.mktemp("train_for_inference")
+    with pytest.MonkeyPatch.context() as mp:
+        _run(synthetic_config, tmp_path, mp, ["--sebbs"])
+    checkpoints = sorted(tmp_path.rglob("epoch=*.ckpt"))
+    assert checkpoints, "checkpoint が保存されていない"
+    return checkpoints[-1]
+
+
+@pytest.mark.slow
+@pytest.mark.parametrize("sebbs", [False, True], ids=["median_filter", "sebbs"])
+def test_devtest_from_checkpoint(synthetic_config, trained_checkpoint, tmp_path, monkeypatch, sebbs):
+    """--test_from_checkpoint: 学習なしで ckpt をロードし, dev-test の評価指標が出る."""
+    extra_args = ["--test_from_checkpoint", str(trained_checkpoint), "--mode", "test"]
+    objective = _run(synthetic_config, tmp_path, monkeypatch, extra_args + ["--sebbs"] * sebbs)
+
+    assert objective is not None and math.isfinite(objective)
+    assert not list(tmp_path.rglob("*.ckpt")), "テストのみの実行で ckpt が作られている"
+    assert list(tmp_path.rglob("metrics_test/**/*.tsv")), "予測スコアが保存されていない"
+
+
+@pytest.mark.slow
+def test_inference_on_unlabeled_audio(synthetic_config, trained_checkpoint, tmp_path, monkeypatch):
+    """--eval_from_checkpoint: ラベルなし音声に対して全クリップ分のスコアを書き出す."""
+    import pandas as pd
+    from local.classes_dict import classes_labels_desed, classes_labels_maestro_real
+
+    _run(synthetic_config, tmp_path, monkeypatch, ["--eval_from_checkpoint", str(trained_checkpoint)])
+
+    eval_clips = {p.stem for p in Path(synthetic_config["data"]["eval_folder"]).glob("*.wav")}
+    labels = list(classes_labels_desed) + list(classes_labels_maestro_real)
+    for model in ["student", "teacher"]:
+        for kind in ["unprocessed", "postprocessed"]:
+            score_dirs = list(tmp_path.rglob(f"metrics_test/{model}_scores/{kind}"))
+            assert len(score_dirs) == 1, f"{model}/{kind} のスコア出力先が見つからない"
+            files = list(score_dirs[0].glob("*.tsv"))
+            assert {f.stem for f in files} == eval_clips
+            scores = pd.read_csv(files[0], sep="\t")
+            assert list(scores.columns) == ["onset", "offset", *labels]
+            assert len(scores) == 156  # 10 秒 / (hop 256 * subsample 4 / 16kHz)
+            assert scores[labels].to_numpy().min() >= 0.0
+            assert scores[labels].to_numpy().max() <= 1.0

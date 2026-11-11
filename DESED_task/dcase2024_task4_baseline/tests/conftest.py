@@ -157,6 +157,8 @@ def synthetic_config(tmp_path_factory, base_config):
     _weak_set(data["weak_folder_44k"], data["weak_tsv"], desed_classes, rng)
     for i in range(N_CLIPS):
         _write_noise(data["unlabeled_folder_44k"] / f"unlabel_{i}.wav", CLIP_SEC, rng)
+    for i in range(N_CLIPS):  # ラベルなしの評価セット (--eval_from_checkpoint 用)
+        _write_noise(data["eval_folder_44k"] / f"eval_{i}.wav", CLIP_SEC, rng)
     _maestro(root, audio, meta, rng)
 
     config = copy.deepcopy(base_config)
@@ -171,6 +173,7 @@ def synthetic_config(tmp_path_factory, base_config):
             lambda fn, args, **_: [fn(a) for a in args],
         )
         resample_data_generate_durations(config["data"])
+        resample_data_generate_durations(config["data"], test_only=True, evaluation=True)
 
     emb_dir = root / "embeddings"
     for name, folder in {
@@ -183,6 +186,7 @@ def synthetic_config(tmp_path_factory, base_config):
         "devtest": "test_folder",
         "maestro_real_train": "real_maestro_train_folder",
         "maestro_real_dev": "real_maestro_val_folder",
+        "eval": "eval_folder",
     }.items():
         _fake_embeddings(config["data"][folder], emb_dir / "beats" / f"{name}.hdf5", rng)
     config["pretrained"]["extracted_embeddings_dir"] = str(emb_dir)

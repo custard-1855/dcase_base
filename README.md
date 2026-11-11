@@ -18,11 +18,11 @@ $ cd DESED_task/dcase2024_task4_baseline # 作業ディレクトリに移動
 ```
 
 ### 動作確認 (smoke test)
-- データや GPU がなくても, 合成データで「学習 → validation → dev-test 評価」が通ることを確認できる.
+- データや GPU がなくても, 合成データで「学習 → validation → dev-test 評価」と「ckpt からの推論」が通ることを確認できる.
 ```bash
 # dcase_base (リポジトリ直下) で実行
 $ uv run pytest -m "not slow" # モデルの forward など軽いテストのみ (数十秒)
-$ uv run pytest               # 学習を最後まで回すテストも含む (CPU で 3 分程度)
+$ uv run pytest               # 学習・推論を最後まで回すテストも含む (CPU で 5 分程度)
 ```
 
 ### データ準備
