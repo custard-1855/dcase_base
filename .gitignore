@@ -163,6 +163,7 @@ experiments/
 .devcontainer/*.md
 
 *.md
+!CLAUDE.md
 .kiro/
 .claude/
 .devcontainer/

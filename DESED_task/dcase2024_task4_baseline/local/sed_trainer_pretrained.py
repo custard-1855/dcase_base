@@ -537,7 +537,7 @@ class SEDTask4(pl.LightningModule):
             output_file="emissions_baseline_training.csv",
             log_level="warning",
             country_iso_code="FRA",
-            gpu_ids=[torch.cuda.current_device()],
+            gpu_ids=_codecarbon_gpu_ids(),
         )
         self.tracker_train.start()
 
@@ -2528,7 +2528,7 @@ class SEDTask4(pl.LightningModule):
                 output_file="emissions_basleline_eval.csv",
                 log_level="warning",
                 country_iso_code="FRA",
-                gpu_ids=[torch.cuda.current_device()],
+                gpu_ids=_codecarbon_gpu_ids(),
             )
             self.tracker_eval.start()
         else:
@@ -2539,7 +2539,7 @@ class SEDTask4(pl.LightningModule):
                 output_file="emissions_baseline_test.csv",
                 log_level="warning",
                 country_iso_code="FRA",
-                gpu_ids=[torch.cuda.current_device()],
+                gpu_ids=_codecarbon_gpu_ids(),
             )
 
             self.tracker_devtest.start()
@@ -2610,6 +2610,13 @@ class SEDTask4(pl.LightningModule):
         self._maestro_ground_truth_clips = maestro_ground_truth_clips
 
         return maestro_audio_durations_filtered, maestro_ground_truth
+
+
+def _codecarbon_gpu_ids() -> list[int] | None:
+    """codecarbon に渡す GPU id. CPU 実行 (--gpus 0) では CUDA に触らない."""
+    if torch.cuda.is_available():
+        return [torch.cuda.current_device()]
+    return None
 
 
 def select_best_auroc(

@@ -4,7 +4,6 @@ from torch import nn
 from .mixstyle import (
     BasicMixStyleWrapper,
     FrequencyAttentionMixStyle,
-    FrequencyTransformerMixStyle,
 )
 
 
