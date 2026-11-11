@@ -64,7 +64,8 @@ def _worker_func(input_args):
     Used internally by the pool of multiprocessing workers to resample a given audio file
     """
     f, in_dir, out_dir, target_fs = input_args
-    audio, orig_fs = torchaudio.load(f)
+    # backend を明示する: libsox が sox_ng の環境では既定の sox バックエンドが segfault する
+    audio, orig_fs = torchaudio.load(f, backend="soundfile")
     audio = resample(audio, orig_fs, target_fs)
     os.makedirs(
         Path(os.path.join(out_dir, Path(f).relative_to(Path(in_dir)))).parent,
@@ -74,6 +75,7 @@ def _worker_func(input_args):
         os.path.join(out_dir, Path(f).relative_to(Path(in_dir))),
         audio,
         target_fs,
+        backend="soundfile",
     )
 
 

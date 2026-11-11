@@ -60,7 +60,8 @@ def process_labels(df, onset, offset):
 def read_audio(file, multisrc, random_channel, pad_to, test=False):
     if not os.path.exists(file):
         return None, None, None, None
-    mixture, fs = torchaudio.load(file)
+    # backend を明示する: libsox が sox_ng の環境では既定の sox バックエンドが segfault する
+    mixture, fs = torchaudio.load(file, backend="soundfile")
 
     if not multisrc:
         mixture = to_mono(mixture, random_channel)
