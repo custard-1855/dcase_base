@@ -19,6 +19,7 @@ dependencies = [
     "pycodestyle==2.5.0",
     "pytorch-lightning==1.9.*",
     "resampy==0.4.3",
+    "sebbs",
     "seaborn>=0.13.2",
     "sed-scores-eval>=0.0.3",
     "sox>=1.4.0",
@@ -31,6 +32,16 @@ dependencies = [
     "wandb>=0.22.3",
 ]
 
+
+[tool.uv.sources]
+# git submodule (要: git submodule update --init). change_detection の Cython 拡張をビルドする
+sebbs = { path = "DESED_task/dcase2024_task4_baseline/sebbs", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["DESED_task/dcase2024_task4_baseline"]
+norecursedirs = ["sebbs", ".venv", "experiments", "exp", "wandb"]
+markers = ["slow: 合成データで学習〜評価を最後まで回すテスト (CPU で数分)"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning", "ignore::FutureWarning", "ignore::RuntimeWarning"]
 
 [tool.ruff]
 line-length = 100
@@ -63,6 +74,7 @@ max-args = 6
 dev = [
     "mypy>=1.19.0",
     "pandas-stubs>=2.3.3.251201",
+    "pytest>=8.4.1",
     "ruff>=0.14.8",
     "types-setuptools>=80.9.0.20250822",
 ]

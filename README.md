@@ -2,32 +2,56 @@
 
 ## 環境構築
 ### インストール
-- 当リポジトリをクローン
+- 当リポジトリをクローン (`sebbs` が git submodule なので `--recursive` が必要)
 ```bash
-$ git clone https://github.com/custard-1855/dcase_base.git
+$ git clone --recursive https://github.com/custard-1855/dcase_base.git
+# クローン済みの場合: git submodule update --init --recursive
 ```
 - パッケージマネージャ [uv](https://github.com/astral-sh/uv)でライブラリをインストール
 ```bash
 $ curl -LsSf https://astral.sh/uv/0.7.12/install.sh | sh # uvをインストール
-$ sudo apt install sox
-$ uv sync # ライブラリインストール
+$ sudo apt install sox libsox-dev # libsox-dev は soxbindings のビルドに必要
+$ cd dcase_base
+$ uv sync # ライブラリインストール (submodule の sebbs もここでビルドされる)
 $ . ./.venv/bin/activate # 仮想環境を起動
-$ cd dcase_base/DESED_task/dcase2024_task4_baseline # 作業ディレクトリに移動
+$ cd DESED_task/dcase2024_task4_baseline # 作業ディレクトリに移動
+```
+
+### 動作確認 (smoke test)
+- データや GPU がなくても, 合成データで「学習 → validation → dev-test 評価」が通ることを確認できる.
+```bash
+# dcase_base (リポジトリ直下) で実行
+$ uv run pytest -m "not slow" # モデルの forward など軽いテストのみ (数十秒)
+$ uv run pytest               # 学習を最後まで回すテストも含む (CPU で 3 分程度)
 ```
 
 ### データ準備
-- ここでは`/mnt`にデータを保存することを想定.
-- 保存場所を変更する場合, `confs/pretrained.yaml`のデータへのパス変更が必要な点に注意.
+- `confs/pretrained.yaml` は `/mnt/data/data/dcase/dataset` 以下にデータがある想定.
+- 保存場所を変更する場合, `confs/pretrained.yaml`の`data:`のパス変更が必要な点に注意.
 - 参照: https://github.com/DCASE-REPO/DESED_task/tree/dcase24_baseline/recipes/dcase2024_task4_baseline
 ```bash
-$ uv run generate_dcase_task4_2024.py --basedir="/mnt"
-$ uv run extract_embeddings.py --output_dir ./embeddings
+$ uv run generate_dcase_task4_2024.py --basedir="/mnt/data/data"
+```
+- 必要な空き容量の目安: 合成データの zip だけで約 20GB, MAESTRO は展開後 約 21GB.
+- AudioSet 由来の音声 (weak / unlabeled / strong / validation) は YouTube から取得するため, 取得できないファイルが出る (`missing_files/` に一覧).
+
+### BEATs のチェックポイント
+- `BEATs_iter3_plus_AS2M.pt` (361MB) を `pretrained_models/` に置く.
+- 公式の配布元は OneDrive ([BEATs README](https://github.com/microsoft/unilm/blob/master/beats/README.md)). 以前使われていた blob の直リンクは失効している.
+- wget で取得する場合は Hugging Face 上の第三者ミラーが使える (公式配布ではない点に注意).
+```bash
+$ mkdir -p pretrained_models
+$ wget -O pretrained_models/BEATs_iter3_plus_AS2M.pt \
+    https://huggingface.co/lpepino/beats_ckpts/resolve/main/BEATs_iter3_plus_AS2M.pt
+$ sha256sum pretrained_models/BEATs_iter3_plus_AS2M.pt
+# d43cbfad4d7b56381c061d7a24774f908d4d94c72961f6eb1d9090ff18cd8d34
 ```
 
-<!-- 
-未検証
-データやBEATsのckptダウンロードが足りない
- -->
+### 埋め込みの抽出
+```bash
+$ uv run extract_embeddings.py --output_dir ./embeddings
+# 別の場所の ckpt を使う場合: --beats_ckpt /path/to/BEATs_iter3_plus_AS2M.pt
+```
 
 
 ## 実験
@@ -35,9 +59,10 @@ $ uv run extract_embeddings.py --output_dir ./embeddings
 - 詳細は各shファイルを参照.
 ```bash
 # dcase_base/DESED_task/dcase2024_task4_baseline
-$ . ./run_cmt_ablation.sh
-$ . ./run_ablation_a_times_b.sh
-$ . ./run_mixstyle.sh
+$ uv run train_pretrained.py --fast_dev_run # まず短い実行で確認 (CPU の場合は --gpus 0)
+$ bash ./run_cmt_ablation.sh
+$ bash ./run_ablation_a_times_b.sh
+$ bash ./run_mixstyle.sh
 $ uv run train_pretrained.py
 ```
 
