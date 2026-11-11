@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 
 import desed
@@ -656,6 +657,12 @@ def single_run(
 
     desed_training.load_state_dict(test_state_dict)
     results = trainer.test(desed_training)[0]
+
+    # 最終指標を run ディレクトリに残す (--eval_from_checkpoint では指標が無いので書かない)
+    if results:
+        os.makedirs(desed_training.exp_dir, exist_ok=True)
+        with open(os.path.join(desed_training.exp_dir, "test_metrics.json"), "w") as f:
+            json.dump(results, f, indent=2, sort_keys=True)
 
     if "test/teacher/psds1/sed_scores_eval" in results:
         return (

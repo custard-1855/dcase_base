@@ -16,6 +16,7 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 | `local/sebbs_wrapper/` | `sebbs` submodule の型付きラッパー。使い方は同ディレクトリの `README.md` | 卒論で追加 |
 | `sebbs/` | cSEBBs 後処理（git submodule, MERL 製）。**編集しない** | 外部 |
 | `run_*.sh` | 論文のアブレーション実験。引数の組み合わせの正本 | 卒論で追加 |
+| `run_repro.sh` | 再現学習のキュー。論文の表の構成を順に流し、`exp/repro/{構成名}/version_N/test_metrics.json` に最終指標を残す（wandb は既定で無効） | 卒論で追加 |
 | `extract_embeddings.py` | BEATs 埋め込みを `./embeddings/beats/*.hdf5` に事前計算 | 本家 + 改変 |
 | `generate_dcase_task4_2024.py`, `dprep/` | データセットのダウンロードと MAESTRO の 10 秒分割 | 本家 |
 | `tests/` | smoke test と合成データ生成（`conftest.py`） | 卒論で追加 |

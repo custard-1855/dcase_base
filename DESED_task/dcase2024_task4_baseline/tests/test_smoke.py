@@ -10,6 +10,7 @@
 """
 
 import copy
+import json
 import math
 from pathlib import Path
 
@@ -95,6 +96,14 @@ def _run(config, tmp_path, monkeypatch, extra_args=()):
     )
 
 
+def _test_metrics(tmp_path):
+    """run ディレクトリに保存された最終指標 (test_metrics.json) を読む."""
+    files = list(tmp_path.rglob("test_metrics.json"))
+    assert len(files) == 1, "test_metrics.json が 1 つだけ保存されているはず"
+    with open(files[0]) as f:
+        return json.load(f)
+
+
 # 各 run_*.sh が使う引数の組み合わせを代表するもの
 VARIANTS = {
     "baseline": [],
@@ -125,6 +134,9 @@ def test_train_and_test_end_to_end(synthetic_config, tmp_path, monkeypatch, extr
 
     assert objective is not None and math.isfinite(objective)
     assert list(tmp_path.rglob("*.ckpt")), "checkpoint が保存されていない"
+    metrics = _test_metrics(tmp_path)
+    psds1 = metrics["test/teacher/psds1/sed_scores_eval"]
+    assert objective == pytest.approx(psds1 + metrics["test/teacher/segment_mpauc/sed_scores_eval"])
     if "--use_wandb" in extra_args:
         run_dirs = list((tmp_path / "experiments" / "train" / "smoke" / "all").rglob("manifest.json"))
         assert run_dirs, "experiments/train/{category}/{method}/{variant}/ に manifest が無い"
@@ -150,6 +162,7 @@ def test_devtest_from_checkpoint(synthetic_config, trained_checkpoint, tmp_path,
 
     assert objective is not None and math.isfinite(objective)
     assert not list(tmp_path.rglob("*.ckpt")), "テストのみの実行で ckpt が作られている"
+    assert "test/teacher/psds1/sed_scores_eval" in _test_metrics(tmp_path)
     assert list(tmp_path.rglob("metrics_test/**/*.tsv")), "予測スコアが保存されていない"
 
 
@@ -160,6 +173,7 @@ def test_inference_on_unlabeled_audio(synthetic_config, trained_checkpoint, tmp_
     from local.classes_dict import classes_labels_desed, classes_labels_maestro_real
 
     _run(synthetic_config, tmp_path, monkeypatch, ["--eval_from_checkpoint", str(trained_checkpoint)])
+    assert not list(tmp_path.rglob("test_metrics.json")), "指標の無い推論で指標が保存されている"
 
     eval_clips = {p.stem for p in Path(synthetic_config["data"]["eval_folder"]).glob("*.wav")}
     labels = list(classes_labels_desed) + list(classes_labels_maestro_real)
