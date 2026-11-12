@@ -1,0 +1,585 @@
+{
+  "version": 0,
+  "files": {
+    "DESED_task/dcase2024_task4_baseline/local/beats/backbone.py": [
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 26,
+        "endColumn": 44,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 20,
+        "endColumn": 68,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-assignment",
+        "startColumn": 16,
+        "endColumn": 64,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 67,
+        "endColumn": 51,
+        "lineCount": 3
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 39,
+        "endColumn": 70,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 39,
+        "endColumn": 77,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 39,
+        "endColumn": 77,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 20,
+        "endColumn": 51,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 20,
+        "endColumn": 58,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 20,
+        "endColumn": 58,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 39,
+        "endColumn": 70,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 39,
+        "endColumn": 77,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 39,
+        "endColumn": 77,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 20,
+        "endColumn": 53,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 20,
+        "endColumn": 60,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 20,
+        "endColumn": 60,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 39,
+        "endColumn": 64,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 39,
+        "endColumn": 64,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 39,
+        "endColumn": 64,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 39,
+        "endColumn": 64,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 46,
+        "endColumn": 64,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 33,
+        "endColumn": 51,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 53,
+        "endColumn": 70,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 29,
+        "endColumn": 46,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 48,
+        "endColumn": 66,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 42,
+        "endColumn": 60,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-parameter-default",
+        "startColumn": 8,
+        "endColumn": 43,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-parameter-default",
+        "startColumn": 8,
+        "endColumn": 51,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 26,
+        "endColumn": 60,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 26,
+        "endColumn": 60,
+        "lineCount": 1
+      },
+      {
+        "rule": "call-non-callable",
+        "startColumn": 17,
+        "endColumn": 76,
+        "lineCount": 1
+      },
+      {
+        "rule": "call-non-callable",
+        "startColumn": 15,
+        "endColumn": 82,
+        "lineCount": 1
+      }
+    ],
+    "DESED_task/dcase2024_task4_baseline/local/beats/modules.py": [
+      {
+        "rule": "incompatible-method-override",
+        "startColumn": 8,
+        "endColumn": 27,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-attribute",
+        "startColumn": 8,
+        "endColumn": 24,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-attribute",
+        "startColumn": 34,
+        "endColumn": 50,
+        "lineCount": 1
+      }
+    ],
+    "DESED_task/dcase2024_task4_baseline/local/beats/quantizer.py": [
+      {
+        "rule": "call-non-callable",
+        "startColumn": 8,
+        "endColumn": 53,
+        "lineCount": 1
+      }
+    ],
+    "DESED_task/dcase2024_task4_baseline/local/pre_sed_trainer_pretrained.py": [
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 32,
+        "endColumn": 51,
+        "lineCount": 1
+      },
+      {
+        "rule": "not-subscriptable",
+        "startColumn": 18,
+        "endColumn": 45,
+        "lineCount": 1
+      },
+      {
+        "rule": "not-subscriptable",
+        "startColumn": 31,
+        "endColumn": 58,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 29,
+        "endColumn": 50,
+        "lineCount": 1
+      },
+      {
+        "rule": "not-subscriptable",
+        "startColumn": 12,
+        "endColumn": 39,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 40,
+        "endColumn": 52,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 27,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 27,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 26,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 8,
+        "endColumn": 31,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 72,
+        "lineCount": 1
+      }
+    ],
+    "DESED_task/dcase2024_task4_baseline/local/sebbs_wrapper/predictor.py": [
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 25,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 25,
+        "lineCount": 1
+      }
+    ],
+    "DESED_task/dcase2024_task4_baseline/local/sebbs_wrapper/tests/test_evaluator.py": [
+      {
+        "rule": "too-many-positional-arguments",
+        "startColumn": 24,
+        "endColumn": 69,
+        "lineCount": 1
+      }
+    ],
+    "DESED_task/dcase2024_task4_baseline/local/sebbs_wrapper/tests/test_predictor.py": [
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 23,
+        "endColumn": 27,
+        "lineCount": 1
+      },
+      {
+        "rule": "not-iterable",
+        "startColumn": 53,
+        "endColumn": 57,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 23,
+        "endColumn": 32,
+        "lineCount": 1
+      },
+      {
+        "rule": "not-iterable",
+        "startColumn": 41,
+        "endColumn": 50,
+        "lineCount": 1
+      }
+    ],
+    "DESED_task/dcase2024_task4_baseline/local/sebbs_wrapper/tuner.py": [
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 25,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 37,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 43,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 25,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 37,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 43,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 25,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 37,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 43,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 25,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 37,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 43,
+        "lineCount": 1
+      }
+    ],
+    "DESED_task/dcase2024_task4_baseline/local/sed_trainer_pretrained.py": [
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 32,
+        "endColumn": 51,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-return-type",
+        "startColumn": 15,
+        "endColumn": 28,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 24,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 20,
+        "endColumn": 39,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 16,
+        "endColumn": 35,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 20,
+        "endColumn": 32,
+        "lineCount": 1
+      },
+      {
+        "rule": "not-subscriptable",
+        "startColumn": 22,
+        "endColumn": 49,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 29,
+        "endColumn": 50,
+        "lineCount": 1
+      },
+      {
+        "rule": "not-subscriptable",
+        "startColumn": 12,
+        "endColumn": 39,
+        "lineCount": 1
+      },
+      {
+        "rule": "incompatible-method-override",
+        "startColumn": 8,
+        "endColumn": 75,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-return-type",
+        "startColumn": 15,
+        "endColumn": 25,
+        "lineCount": 1
+      },
+      {
+        "rule": "incompatible-method-override",
+        "startColumn": 8,
+        "endColumn": 78,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 40,
+        "endColumn": 52,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-return-type",
+        "startColumn": 15,
+        "endColumn": 43,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 8,
+        "endColumn": 31,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 12,
+        "endColumn": 72,
+        "lineCount": 1
+      }
+    ],
+    "DESED_task/dcase2024_task4_baseline/local/utils.py": [
+      {
+        "rule": "not-subscriptable",
+        "startColumn": 58,
+        "endColumn": 68,
+        "lineCount": 1
+      }
+    ],
+    "DESED_task/dcase2024_task4_baseline/train_pretrained.py": [
+      {
+        "rule": "import-not-found",
+        "startColumn": 13,
+        "endColumn": 33,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-attribute",
+        "startColumn": 8,
+        "endColumn": 31,
+        "lineCount": 1
+      },
+      {
+        "rule": "import-not-found",
+        "startColumn": 13,
+        "endColumn": 31,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 63,
+        "endColumn": 84,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-union-attribute",
+        "startColumn": 29,
+        "endColumn": 43,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 8,
+        "endColumn": 27,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-attribute",
+        "startColumn": 27,
+        "endColumn": 44,
+        "lineCount": 1
+      },
+      {
+        "rule": "missing-attribute",
+        "startColumn": 18,
+        "endColumn": 35,
+        "lineCount": 1
+      },
+      {
+        "rule": "possibly-missing-submodule",
+        "startColumn": 46,
+        "endColumn": 65,
+        "lineCount": 1
+      },
+      {
+        "rule": "invalid-argument-type",
+        "startColumn": 37,
+        "endColumn": 46,
+        "lineCount": 1
+      }
+    ]
+  }
+}

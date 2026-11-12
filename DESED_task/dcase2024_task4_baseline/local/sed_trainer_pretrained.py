@@ -333,9 +333,9 @@ class SEDTask4(pl.LightningModule):
         res = super(SEDTask4, self).log(name, value, *args, **kwargs)
         try:
             self._maybe_wandb_log({name: value})
-        except Exception:
+        except Exception as e:
             # avoid any logging errors interfering with training
-            pass
+            self._warn_wandb_log_failure(e)
         return res
 
     def log_dict(self, dictionary: dict[str, Any], *args: Any, **kwargs: Any) -> None:  # type: ignore[override]  # Lightning expects specific Mapping type
@@ -343,9 +343,21 @@ class SEDTask4(pl.LightningModule):
         res = super(SEDTask4, self).log_dict(dictionary, *args, **kwargs)
         try:
             self._maybe_wandb_log(dictionary)
-        except Exception:
-            pass
+        except Exception as e:
+            self._warn_wandb_log_failure(e)
         return res
+
+    _wandb_log_failure_warned = False
+
+    def _warn_wandb_log_failure(self, error: Exception) -> None:
+        """送信 (wandb.log) の失敗を初回だけ警告する. 学習は止めない."""
+        if self._wandb_log_failure_warned:
+            return
+        self._wandb_log_failure_warned = True
+        warnings.warn(
+            f"wandb への送信に失敗した (学習は続行. 以降の失敗は通知しない): {error!r}",
+            stacklevel=2,
+        )
 
     def _maybe_wandb_log(self, log_dict: dict[str, Any]) -> None:
         """Safely log a dict to wandb if enabled and initialized.
@@ -426,9 +438,9 @@ class SEDTask4(pl.LightningModule):
                 wandb.log(payload, step=step)
             else:
                 wandb.log(payload)
-        except Exception:
+        except Exception as e:
             # never raise from logging
-            pass
+            self._warn_wandb_log_failure(e)
 
     def _init_wandb_project(self) -> None:
         """Initialize wandb project with execution mode-aware directory management.
@@ -537,7 +549,7 @@ class SEDTask4(pl.LightningModule):
             output_file="emissions_baseline_training.csv",
             log_level="warning",
             country_iso_code="FRA",
-            gpu_ids=[torch.cuda.current_device()],
+            gpu_ids=_codecarbon_gpu_ids(),
         )
         self.tracker_train.start()
 
@@ -936,6 +948,12 @@ class SEDTask4(pl.LightningModule):
         tot_self_loss = (strong_self_sup_loss + weak_self_sup_loss) * weight
 
         tot_loss = tot_loss_supervised + tot_self_loss
+        if not torch.isfinite(tot_loss):
+            msg = (
+                f"損失が NaN / inf になった (epoch {self.current_epoch}, step {self.global_step}): "
+                f"supervised={tot_loss_supervised.item()}, self_sup={tot_self_loss.item()}"
+            )
+            raise RuntimeError(msg)
 
         # 教師あり学習の損失
         self.log("train/student/loss_strong", loss_strong)
@@ -2528,7 +2546,7 @@ class SEDTask4(pl.LightningModule):
                 output_file="emissions_basleline_eval.csv",
                 log_level="warning",
                 country_iso_code="FRA",
-                gpu_ids=[torch.cuda.current_device()],
+                gpu_ids=_codecarbon_gpu_ids(),
             )
             self.tracker_eval.start()
         else:
@@ -2539,7 +2557,7 @@ class SEDTask4(pl.LightningModule):
                 output_file="emissions_baseline_test.csv",
                 log_level="warning",
                 country_iso_code="FRA",
-                gpu_ids=[torch.cuda.current_device()],
+                gpu_ids=_codecarbon_gpu_ids(),
             )
 
             self.tracker_devtest.start()
@@ -2610,6 +2628,13 @@ class SEDTask4(pl.LightningModule):
         self._maestro_ground_truth_clips = maestro_ground_truth_clips
 
         return maestro_audio_durations_filtered, maestro_ground_truth
+
+
+def _codecarbon_gpu_ids() -> list[int] | None:
+    """codecarbon に渡す GPU id. CPU 実行 (--gpus 0) では CUDA に触らない."""
+    if torch.cuda.is_available():
+        return [torch.cuda.current_device()]
+    return None
 
 
 def select_best_auroc(

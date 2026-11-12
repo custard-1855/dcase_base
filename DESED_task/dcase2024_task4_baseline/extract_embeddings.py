@@ -88,6 +88,11 @@ if __name__ == "__main__":
         default="beats",
         help="The pretrained model to use," "choose between panns and ast",
     )
+    parser.add_argument(
+        "--beats_ckpt",
+        default="./pretrained_models/BEATs_iter3_plus_AS2M.pt",
+        help="Path to the BEATs_iter3+ (AS2M) checkpoint.",
+    )
     parser.add_argument("--use_gpu", default="1", help="0 does not use GPU, 1 use GPU")
     parser.add_argument(
         "--batch_size",
@@ -184,12 +189,13 @@ if __name__ == "__main__":
         # use beats as additional feature
         from local.beats.BEATs import BEATsModel
 
-        try:
-            pretrained = BEATsModel(cfg_path="/home/beat/work/dcase_base/DESED_task/dcase2024_task4_baseline/local/beats/BEATs_iter3_plus_AS2M.pt")
-        except:
-            raise RuntimeError(f"Unfortunately automatic download of BEATs model is not longer possible, "
-                               f"you need to download it manually from https://github.com/microsoft/unilm/blob/master/beats/README.md.\n"
-                               f"We use BEATs_iter3+ AS2M. Please download it and copy it into a new folder called pretrained_models as: {os.getcwd()}/pretrained_models.")
+        if not os.path.exists(args.beats_ckpt):
+            raise RuntimeError(
+                f"BEATs checkpoint not found: {args.beats_ckpt}\n"
+                "Download BEATs_iter3+ (AS2M) (see README) and place it there, "
+                "or pass its location with --beats_ckpt."
+            )
+        pretrained = BEATsModel(cfg_path=args.beats_ckpt)
 
     else:
         raise NotImplementedError

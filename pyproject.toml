@@ -5,7 +5,6 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "black==19.10b0",
     "codecarbon>=3.0.4",
     "dcase-util>=0.2.16",
     "desed>=1.3.6",
@@ -14,11 +13,11 @@ dependencies = [
     "optuna>=4.6.0",
     "optuna-dashboard>=0.20.0",
     "plotly>=6.5.0",
-    "pre-commit>=2.3.0",
     "psds-eval>=0.5.3",
     "pycodestyle==2.5.0",
     "pytorch-lightning==1.9.*",
     "resampy==0.4.3",
+    "sebbs",
     "seaborn>=0.13.2",
     "sed-scores-eval>=0.0.3",
     "sox>=1.4.0",
@@ -31,6 +30,60 @@ dependencies = [
     "wandb>=0.22.3",
 ]
 
+
+[tool.uv.sources]
+# git submodule (要: git submodule update --init). change_detection の Cython 拡張をビルドする
+sebbs = { path = "DESED_task/dcase2024_task4_baseline/sebbs", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["DESED_task/dcase2024_task4_baseline"]
+norecursedirs = ["sebbs", ".venv", "experiments", "exp", "wandb"]
+markers = [
+    "slow: 合成データで学習〜評価を最後まで回すテスト (CPU で数分)",
+    "repro: 再現学習の結果 (exp/repro*) を期待値と比較するテスト. 既定では除外",
+]
+# repro は既定で除外する. コマンドラインの -m はこれを上書きするので,
+# slow を外すときは -m "not slow and not repro" と書く.
+addopts = ["-m", "not repro"]
+filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning", "ignore::FutureWarning", "ignore::RuntimeWarning"]
+
+[tool.poe.tasks]
+test = { cmd = "pytest -m 'not slow and not repro'", help = "学習を回さない軽いテスト (数十秒)" }
+test-all = { cmd = "pytest", help = "学習〜評価を回すテストも含む (CPU で数分. repro は除外)" }
+lint = { cmd = "ruff check", help = "ruff check (対象を引数で渡せる)" }
+typecheck = { cmd = "ty check", help = "ty による型検査 (対象は [tool.ty.src])" }
+repro-check = { cmd = "pytest -m repro", help = "exp/repro* の結果を期待値と比較 (学習・評価はしない)" }
+
+[tool.poe.tasks.repro]
+cmd = "./run_repro.sh"
+cwd = "DESED_task/dcase2024_task4_baseline"
+help = "再現学習のキュー (構成名と追加引数はそのまま渡る. 1 構成 約 1 時間)"
+
+[tool.poe.tasks.repro-short]
+cmd = "./run_repro.sh --confs ./confs/pretrained_short.yaml --out exp/repro_short"
+cwd = "DESED_task/dcase2024_task4_baseline"
+help = "10 エポックの短縮学習. 出力は exp/repro_short/ (1 構成 約 7 分). --rotate で前回分を退避して流し直す"
+
+[tool.poe.tasks.repro-eval]
+cmd = "./run_repro_eval.sh"
+cwd = "DESED_task/dcase2024_task4_baseline"
+help = "指定した構成のベスト ckpt を再評価. 出力は exp/repro_eval/{構成名}/ (約 3 分)"
+
+[tool.poe.tasks.sebbs]
+cmd = "./run_repro_eval.sh --sebbs"
+cwd = "DESED_task/dcase2024_task4_baseline"
+help = "指定した構成のベスト ckpt に cSEBBs を掛けて評価. 出力は exp/repro/{構成名}_sebbs/"
+
+[tool.ty]
+# 既存の指摘 (93 件) を記録し, 新しい指摘だけを報告する. preview 機能.
+# 取り直し: uv run ty check --update-baseline
+baseline = "ty-baseline.json"
+
+[tool.ty.src]
+include = [
+    "DESED_task/dcase2024_task4_baseline/local",
+    "DESED_task/dcase2024_task4_baseline/train_pretrained.py",
+]
 
 [tool.ruff]
 line-length = 100
@@ -61,8 +114,13 @@ max-args = 6
 
 [dependency-groups]
 dev = [
-    "mypy>=1.19.0",
     "pandas-stubs>=2.3.3.251201",
+    "poethepoet>=0.49.0",
+    "prek>=0.5.10",
+    "pytest>=8.4.1",
+    "pytest-cov>=7.1.0",
+    "pytest-sugar>=1.1.1",
     "ruff>=0.14.8",
+    "ty==0.0.101",
     "types-setuptools>=80.9.0.20250822",
 ]

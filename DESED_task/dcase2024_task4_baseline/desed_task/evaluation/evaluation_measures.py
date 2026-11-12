@@ -44,7 +44,7 @@ def psds_results(psds_obj):
         print(f"\nPSD-Score (0, 1, 100): {psds_score.value:.5f}")
     except psds_eval.psds.PSDSEvalError as e:
         print("psds did not work ....")
-        raise EnvironmentError
+        raise EnvironmentError("PSDS の計算に失敗した") from e
 
 
 def event_based_evaluation_df(

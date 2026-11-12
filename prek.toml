@@ -1,0 +1,44 @@
+# コミット前・プッシュ前の検査. セットアップ: uv run prek install
+# (prek は pyproject.toml を読まないので, この設定だけ別ファイル)
+# ruff のフックは一括整形 (docs/tasks.md 手順 9) の後に足す.
+
+default_install_hook_types = ["pre-commit", "pre-push"]
+
+# sebbs/ は submodule, pre_*.py は改変前の控え
+exclude = '^DESED_task/dcase2024_task4_baseline/(sebbs/|(.*/)?pre_[^/]*\.py$)'
+
+[[repos]]
+repo = "builtin"
+hooks = [
+    { id = "trailing-whitespace" },
+    { id = "end-of-file-fixer" },
+    { id = "check-yaml" },
+    { id = "check-toml" },
+    { id = "check-merge-conflict" },
+    # ckpt / hdf5 の誤コミット防止 (既定の上限 500 kB)
+    { id = "check-added-large-files" },
+]
+
+[[repos]]
+repo = "https://github.com/astral-sh/uv-pre-commit"
+rev = "0.13.7"
+hooks = [
+    # pyproject.toml と uv.lock のずれを検知
+    { id = "uv-lock" },
+]
+
+[[repos]]
+repo = "https://github.com/shellcheck-py/shellcheck-py"
+rev = "v0.11.0.1-1"
+hooks = [
+    { id = "shellcheck", files = '(^|/)run_[^/]*\.sh$' },
+]
+
+[[repos]]
+repo = "local"
+hooks = [
+    # 既存の指摘は ty-baseline.json に記録済み. 新しい指摘だけで落ちる
+    { id = "ty", name = "ty", entry = "uv run ty check", language = "system", types = ["python"], pass_filenames = false },
+    # 数十秒. test_evaluate_psds2 は既知の失敗 (sed_scores_eval 内部の TypeError) なので外す
+    { id = "pytest", name = "pytest (not slow)", entry = "uv run pytest -m 'not slow and not repro' --deselect DESED_task/dcase2024_task4_baseline/local/sebbs_wrapper/tests/test_evaluator.py::TestSEBBsEvaluator::test_evaluate_psds2", language = "system", pass_filenames = false, always_run = true, stages = ["pre-push"] },
+]

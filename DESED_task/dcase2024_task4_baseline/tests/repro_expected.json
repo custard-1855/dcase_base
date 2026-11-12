@@ -1,0 +1,135 @@
+{
+  "_comment": [
+    "再現学習の期待値 (tests/test_repro.py が読む). 値はすべて teacher.",
+    "reference: 基準値. 現在は seed 42 の 1 回の実測 (commit ddca340, 2026-11-12) を仮に入れている.",
+    "tolerance: 許容幅 (絶対値). null の間, 学習結果の検査は skip される.",
+    "paper: 論文 (ieice2025) の値. 記録のみで検査しない.",
+    "複数 seed の計測後に reference と tolerance を置き換える."
+  ],
+  "metrics": {
+    "psds1": "test/teacher/psds1/psds_eval",
+    "psds2": "test/teacher/psds2/psds_eval",
+    "mpauc": "test/teacher/segment_mpauc/sed_scores_eval"
+  },
+  "configs": {
+    "mt": {
+      "psds1": {
+        "reference": 0.373867357294179,
+        "tolerance": null,
+        "paper": 0.369
+      },
+      "psds2": {
+        "reference": 0.5869425538307346,
+        "tolerance": null,
+        "paper": 0.581
+      },
+      "mpauc": {
+        "reference": 0.725013434771355,
+        "tolerance": null,
+        "paper": 0.72
+      }
+    },
+    "cmt_scale_mixstyle": {
+      "psds1": {
+        "reference": 0.3935631371376481,
+        "tolerance": null,
+        "paper": 0.393
+      },
+      "psds2": {
+        "reference": 0.6355463493481068,
+        "tolerance": null,
+        "paper": 0.632
+      },
+      "mpauc": {
+        "reference": 0.6741124628554269,
+        "tolerance": null,
+        "paper": 0.727
+      }
+    },
+    "cmt": {
+      "psds1": {
+        "reference": 0.3387869612945369,
+        "tolerance": null,
+        "paper": 0.297
+      },
+      "psds2": {
+        "reference": 0.6135039984383046,
+        "tolerance": null,
+        "paper": 0.6
+      },
+      "mpauc": {
+        "reference": 0.7204368787401295,
+        "tolerance": null,
+        "paper": 0.689
+      }
+    },
+    "mt_mixstyle": {
+      "psds1": {
+        "reference": 0.37892881436806236,
+        "tolerance": null,
+        "paper": 0.382
+      },
+      "psds2": {
+        "reference": 0.6073805244727479,
+        "tolerance": null,
+        "paper": 0.607
+      },
+      "mpauc": {
+        "reference": 0.688184759912344,
+        "tolerance": null,
+        "paper": 0.704
+      }
+    },
+    "cmt_mixstyle": {
+      "psds1": {
+        "reference": 0.388054421049362,
+        "tolerance": null,
+        "paper": 0.387
+      },
+      "psds2": {
+        "reference": 0.6427944760890276,
+        "tolerance": null,
+        "paper": 0.637
+      },
+      "mpauc": {
+        "reference": 0.6905182180916392,
+        "tolerance": null,
+        "paper": 0.722
+      }
+    },
+    "cmt_neg": {
+      "psds1": {
+        "reference": 0.36579242365443143,
+        "tolerance": null,
+        "paper": 0.369
+      },
+      "psds2": {
+        "reference": 0.5389988496860804,
+        "tolerance": null,
+        "paper": 0.543
+      },
+      "mpauc": {
+        "reference": 0.6806614993085774,
+        "tolerance": null,
+        "paper": 0.661
+      }
+    },
+    "cmt_scale": {
+      "psds1": {
+        "reference": 0.36924981579086164,
+        "tolerance": null,
+        "paper": 0.368
+      },
+      "psds2": {
+        "reference": 0.6226122085900162,
+        "tolerance": null,
+        "paper": 0.621
+      },
+      "mpauc": {
+        "reference": 0.6789249939356169,
+        "tolerance": null,
+        "paper": 0.699
+      }
+    }
+  }
+}

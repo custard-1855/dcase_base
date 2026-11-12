@@ -1,6 +1,7 @@
 import glob
 import os
 import random
+import warnings
 from pathlib import Path
 
 import h5py
@@ -57,10 +58,22 @@ def process_labels(df, onset, offset):
     return df_new.drop_duplicates()
 
 
+def warn_missing_audio(audio_folder, files):
+    """音声ファイルが無いサンプルの件数を警告する (read_audio が None を返し, 読み飛ばされる分)."""
+    missing = sum(not os.path.exists(f) for f in files)
+    if missing:
+        warnings.warn(
+            f"{audio_folder}: 音声ファイルが無いサンプルが {missing} / {len(files)} 件ある"
+            " (読み飛ばす)",
+            stacklevel=3,
+        )
+
+
 def read_audio(file, multisrc, random_channel, pad_to, test=False):
     if not os.path.exists(file):
         return None, None, None, None
-    mixture, fs = torchaudio.load(file)
+    # backend を明示する: libsox が sox_ng の環境では既定の sox バックエンドが segfault する
+    mixture, fs = torchaudio.load(file, backend="soundfile")
 
     if not multisrc:
         mixture = to_mono(mixture, random_channel)
@@ -165,6 +178,7 @@ class StronglyAnnotatedSet(Dataset):
         # we construct a dictionary for each example
         self.examples = examples
         self.examples_list = list(examples.keys())
+        warn_missing_audio(audio_folder, [e["mixture"] for e in examples.values()])
 
         if self.embeddings_hdf5_file is not None:
             assert (
@@ -300,6 +314,7 @@ class WeakSet(Dataset):
 
         self.examples = examples
         self.examples_list = list(examples.keys())
+        warn_missing_audio(audio_folder, [e["mixture"] for e in examples.values()])
 
         if self.embeddings_hdf5_file is not None:
             assert (

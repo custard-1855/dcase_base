@@ -1,0 +1,164 @@
+# 実データでの短縮学習用 (docs/tasks.md 手順 3). 学習ロジックを変えたときの軽量な検証に使う.
+# pretrained.yaml との違いは training の 2 行だけ:
+#   n_epochs: 150 -> 10
+#   n_epochs_warmup: 50 -> 3   (同じ比率で短縮. 50 のままだと一貫性損失の重みが立ち上がらない)
+# validation_interval は 10 のままなので, validation は最終エポックの 1 回だけになる.
+# pretrained.yaml を変えたら, このファイルも同じように直す.
+pretrained:
+  model: beats
+  e2e: False
+  freezed: True
+  extracted_embeddings_dir: ./embeddings
+
+cmt:
+  enabled: False
+  phi_clip: 0.5
+  phi_frame: 0.5
+  phi_neg: 0.3
+  phi_pos: 0.7
+  warmup_epochs: 0
+  use_neg_sample: False
+  pos_neg_scale: False
+
+sebbs:
+  enabled: false
+
+wandb:
+  use_wandb: True
+
+# Experiment directory structure
+experiment:
+  mode: train                    # Execution mode: train | test | inference | feature_extraction
+  category: baseline             # Experiment category (e.g., baseline, ablation, optimization)
+  method: baseline               # Method name (e.g., baseline, cmt, beats, sebbs)
+  variant: default               # Variant description (e.g., use_neg_sample, phi_0.5)
+  base_dir: experiments          # Base directory for experiments (default: experiments)
+  log_test_to_wandb: false       # Whether to create wandb runs in test mode (default: false)
+
+
+training:
+  batch_size: [12, 6, 6, 12, 24]    # [maestro, synth, strong, weak, unlabel]
+  batch_size_val: 24
+
+  # Mean Teacher設定
+  ema_factor: 0.999
+  self_sup_loss: mse
+
+  # 損失重み調整
+  const_max: 2
+  n_epochs_warmup: 3
+  epoch_decay: 100
+
+  # 訓練制御
+  num_workers: 6
+  n_epochs: 10
+  early_stop_patience: 150
+  accumulate_batches: 1
+  gradient_clip: 5.0
+
+  # 検証設定
+  val_thresholds: [0.5]
+  n_test_thresholds: 50
+  validation_interval: 10
+
+  # データ分割
+  weak_split: 0.9
+  maestro_split: 0.9
+
+  # 再現性
+  seed: 42
+  deterministic: False
+  precision: 32
+
+  # データ拡張
+  mixup: soft
+  mixup_prob: 0.5
+
+  # 評価メトリック
+  obj_metric_synth_type: intersection
+  obj_metric_maestro_type: fmo
+  enable_progress_bar: True
+
+scaler:
+  statistic: instance
+  normtype: minmax
+  dims: [1, 2]
+  savepath: ./scaler.ckpt
+
+# データパス（既存設定をそのまま使用）
+data:
+  synth_folder: "/mnt/data/data/dcase/dataset/dcase_synth/audio/train/synthetic21_train/soundscapes_16k/"
+  synth_folder_44k: "/mnt/data/data/dcase/dataset/dcase_synth/audio/train/synthetic21_train/soundscapes/"
+  synth_tsv:  "/mnt/data/data/dcase/dataset/dcase_synth/metadata/train/synthetic21_train/soundscapes.tsv"
+  strong_folder: "/mnt/data/data/dcase/dataset/audio/train/strong_label_real_16k/"
+  strong_folder_44k: "/mnt/data/data/dcase/dataset/audio/train/strong_label_real/"
+  strong_tsv: "/mnt/data/data/dcase/dataset/metadata/train/audioset_strong.tsv"
+  synth_maestro_train: "/mnt/data/data/dcase/dataset/audio/maestro_synth_train_16k"
+  synth_maestro_train_44k: "/mnt/data/data/dcase/dataset/audio/maestro_synth_train"
+  synth_maestro_tsv: "/mnt/data/data/dcase/dataset/metadata/maestro_synth_train.tsv"
+  real_maestro_train_folder: "/mnt/data/data/dcase/dataset/audio/maestro_real_train_16k"
+  real_maestro_train_folder_44k: "/mnt/data/data/dcase/dataset/audio/maestro_real_train"
+  real_maestro_train_tsv: "/mnt/data/data/dcase/dataset/metadata/maestro_real_train.tsv"
+  real_maestro_val_folder: "/mnt/data/data/dcase/dataset/audio/maestro_real_validation_16k"
+  real_maestro_val_folder_44k: "/mnt/data/data/dcase/dataset/audio/maestro_real_validation"
+  real_maestro_val_tsv: "/mnt/data/data/dcase/dataset/metadata/maestro_real_validation.tsv"
+  real_maestro_val_dur: "/mnt/data/data/dcase/dataset/metadata/maestro_real_durations.tsv"
+  weak_folder: "/mnt/data/data/dcase/dataset/audio/train/weak_16k/"
+  weak_folder_44k: "/mnt/data/data/dcase/dataset/audio/train/weak/"
+  weak_tsv: "/mnt/data/data/dcase/dataset/metadata/train/weak.tsv"
+  unlabeled_folder: "/mnt/data/data/dcase/dataset/audio/train/unlabel_in_domain_16k/"
+  unlabeled_folder_44k: "/mnt/data/data/dcase/dataset/audio/train/unlabel_in_domain/"
+  synth_val_folder: "/mnt/data/data/dcase/dataset/audio/validation/synthetic21_validation/soundscapes_16k/"
+  synth_val_folder_44k: "/mnt/data/data/dcase/dataset/dcase_synth/audio/validation/synthetic21_validation/soundscapes/"
+  synth_val_tsv:  "/mnt/data/data/dcase/dataset/dcase_synth/metadata/validation/synthetic21_validation/soundscapes.tsv"
+  synth_val_dur: "/mnt/data/data/dcase/dataset/dcase_synth/metadata/validation/synthetic21_validation/durations.tsv"
+  test_folder: "/mnt/data/data/dcase/dataset/audio/validation/validation_16k/"
+  test_folder_44k: "/mnt/data/data/dcase/dataset/audio/validation/validation/"
+  test_tsv: "/mnt/data/data/dcase/dataset/metadata/validation/validation.tsv"
+  test_dur: "/mnt/data/data/dcase/dataset/metadata/validation/validation_durations.tsv"
+  eval_folder: "/mnt/data/data/dcase/dataset/audio/eval24_16k"
+  eval_folder_44k: "/mnt/data/data/dcase/dataset/audio/eval24"
+  audio_max_len: 10
+  fs: 16000
+  net_subsample: 4
+
+opt:
+  lr: 0.001
+
+feats:
+  n_mels: 128
+  n_filters: 2048
+  hop_length: 256
+  n_window: 2048
+  sample_rate: 16000
+  f_min: 0
+  f_max: 8000
+
+net:
+  dropout: 0.2
+  rnn_layers: 1
+  n_in_channel: 1 # 3 #stack用に変更
+  nclass: 27
+  attention: True
+  n_RNN_cell: 192
+  activation: glu
+  rnn_type: BGRU
+  kernel_size: [3, 3, 3, 3, 3, 3, 3]
+  padding: [1, 1, 1, 1, 1, 1, 1]
+  stride: [1, 1, 1, 1, 1, 1, 1]
+  nb_filters: [ 16, 32, 64, 128, 128, 128, 128 ]
+  pooling:  [ [ 2, 2 ], [ 2, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ], [ 1, 2 ] ] # for log mel
+  dropstep_recurrent: 0.3
+  dropstep_recurrent_len: 16
+  use_embeddings: True
+  embedding_size: 768
+  embedding_type: frame
+  aggregation_type: pool1d
+  specaugm_t_p: 0.0
+  specaugm_t_l: 5
+  specaugm_f_p: 0.0
+  specaugm_f_l: 10
+  median_filter: [3, 9, 9, 5, 5, 5, 9, 7, 11, 9, 7, 3, 9, 13, 7, 1, 13, 3, 13, 7, 5, 5, 1, 13, 17, 13, 15]
+  # for MixStyle
+  attn_type: default
+  mixstyle_type: disabled

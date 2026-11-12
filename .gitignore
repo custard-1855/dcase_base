@@ -14,7 +14,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 
-docs/
+#docs/
 
 # C extensions
 *.so
@@ -163,6 +163,8 @@ experiments/
 .devcontainer/*.md
 
 *.md
+!CLAUDE.md
+!docs/reports/*.md
 .kiro/
 .claude/
 .devcontainer/

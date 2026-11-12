@@ -1,0 +1,3 @@
+# 本家由来の .pre-commit-config.yaml (black など) と submodule の設定は使わない.
+# 直下の prek.toml だけを有効にする (ファイル自体は直下のフックの対象のまま).
+DESED_task/
