@@ -21,8 +21,14 @@ $ cd DESED_task/dcase2024_task4_baseline # 作業ディレクトリに移動
 - データや GPU がなくても, 合成データで「学習 → validation → dev-test 評価」と「ckpt からの推論」が通ることを確認できる.
 ```bash
 # dcase_base (リポジトリ直下) で実行
-$ uv run pytest -m "not slow" # モデルの forward など軽いテストのみ (数十秒)
-$ uv run pytest               # 学習・推論を最後まで回すテストも含む (CPU で 5 分程度)
+$ uv run poe test   # モデルの forward など軽いテストのみ (数十秒)
+$ uv run pytest     # 学習・推論を最後まで回すテストも含む (CPU で 5 分程度)
+$ uv run poe        # 登録済みのタスク一覧 (再現学習, ckpt の再評価など)
+```
+
+### コミット前・プッシュ前の検査
+```bash
+$ uv run prek install # 設定は prek.toml. コミット時に構文・型検査, プッシュ時に軽いテストが走る
 ```
 
 ### データ準備

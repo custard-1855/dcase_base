@@ -11,8 +11,10 @@ CMT・MixStyle・cSEBBs を追加して比較している。セットアップ�
 
 | 目的 | 実行場所 | コマンド |
 |---|---|---|
-| テスト | リポジトリ直下 | `uv run pytest -m "not slow"`（数十秒）, `uv run pytest`（CPU で約 4 分） |
+| テスト | リポジトリ直下 | `uv run poe test`（= `pytest -m "not slow and not repro"`, 数十秒）, `uv run pytest`（CPU で数分） |
+| 再現値の検査 | リポジトリ直下 | `uv run poe repro-check`（`exp/repro*` の結果を期待値と比較。既定の `pytest` には含まれない） |
 | 学習・推論・データ準備 | `DESED_task/dcase2024_task4_baseline/` | `uv run train_pretrained.py ...` |
+| 再現学習・ckpt の再評価 | リポジトリ直下 | `uv run poe repro` / `repro-short` / `repro-eval` / `sebbs`（一覧は `uv run poe`） |
 | lint | リポジトリ直下 | `uv run ruff check <触ったファイル>`（設定は `pyproject.toml`） |
 
 コードの本体はすべて `DESED_task/dcase2024_task4_baseline/` にある。そこを触るときは同ディレクトリの `CLAUDE.md` を読む。
