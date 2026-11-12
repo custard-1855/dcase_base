@@ -164,6 +164,7 @@ experiments/
 
 *.md
 !CLAUDE.md
+!docs/reports/*.md
 .kiro/
 .claude/
 .devcontainer/
