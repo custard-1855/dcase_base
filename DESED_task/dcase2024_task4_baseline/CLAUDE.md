@@ -17,9 +17,11 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 | `sebbs/` | cSEBBs 後処理（git submodule, MERL 製）。**編集しない** | 外部 |
 | `run_*.sh` | 論文のアブレーション実験。引数の組み合わせの正本 | 卒論で追加 |
 | `run_repro.sh` | 再現学習のキュー。論文の表の構成を順に流し、`exp/repro/{構成名}/version_N/test_metrics.json` に最終指標を残す（wandb は既定で無効） | 卒論で追加 |
+| `run_repro_eval.sh` | 再現学習のベスト ckpt の再評価（`--sebbs` で cSEBBs）。構成のフラグは `run_repro.sh --list` から引く。結果は `exp/repro_eval/{構成名}/version_N/` | 卒論で追加 |
+| `confs/pretrained_short.yaml` | 10 エポックの短縮学習用。`pretrained.yaml` を変えたら合わせて直す | 卒論で追加 |
 | `extract_embeddings.py` | BEATs 埋め込みを `./embeddings/beats/*.hdf5` に事前計算 | 本家 + 改変 |
 | `generate_dcase_task4_2024.py`, `dprep/` | データセットのダウンロードと MAESTRO の 10 秒分割 | 本家 |
-| `tests/` | smoke test と合成データ生成（`conftest.py`） | 卒論で追加 |
+| `tests/` | smoke test と合成データ生成（`conftest.py`）、再現値の検査（`test_repro.py`, 期待値は `repro_expected.json`） | 卒論で追加 |
 | `local/pre_sed_trainer_pretrained.py`, `desed_task/dataio/pre_datasets.py` | 改変前の控え。どこからも import されていない | 旧版 |
 | `optuna_pretrained.py`, `confs/optuna.yaml` | ハイパーパラメータ探索。smoke test の対象外 | 本家 |
 | `README.md` | 本家ベースラインの README。devcontainer や `visualize/` など、このリポジトリに無いものへの言及が残る | 本家 |
@@ -55,7 +57,7 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 - 埋め込み hdf5 のキーは wav の stem。セットを足すときは `extract_embeddings.py` 末尾の辞書と
   `train_pretrained.py` の `get_embeddings_name(config, "<name>")` の両方に名前を足す。
 - MAESTRO は `{scene}_{番号}-{開始}-{終了}.wav`。scene 名と番号で train / valid を分けている（`split_maestro`）。
-- 欠損した音声は Dataset が `None` を返し、`SafeDataLoader` が読み飛ばす。
+- 欠損した音声は Dataset が `None` を返し、`SafeDataLoader` が読み飛ばす。件数は Dataset の構築時にセットごとに警告される。
 
 ## sebbs の import
 
@@ -67,6 +69,7 @@ editable インストールの両方に依存している。
 
 - 合成データは `tests/conftest.py` の `synthetic_config` が実データと同じ構成・形式で生成する。
   新しいデータセットやファイルを読むコードを足したら、ここにも同じ形式で足す。
-- 新しい CLI フラグの組み合わせは `tests/test_smoke.py` の `VARIANTS` に 1 行足せば学習〜評価まで通る。
+- 再現対象の構成は `run_repro.sh --list` から読むので、`run_repro.sh` に足せば smoke test に入る。
+  それ以外の CLI フラグの組み合わせは `tests/test_smoke.py` の `VARIANTS` に 1 行足す。
 - 学習を回すテストには `@pytest.mark.slow` を付ける。
 - リサンプルの並列処理（fork）は pytest 内でデッドロックするので、fixture で逐次実行に差し替えてある。

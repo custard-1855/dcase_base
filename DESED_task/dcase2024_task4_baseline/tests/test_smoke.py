@@ -1,7 +1,7 @@
 """smoke test: 実データなしで「動くこと」だけを確認する.
 
     uv run pytest                 # 全部 (CPU で数分)
-    uv run pytest -m "not slow"   # 学習を回さない軽いテストのみ (数秒)
+    uv run poe test               # 学習を回さない軽いテストのみ (数秒)
 
 学習を通すテストは合成データ (tests/conftest.py) を使い, CPU 上で
 学習 2 epoch -> validation -> ベスト ckpt のロード -> dev-test 評価 まで実行する.
@@ -12,6 +12,8 @@
 import copy
 import json
 import math
+import os
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -20,6 +22,7 @@ import yaml
 
 RECIPE_DIR = Path(__file__).resolve().parents[1]
 MIXSTYLE_TYPES = ["disabled", "only_mix", "freqAttn"]
+SYNTHETIC_EXPECTED = Path(__file__).with_name("synthetic_expected.json")
 
 
 def test_config_matches_code(base_config):
@@ -104,10 +107,18 @@ def _test_metrics(tmp_path):
         return json.load(f)
 
 
-# 各 run_*.sh が使う引数の組み合わせを代表するもの
+def _repro_variants():
+    """再現対象の構成 (構成名 -> フラグ). 正本の run_repro.sh --list から読む."""
+    out = subprocess.run(
+        [str(RECIPE_DIR / "run_repro.sh"), "--list"], capture_output=True, text=True, check=True
+    ).stdout
+    return {line.split()[0]: line.split()[1:] for line in out.splitlines() if line.strip()}
+
+
+REPRO_VARIANTS = _repro_variants()
+
+# 再現対象の構成 (REPRO_VARIANTS) に無い引数の組み合わせ
 VARIANTS = {
-    "baseline": [],
-    "cmt_neg_scale": ["--cmt", "--use_neg_sample", "--pos_neg_scale"],
     "mixstyle_freqattn": ["--mixstyle_type", "freqAttn", "--attn_type", "default"],
     "mixstyle_only_mix": ["--mixstyle_type", "only_mix", "--attn_type", "default"],
     "sebbs": ["--sebbs"],
@@ -140,6 +151,47 @@ def test_train_and_test_end_to_end(synthetic_config, tmp_path, monkeypatch, extr
     if "--use_wandb" in extra_args:
         run_dirs = list((tmp_path / "experiments" / "train" / "smoke" / "all").rglob("manifest.json"))
         assert run_dirs, "experiments/train/{category}/{method}/{variant}/ に manifest が無い"
+
+
+@pytest.fixture(scope="module", params=list(REPRO_VARIANTS))
+def repro_run(request, synthetic_config, tmp_path_factory):
+    """再現対象の構成を合成データで 1 回ずつ学習〜評価した結果 (構成名, 出力先, 目的関数値)."""
+    tmp_path = tmp_path_factory.mktemp(f"repro_{request.param}")
+    with pytest.MonkeyPatch.context() as mp:
+        objective = _run(synthetic_config, tmp_path, mp, REPRO_VARIANTS[request.param])
+    return request.param, tmp_path, objective
+
+
+@pytest.mark.slow
+def test_repro_variant_end_to_end(repro_run):
+    """再現対象の全構成 (run_repro.sh) で, 学習 -> validation -> ckpt 保存 -> dev-test 評価が完走する."""
+    _, tmp_path, objective = repro_run
+
+    assert objective is not None and math.isfinite(objective)
+    assert list(tmp_path.rglob("*.ckpt")), "checkpoint が保存されていない"
+    assert "test/teacher/psds1/sed_scores_eval" in _test_metrics(tmp_path)
+
+
+@pytest.mark.slow
+def test_synthetic_metrics_unchanged(repro_run):
+    """合成データ・seed 固定・CPU での最終指標が, 保存した値から変わっていない.
+
+    整形やリファクタで挙動が変わったことを検知する. 保存値は tests/synthetic_expected.json.
+    意図して挙動を変えたとき, torch などの版を上げたときは, 次で取り直す:
+
+        UPDATE_SYNTHETIC_EXPECTED=1 uv run pytest -k test_synthetic_metrics_unchanged
+    """
+    name, tmp_path, _ = repro_run
+    metrics = _test_metrics(tmp_path)
+    expected = json.loads(SYNTHETIC_EXPECTED.read_text()) if SYNTHETIC_EXPECTED.exists() else {}
+
+    if os.environ.get("UPDATE_SYNTHETIC_EXPECTED"):
+        expected[name] = metrics
+        SYNTHETIC_EXPECTED.write_text(json.dumps(expected, indent=2, sort_keys=True) + "\n")
+        return
+    if name not in expected:
+        pytest.skip("保存値が無い (UPDATE_SYNTHETIC_EXPECTED=1 で作る)")
+    assert metrics == pytest.approx(expected[name], rel=1e-6, abs=1e-9, nan_ok=True)
 
 
 @pytest.fixture(scope="module")
