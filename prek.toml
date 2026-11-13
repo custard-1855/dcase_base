@@ -4,8 +4,8 @@
 
 default_install_hook_types = ["pre-commit", "pre-push"]
 
-# sebbs/ は submodule, pre_*.py は改変前の控え
-exclude = '^DESED_task/dcase2024_task4_baseline/(sebbs/|(.*/)?pre_[^/]*\.py$)'
+# sebbs/ は submodule
+exclude = '^DESED_task/dcase2024_task4_baseline/sebbs/'
 
 [[repos]]
 repo = "builtin"
