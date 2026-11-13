@@ -8,7 +8,10 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 | 場所 | 役割 | 由来 |
 |---|---|---|
 | `train_pretrained.py` | 学習・評価・推論の入口。`prepare_run`（引数と yaml の統合）→ `single_run` | 本家 + 改変 |
-| `local/sed_trainer_pretrained.py` | LightningModule `SEDTask4`。損失、CMT、validation / test の指標計算、wandb | 本家 + 大幅改変 |
+| `local/sed_trainer_pretrained.py` | LightningModule `SEDTask4`。損失、validation / test の指標計算、wandb | 本家 + 大幅改変 |
+| `local/cmt.py` | CMT の擬似ラベル生成・信頼度の重み・一貫性損失。`SEDTask4` を `self` として受け取る関数 | 卒論で追加 |
+| `local/sebbs_postprocess.py` | cSEBBs の適用（`get_sebbs`）とチューニング時の選択関数（`select_best_auroc`） | 卒論で追加 |
+| `local/utils.py` | 復号・指標のログなどの補助関数。`SafeDataLoader`、MAESTRO の正解ラベル結合、セグメントスコア計算もここ | 本家 + 追加 |
 | `confs/pretrained.yaml` | 既定の設定。データの置き場所は `data.root` の 1 か所 | 本家 + 改変 |
 | `desed_task/nnet/` | `CRNN` / `CNN` / `RNN`。`mixstyle.py` が MixStyle 実装 | 本家 + MixStyle 追加 |
 | `desed_task/dataio/datasets.py` | Strong / Weak / Unlabeled の Dataset。埋め込みは hdf5 から読む | 本家 |
