@@ -14,6 +14,21 @@ from sed_scores_eval.base_modules.scores import create_score_dataframe
 from thop import clever_format, profile
 
 
+def resolve_data_paths(config_data):
+    """`data.root` からの相対で書かれたパスを絶対パスにする (その場で書き換える).
+
+    文字列の値はすべてパスとみなす. 絶対パスはそのまま残る.
+    `root` が無い設定 (optuna.yaml や, 以前に保存した設定) は何も変えない.
+    """
+    root = config_data.get("root")
+    if root is None:
+        return config_data
+    for key, value in config_data.items():
+        if key != "root" and isinstance(value, str):
+            config_data[key] = os.path.join(root, value)
+    return config_data
+
+
 def process_tsvs(tsv, alias_map=None):
     if alias_map is None:
         return tsv

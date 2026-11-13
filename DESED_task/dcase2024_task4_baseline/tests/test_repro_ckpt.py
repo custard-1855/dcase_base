@@ -91,12 +91,14 @@ def subset_config(tmp_path_factory):
     絞るのは正解ラベルと durations の tsv だけで, 音声と埋め込みは元の場所から読む
     (Dataset は tsv にあるクリップだけを読み, 埋め込みは hdf5 から stem で引く).
     """
+    from local.utils import resolve_data_paths
+
     conf_file = CKPT_DIR / "pretrained.nowandb.yaml"
     if not conf_file.exists():
         pytest.skip(f"学習時の設定が無い: {conf_file}")
     with open(conf_file) as f:
         config = yaml.safe_load(f)
-    data = config["data"]
+    data = resolve_data_paths(config["data"])
 
     # 相対パスはレシピのディレクトリから見たもの. テストは tmp にカレントを移して実行する
     emb_dir = RECIPE_DIR / config["pretrained"]["extracted_embeddings_dir"]

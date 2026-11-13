@@ -33,7 +33,7 @@ $ uv run prek install # 設定は prek.toml. コミット時に構文・型検�
 
 ### データ準備
 - `confs/pretrained.yaml` は `/mnt/data/data/dcase/dataset` 以下にデータがある想定.
-- 保存場所を変更する場合, `confs/pretrained.yaml`の`data:`のパス変更が必要な点に注意.
+- 保存場所を変更する場合, `confs/pretrained.yaml`の`data.root`を書き換える(各パスは`root`からの相対).
 - 参照: https://github.com/DCASE-REPO/DESED_task/tree/dcase24_baseline/recipes/dcase2024_task4_baseline
 ```bash
 $ uv run generate_dcase_task4_2024.py --basedir="/mnt/data/data"
@@ -88,7 +88,7 @@ $ uv run train_pretrained.py
 ### wandb
 ```bash
 $ export WANDB_MODE=offline
-# $ WANDB_MODE=disabled 
+# $ WANDB_MODE=disabled
 ```
 
 ## 引用
@@ -96,4 +96,3 @@ $ export WANDB_MODE=offline
 ```
 竹本志恩, 川原亮一, “実環境を見据えた音による行動認識モデルの精度向上に関する一検討,” 信学技報, vol. 125, no. 385, NS2025-226, pp. 31-36, 2026 年 3 月.
 ```
-

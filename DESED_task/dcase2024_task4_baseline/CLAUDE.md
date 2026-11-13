@@ -9,7 +9,7 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 |---|---|---|
 | `train_pretrained.py` | 学習・評価・推論の入口。`prepare_run`（引数と yaml の統合）→ `single_run` | 本家 + 改変 |
 | `local/sed_trainer_pretrained.py` | LightningModule `SEDTask4`。損失、CMT、validation / test の指標計算、wandb | 本家 + 大幅改変 |
-| `confs/pretrained.yaml` | 既定の設定。データのパスもここ | 本家 + 改変 |
+| `confs/pretrained.yaml` | 既定の設定。データの置き場所は `data.root` の 1 か所 | 本家 + 改変 |
 | `desed_task/nnet/` | `CRNN` / `CNN` / `RNN`。`mixstyle.py` が MixStyle 実装 | 本家 + MixStyle 追加 |
 | `desed_task/dataio/datasets.py` | Strong / Weak / Unlabeled の Dataset。埋め込みは hdf5 から読む | 本家 |
 | `local/experiment_dir.py` | `experiments/{mode}/{category}/{method}/{variant}/run-*/` の出力先管理 | 卒論で追加 |
@@ -52,6 +52,8 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 ## データの約束事
 
 - クラスは DESED 10 + MAESTRO 17 = 27（`local/classes_dict.py`）。`net.nclass` と `net.median_filter` の長さはこれに合わせる。
+- `data` のパスは `data.root` からの相対で書く。yaml を読んだ直後に `local/utils.py` の `resolve_data_paths` が絶対パスにする
+  （`train_pretrained.py` と `extract_embeddings.py`）。絶対パスで書いた値と、`root` の無い設定はそのまま通る。
 - 各セットは `*_folder_44k`（元音源）と `*_folder`（16 kHz）の組。16 kHz 側は初回実行時に自動生成される。
 - 埋め込み hdf5 のキーは wav の stem。セットを足すときは `extract_embeddings.py` 末尾の辞書と
   `train_pretrained.py` の `get_embeddings_name(config, "<name>")` の両方に名前を足す。
