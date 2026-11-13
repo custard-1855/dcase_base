@@ -22,7 +22,6 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 | `extract_embeddings.py` | BEATs 埋め込みを `./embeddings/beats/*.hdf5` に事前計算 | 本家 + 改変 |
 | `generate_dcase_task4_2024.py`, `dprep/` | データセットのダウンロードと MAESTRO の 10 秒分割 | 本家 |
 | `tests/` | smoke test と合成データ生成（`conftest.py`）、再現値の検査（`test_repro.py`, 期待値は `repro_expected.json`） | 卒論で追加 |
-| `local/pre_sed_trainer_pretrained.py`, `desed_task/dataio/pre_datasets.py` | 改変前の控え。どこからも import されていない | 旧版 |
 | `optuna_pretrained.py`, `confs/optuna.yaml` | ハイパーパラメータ探索。smoke test の対象外 | 本家 |
 | `README.md` | 本家ベースラインの README。devcontainer や `visualize/` など、このリポジトリに無いものへの言及が残る | 本家 |
 
