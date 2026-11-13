@@ -22,7 +22,12 @@ from local.classes_dict import (
 from local.experiment_dir import ExperimentConfig
 from local.resample_folder import resample_folder
 from local.sed_trainer_pretrained import SEDTask4
-from local.utils import calculate_macs, generate_tsv_wav_durations, process_tsvs
+from local.utils import (
+    calculate_macs,
+    generate_tsv_wav_durations,
+    process_tsvs,
+    resolve_data_paths,
+)
 from pytorch_lightning.callbacks import EarlyStopping, ModelCheckpoint
 from pytorch_lightning.loggers import TensorBoardLogger
 
@@ -861,6 +866,7 @@ def prepare_run(argv=None):
     args = parser.parse_args(argv)
     with open(args.confs) as f:
         configs = yaml.safe_load(f)
+    resolve_data_paths(configs["data"])
 
     # WandB用に設定ファイルパスを保存
     configs["config_file_path"] = os.path.abspath(args.confs)

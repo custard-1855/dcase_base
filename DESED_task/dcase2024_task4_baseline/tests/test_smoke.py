@@ -45,6 +45,27 @@ def test_config_matches_code(base_config):
     ExperimentConfig(**base_config["experiment"])
 
 
+def test_data_paths_resolve_from_root(base_config):
+    """データのパスは root からの相対で書かれ, resolve_data_paths で絶対パスになる."""
+    from local.utils import resolve_data_paths
+
+    data = copy.deepcopy(base_config["data"])
+    root = data["root"]
+    relative = {k: v for k, v in data.items() if isinstance(v, str) and k != "root"}
+    assert relative
+    assert not any(os.path.isabs(v) for v in relative.values())
+
+    resolve_data_paths(data)
+    assert {k: data[k] for k in relative} == {k: f"{root}/{v}" for k, v in relative.items()}
+    assert data["fs"] == base_config["data"]["fs"]  # 文字列でない値は触らない
+
+    resolved = copy.deepcopy(data)
+    assert resolve_data_paths(data) == resolved  # 絶対パスはそのまま (2 回通しても同じ)
+
+    without_root = {"test_folder": "../../data/audio", "fs": 16000}
+    assert resolve_data_paths(dict(without_root)) == without_root
+
+
 @pytest.mark.parametrize("mixstyle_type", MIXSTYLE_TYPES)
 def test_crnn_forward(base_config, mixstyle_type):
     """CRNN (+BEATs 埋め込み) の forward が全 MixStyle 設定で通り, 出力形状が正しい."""

@@ -1,10 +1,8 @@
 import os
 import random
 import warnings
-from collections import defaultdict
 from copy import deepcopy
 from datetime import datetime
-from math import ceil
 from pathlib import Path
 from typing import Any, TypeAlias
 
@@ -13,7 +11,6 @@ import pandas as pd
 import pytorch_lightning as pl
 import sed_scores_eval
 import torch
-import torch.nn.functional as F
 import torchmetrics
 import wandb
 from codecarbon import OfflineEmissionsTracker
@@ -31,13 +28,6 @@ from local.experiment_dir import ExecutionMode, ExperimentConfig, ExperimentDirM
 
 # Import SEBBs wrapper layer for type-safe interface
 from local.sebbs_wrapper import SEBBsPredictor, SEBBsTuner
-
-# Keep direct import for utilities
-from sebbs.sebbs.utils import sed_scores_from_sebbs
-from sed_scores_eval.base_modules.scores import create_score_dataframe, validate_score_dataframe
-
-# データ不足の対策
-from torch.utils.data.dataloader import DataLoader, default_collate
 from torchaudio.transforms import AmplitudeToDB, MelSpectrogram
 
 from .classes_dict import (
@@ -45,7 +35,21 @@ from .classes_dict import (
     classes_labels_maestro_real,
     classes_labels_maestro_real_eval,
 )
-from .utils import batched_decode_preds, log_sedeval_metrics
+from .cmt import (
+    apply_cmt_postprocessing,
+    compute_cmt_confidence_weights,
+    compute_cmt_consistency_loss,
+)
+from .sebbs_postprocess import get_sebbs, select_best_auroc
+from .utils import (
+    SafeDataLoader,
+    _codecarbon_gpu_ids,
+    _get_segment_scores_and_overlap_add,
+    _merge_maestro_ground_truth,
+    _merge_overlapping_events,
+    batched_decode_preds,
+    log_sedeval_metrics,
+)
 
 PROJECT_NAME = "SED-pl-noise"
 
@@ -85,56 +89,6 @@ ScoreDataFrameDict: TypeAlias = dict[str, pd.DataFrame]
 # Contains PSDS scores (float) and optional per-class breakdowns (dict[str, float])
 # Example: {"psds": 0.653, "per_class": {"Blender": 0.75, "Cat": 0.68}}
 PSDSResult: TypeAlias = dict[str, float | dict[str, float]]
-
-
-class _NoneSafeIterator:
-    """DataLoaderから返されるNoneバッチを内部でスキップ."""
-
-    def __init__(self, dataloader_iter):
-        self.dataloader_iter = dataloader_iter
-
-    def __iter__(self):
-        return self
-
-    def __next__(self):
-        while True:
-            batch = next(self.dataloader_iter)
-            if batch is not None:
-                return batch
-            print("Skipping a batch that was None internally.")
-
-
-class SafeCollate:
-    """データセットから返される None 値をフィルタリングする collate_fn.
-
-    フィルタリング後にバッチが空になった場合は None を返す.
-    """
-
-    def __call__(self, batch):
-        batch = [b for b in batch if b is not None]
-
-        if not batch:
-            # バッチが空ならNoneを返す（このNoneは_NoneSafeIteratorで捕捉される>）
-            return None
-
-        return default_collate(batch)
-
-
-class SafeDataLoader(DataLoader):
-    """Noneを返す可能性があるバッチを自動的にスキップするDataLoader.
-
-    PyTorch Lightningなどのフレームワークで安全に使用できる。
-    """
-
-    def __init__(self, *args, **kwargs):
-        # ユーザーがcollate_fnを指定していない場合のみ、SafeCollateを設定
-        if "collate_fn" not in kwargs:
-            kwargs["collate_fn"] = SafeCollate()
-        super().__init__(*args, **kwargs)
-
-    def __iter__(self):
-        dataloader_iter = super().__iter__()
-        return _NoneSafeIterator(dataloader_iter)
 
 
 class SEDTask4(pl.LightningModule):
@@ -897,13 +851,15 @@ class SEDTask4(pl.LightningModule):
                     (
                         teacher_pseudo_w,
                         teacher_pseudo_s,
-                    ) = self.apply_cmt_postprocessing(
+                    ) = apply_cmt_postprocessing(
+                        self,
                         weak_preds_teacher[mask_consistency],
                         strong_preds_teacher[mask_consistency],
                         index_weak=index_weak_relative,
                     )
                     # Compute confidence weights
-                    confidence_w, confidence_s = self.compute_cmt_confidence_weights(
+                    confidence_w, confidence_s = compute_cmt_confidence_weights(
+                        self,
                         weak_preds_teacher[mask_consistency],
                         strong_preds_teacher[mask_consistency],
                         teacher_pseudo_w,
@@ -912,14 +868,16 @@ class SEDTask4(pl.LightningModule):
                     )
                 else:
                     # Apply CMT postprocessing to teacher predictions
-                    teacher_pseudo_w, teacher_pseudo_s = self.apply_cmt_postprocessing(
+                    teacher_pseudo_w, teacher_pseudo_s = apply_cmt_postprocessing(
+                        self,
                         weak_preds_teacher[mask_consistency],
                         strong_preds_teacher[mask_consistency],
                         index_weak=index_weak_relative,
                     )
 
                     # Compute confidence weights
-                    confidence_w, confidence_s = self.compute_cmt_confidence_weights(
+                    confidence_w, confidence_s = compute_cmt_confidence_weights(
+                        self,
                         weak_preds_teacher[mask_consistency],
                         strong_preds_teacher[mask_consistency],
                         teacher_pseudo_w,
@@ -928,7 +886,8 @@ class SEDTask4(pl.LightningModule):
                     )
 
             # Compute CMT consistency loss with confidence weighting
-            weak_self_sup_loss, strong_self_sup_loss = self.compute_cmt_consistency_loss(
+            weak_self_sup_loss, strong_self_sup_loss = compute_cmt_consistency_loss(
+                self,
                 weak_preds_student[mask_consistency],
                 strong_preds_student[mask_consistency],
                 teacher_pseudo_w,
@@ -977,197 +936,6 @@ class SEDTask4(pl.LightningModule):
         self.log("train/step/current_epoch", self.current_epoch)
 
         return tot_loss
-
-    def apply_cmt_postprocessing(
-        self,
-        y_w: torch.Tensor,
-        y_s: torch.Tensor,
-        index_weak: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Apply Confident Mean Teacher postprocessing only unlabeled data.
-
-        y_w: (batch, classes)
-        y_s: (batch, classes, frames)
-        """
-        y_w_unlabeled = y_w[index_weak:]  # (unlabeled_batch, classes)
-        y_s_unlabeled = y_s[index_weak:]  # (unlabeled_batch, classes, frames)
-
-        if self.use_neg_sample:
-            # Weak (clip-level)
-            y_tilde_w = torch.where(
-                y_w_unlabeled >= self.phi_pos,
-                torch.ones_like(y_w_unlabeled),  # 正例 → 1.0
-                torch.where(
-                    y_w_unlabeled <= self.phi_neg,
-                    torch.zeros_like(y_w_unlabeled),  # 負例 → 0.0
-                    y_w_unlabeled,  # 中間値 → そのまま（後で信頼度0）
-                ),
-            )
-
-            # Strong (frame-level) - Weak制約なし、独立判定
-            y_s_binary = torch.where(
-                y_s_unlabeled >= self.phi_pos,
-                torch.ones_like(y_s_unlabeled),  # 正例 → 1.0
-                torch.where(
-                    y_s_unlabeled <= self.phi_neg,
-                    torch.zeros_like(y_s_unlabeled),  # 負例 → 0.0
-                    y_s_unlabeled,  # 中間値 → そのまま（後で信頼度0）
-                ),
-            )
-
-        else:
-            y_tilde_w = (y_w_unlabeled > self.phi_clip).float()  # clip
-            y_w_expanded = y_tilde_w.unsqueeze(-1).expand_as(y_s_unlabeled)
-            y_s_binary = y_w_expanded * (y_s_unlabeled > self.phi_frame).float()  # frame
-
-        y_tilde_s_list = []
-        original_device = y_s.device
-        y_s_numpy = y_s_binary.detach().cpu().numpy()  # y_s_binary: (batch, classes, frames)
-
-        for i in range(y_s_unlabeled.shape[0]):
-            sample = y_s_numpy[i].transpose(1, 0)  # (classes, frames) -> (frames, classes)
-            filtered = self.median_filter(sample)
-            y_tilde_s_list.append(filtered)
-
-        y_tilde_s_np = np.stack(y_tilde_s_list, axis=0)  # (batch, frames, classes)
-        y_tilde_s_tensor = torch.from_numpy(y_tilde_s_np).to(original_device)
-        y_tilde_s = y_tilde_s_tensor.transpose(1, 2)  # -> (batch, classes, frames)
-
-        y_tilde_w = torch.cat((y_w[:index_weak], y_tilde_w), dim=0)
-        y_tilde_s = torch.cat((y_s[:index_weak], y_tilde_s), dim=0)
-
-        return y_tilde_w, y_tilde_s
-
-    def compute_cmt_confidence_weights(
-        self,
-        y_w: torch.Tensor,
-        y_s: torch.Tensor,
-        y_tilde_w: torch.Tensor,
-        y_tilde_s: torch.Tensor,
-        index_weak: int,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute confidence weights based on teacher's certainty.
-
-        Correction: High confidence for both positive (near 1) and negative (near 0) predictions.
-        """
-        if self.use_neg_sample:
-            # --- use neg_sample ---
-            # Unlabeled部分のマスク生成
-            y_w_unlabeled = y_w[index_weak:]
-            y_s_unlabeled = y_s[index_weak:]
-
-            pos_mask_w_unlabeled = (y_tilde_w[index_weak:] == 1.0).float()
-            neg_mask_w_unlabeled = (y_tilde_w[index_weak:] == 0.0).float()
-
-            pos_mask_s_unlabeled = (y_tilde_s[index_weak:] == 1.0).float()
-            neg_mask_s_unlabeled = (y_tilde_s[index_weak:] == 0.0).float()
-
-            # Unlabeled部分の信頼度計算
-            c_w_pos_unlabeled = pos_mask_w_unlabeled * y_w_unlabeled
-            c_w_neg_unlabeled = neg_mask_w_unlabeled * (1.0 - y_w_unlabeled)
-            c_w_unlabeled = c_w_pos_unlabeled + c_w_neg_unlabeled
-
-            c_s_pos_unlabeled = pos_mask_s_unlabeled * y_s_unlabeled
-            c_s_neg_unlabeled = neg_mask_s_unlabeled * (1.0 - y_s_unlabeled)
-            c_s_unlabeled = c_s_pos_unlabeled + c_s_neg_unlabeled
-
-            # Labeled部分は常に信頼度1.0
-            c_w_labeled = torch.ones_like(y_w[:index_weak])
-            c_s_labeled = torch.ones_like(y_s[:index_weak])
-
-            # 結合（pos/negは後でスケーリングに使用）
-            c_w_pos = torch.cat((c_w_labeled, c_w_pos_unlabeled), dim=0)
-            c_w_neg = torch.cat((torch.zeros_like(y_w[:index_weak]), c_w_neg_unlabeled), dim=0)
-            c_w = torch.cat((c_w_labeled, c_w_unlabeled), dim=0)
-
-            c_s_pos = torch.cat((c_s_labeled, c_s_pos_unlabeled), dim=0)
-            c_s_neg = torch.cat((torch.zeros_like(y_s[:index_weak]), c_s_neg_unlabeled), dim=0)
-            c_s = torch.cat((c_s_labeled, c_s_unlabeled), dim=0)
-
-        else:
-            # --- CMT ---
-            # Unlabeled部分のみ計算（labeled部分はy_tildeが元のy_wなので除外）
-            y_w_unlabeled = y_w[index_weak:]
-            y_s_unlabeled = y_s[index_weak:]
-            y_tilde_w_unlabeled = y_tilde_w[index_weak:]
-            y_tilde_s_unlabeled = y_tilde_s[index_weak:]
-
-            c_w_unlabeled = y_w_unlabeled * y_tilde_w_unlabeled
-            y_w_expanded = y_w_unlabeled.unsqueeze(-1).expand_as(y_s_unlabeled)
-            c_s_unlabeled = y_s_unlabeled * y_w_expanded * y_tilde_s_unlabeled
-
-            # Labeled部分は常に信頼度1.0
-            c_w_labeled = torch.ones_like(y_w[:index_weak])
-            c_s_labeled = torch.ones_like(y_s[:index_weak])
-
-            # 結合
-            c_w = torch.cat((c_w_labeled, c_w_unlabeled), dim=0)
-            c_s = torch.cat((c_s_labeled, c_s_unlabeled), dim=0)
-
-        # 実装予定
-        # 温度パラメータによる調整
-
-        if self.use_neg_sample and self.pos_neg_scale:  # 正例と負例の量を調整
-            # Unlabeled部分のみの正例と負例の総重みを計算
-            pos_sum_w_unlabeled = c_w_pos_unlabeled.sum().clamp(min=1e-6)
-            neg_sum_w_unlabeled = c_w_neg_unlabeled.sum().clamp(min=1e-6)
-
-            pos_sum_s_unlabeled = c_s_pos_unlabeled.sum().clamp(min=1e-6)
-            neg_sum_s_unlabeled = c_s_neg_unlabeled.sum().clamp(min=1e-6)
-
-            # Unlabeled部分のみをスケーリング
-            if pos_sum_w_unlabeled < neg_sum_w_unlabeled:
-                # 負例が多い → 負例を縮小
-                scale_factor = neg_sum_w_unlabeled / pos_sum_w_unlabeled
-                c_w_unlabeled_scaled = c_w_pos_unlabeled + c_w_neg_unlabeled / scale_factor
-            else:
-                # 正例が多い → 正例を縮小
-                scale_factor = pos_sum_w_unlabeled / neg_sum_w_unlabeled
-                c_w_unlabeled_scaled = c_w_pos_unlabeled / scale_factor + c_w_neg_unlabeled
-
-            if pos_sum_s_unlabeled < neg_sum_s_unlabeled:
-                scale_factor = neg_sum_s_unlabeled / pos_sum_s_unlabeled
-                c_s_unlabeled_scaled = c_s_pos_unlabeled + c_s_neg_unlabeled / scale_factor
-            else:
-                scale_factor = pos_sum_s_unlabeled / neg_sum_s_unlabeled
-                c_s_unlabeled_scaled = c_s_pos_unlabeled / scale_factor + c_s_neg_unlabeled
-
-            # Labeledとスケール済みUnlabeledを結合
-            c_w = torch.cat((c_w_labeled, c_w_unlabeled_scaled), dim=0)
-            c_s = torch.cat((c_s_labeled, c_s_unlabeled_scaled), dim=0)
-
-            # ログを更新（スケール前の値を記録）
-            self.log("train/cmt/pos_neg_ratio_weak", pos_sum_w_unlabeled / neg_sum_w_unlabeled)
-            self.log("train/cmt/pos_neg_ratio_strong", pos_sum_s_unlabeled / neg_sum_s_unlabeled)
-
-        return c_w, c_s
-
-    def compute_cmt_consistency_loss(
-        self,
-        student_w: torch.Tensor,
-        student_s: torch.Tensor,
-        teacher_pseudo_w: torch.Tensor,
-        teacher_pseudo_s: torch.Tensor,
-        confidence_w: torch.Tensor,
-        confidence_s: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        """Compute weighted BCE loss."""
-        # Weak Loss
-        bce_w = F.binary_cross_entropy(student_w, teacher_pseudo_w, reduction="none")
-        weighted_bce_w = confidence_w * bce_w
-        loss_w_con = weighted_bce_w.mean()
-
-        # Strong Loss
-        bce_s = F.binary_cross_entropy(student_s, teacher_pseudo_s, reduction="none")
-        weighted_bce_s = confidence_s * bce_s
-        loss_s_con = weighted_bce_s.mean()
-
-        self.log("train/cmt/confidence_weak_mean", confidence_w.mean())
-        self.log("train/cmt/confidence_weak_std", confidence_w.std())
-        self.log("train/cmt/confidence_strong_mean", confidence_s.mean())
-        self.log("train/cmt/confidence_strong_std", confidence_s.std())
-
-        return loss_w_con, loss_s_con
 
     def on_before_zero_grad(self, *args: Any, **kwargs: Any) -> None:
         # update EMA teacher
@@ -2628,314 +2396,3 @@ class SEDTask4(pl.LightningModule):
         self._maestro_ground_truth_clips = maestro_ground_truth_clips
 
         return maestro_audio_durations_filtered, maestro_ground_truth
-
-
-def _codecarbon_gpu_ids() -> list[int] | None:
-    """codecarbon に渡す GPU id. CPU 実行 (--gpus 0) では CUDA に触らない."""
-    if torch.cuda.is_available():
-        return [torch.cuda.current_device()]
-    return None
-
-
-def select_best_auroc(
-    csebbs: list,
-    ground_truth: dict,
-    audio_durations: dict,
-    audio_ids=None,
-    segment_length=1.0,
-    **kwargs,
-):
-    """cSEBBsのハイパーパラメータチューニングでAUROCを最大化する選択関数.
-
-    csebbs.tune()からのインターフェースに適合し、
-    内部でsed_scores_eval.segment_based.aurocを使用する
-
-    Args:
-        csebbs: [(CSEBBsPredictor, sebbs_dict), ...]のリスト
-        ground_truth: {audio_id: [(onset, offset, label), ...]}
-        audio_durations: {audio_id: duration}
-        audio_ids: 評価対象のaudio_idリスト（オプション）
-        segment_length: セグメント長（秒）
-        **kwargs: aurocに渡す追加引数
-
-    Returns:
-        (best_predictor, best_scores): 最良のpredictor、および各クラスのAUROC値
-
-    """
-    if audio_ids is not None:
-        ground_truth = {aid: ground_truth[aid] for aid in audio_ids}
-        audio_durations = {aid: audio_durations[aid] for aid in audio_ids}
-
-    best_auroc = -1
-    best_predictor = None
-    best_auroc_values = None
-
-    for predictor, sebbs_dict in csebbs:
-        # SEBBsをsed_scores_eval形式に変換
-        if audio_ids is not None:
-            sebbs_dict = {aid: sebbs_dict[aid] for aid in audio_ids}
-
-        scores = sed_scores_from_sebbs(
-            sebbs_dict,
-            sound_classes=predictor.sound_classes,
-            audio_duration=audio_durations,
-        )
-
-        # AUROC計算
-        auroc_values, _ = sed_scores_eval.segment_based.auroc(
-            scores=scores,
-            ground_truth=ground_truth,
-            audio_durations=audio_durations,
-            segment_length=segment_length,
-            **kwargs,
-        )
-
-        # 平均AUROCで評価
-        mean_auroc = np.mean(list(auroc_values.values()))
-
-        if mean_auroc > best_auroc:
-            best_auroc = mean_auroc
-            best_predictor = predictor
-            best_auroc_values = auroc_values
-
-    return best_predictor, best_auroc_values
-
-
-def _merge_maestro_ground_truth(clip_ground_truth):
-    ground_truth = defaultdict(list)
-    for clip_id in clip_ground_truth:
-        file_id, clip_onset_time, clip_offset_time = clip_id.rsplit("-", maxsplit=2)
-        clip_onset_time = int(clip_onset_time) // 100
-        ground_truth[file_id].extend(
-            [
-                (
-                    clip_onset_time + event_onset_time,
-                    clip_onset_time + event_offset_time,
-                    event_class,
-                )
-                for event_onset_time, event_offset_time, event_class in clip_ground_truth[clip_id]
-            ],
-        )
-    return _merge_overlapping_events(ground_truth)
-
-
-def _merge_overlapping_events(ground_truth_events):
-    for clip_id, events in ground_truth_events.items():
-        per_class_events = defaultdict(list)
-        for event in events:
-            per_class_events[event[2]].append(event)
-        ground_truth_events[clip_id] = []
-        for event_class, events in per_class_events.items():
-            events = sorted(events)
-            merged_events = []
-            current_offset = -1e6
-            for event in events:
-                if event[0] > current_offset:
-                    merged_events.append(list(event))
-                else:
-                    merged_events[-1][1] = max(current_offset, event[1])
-                current_offset = merged_events[-1][1]
-            ground_truth_events[clip_id].extend(merged_events)
-    return ground_truth_events
-
-
-def _get_segment_scores_and_overlap_add(
-    frame_scores,
-    audio_durations,
-    event_classes,
-    segment_length=1.0,
-):
-    """>>> event_classes = ['a', 'b', 'c']
-    >>> audio_durations = {'f1': 201.6, 'f2':133.1, 'f3':326}
-    >>> frame_scores = {\
-        f'{file_id}-{int(100*onset)}-{int(100*(onset+10.))}': create_score_dataframe(np.random.rand(156,3), np.arange(157.)*0.064, event_classes)\
-        for file_id in audio_durations for onset in range(int((audio_durations[file_id]-9.)))\
-    }
-    >>> frame_scores.keys()
-    >>> seg_scores = _get_segment_scores_and_overlap_add(frame_scores, audio_durations, event_classes, segment_length=1.)
-    >>> [(key, validate_score_dataframe(value)[0][-3:]) for key, value in seg_scores.items()]
-    """
-    segment_scores_file = {}
-    summand_count = {}
-    keys = ["onset", "offset"] + event_classes
-    for clip_id in frame_scores:
-        file_id, clip_onset_time, clip_offset_time = clip_id.rsplit("-", maxsplit=2)
-        clip_onset_time = float(clip_onset_time) / 100
-        clip_offset_time = float(clip_offset_time) / 100
-        if file_id not in segment_scores_file:
-            segment_scores_file[file_id] = np.zeros(
-                (ceil(audio_durations[file_id] / segment_length), len(event_classes)),
-            )
-            summand_count[file_id] = np.zeros_like(segment_scores_file[file_id])
-        segment_scores_clip = _get_segment_scores(
-            frame_scores[clip_id][keys],
-            clip_length=(clip_offset_time - clip_onset_time),
-            segment_length=1.0,
-        )[event_classes].to_numpy()
-        seg_idx = int(clip_onset_time // segment_length)
-        segment_scores_file[file_id][seg_idx : seg_idx + len(segment_scores_clip)] += (
-            segment_scores_clip
-        )
-        summand_count[file_id][seg_idx : seg_idx + len(segment_scores_clip)] += 1
-    return {
-        file_id: create_score_dataframe(
-            segment_scores_file[file_id] / np.maximum(summand_count[file_id], 1),
-            np.minimum(
-                np.arange(
-                    0.0,
-                    audio_durations[file_id] + segment_length,
-                    segment_length,
-                ),
-                audio_durations[file_id],
-            ),
-            event_classes,
-        )
-        for file_id in segment_scores_file
-    }
-
-
-def _get_segment_scores(scores_df, clip_length, segment_length=1.0):
-    """>>> scores_arr = np.random.rand(156,3)
-    >>> timestamps = np.arange(157) * 0.064
-    >>> event_classes = ["a", "b", "c"]
-    >>> scores_df = create_score_dataframe(scores_arr, timestamps, event_classes)
-    >>> seg_scores_df = _get_segment_scores(scores_df, clip_length=10.0, segment_length=1.0)
-    """
-    frame_timestamps, event_classes = validate_score_dataframe(scores_df)
-    scores_arr = scores_df[event_classes].to_numpy()
-    segment_scores = []
-    segment_timestamps = []
-    seg_onset_idx = 0
-    seg_offset_idx = 0
-    for seg_onset in np.arange(0.0, clip_length, segment_length):
-        seg_offset = seg_onset + segment_length
-        while frame_timestamps[seg_onset_idx + 1] <= seg_onset:
-            seg_onset_idx += 1
-        while seg_offset_idx < len(scores_arr) and frame_timestamps[seg_offset_idx] < seg_offset:
-            seg_offset_idx += 1
-        seg_weights = np.minimum(
-            frame_timestamps[seg_onset_idx + 1 : seg_offset_idx + 1],
-            seg_offset,
-        ) - np.maximum(frame_timestamps[seg_onset_idx:seg_offset_idx], seg_onset)
-        segment_scores.append(
-            (seg_weights[:, None] * scores_arr[seg_onset_idx:seg_offset_idx]).sum(0)
-            / seg_weights.sum(),
-        )
-        segment_timestamps.append(seg_onset)
-    segment_timestamps.append(clip_length)
-    return create_score_dataframe(
-        np.array(segment_scores),
-        np.array(segment_timestamps),
-        event_classes,
-    )
-
-
-def get_sebbs(self, scores_all_classes, model_type="student"):
-    """Apply cSEBBs post-processing to both DESED and MAESTRO classes.
-
-    cSEBBs (change-point based Sound Event Bounding Boxes)は、
-    フレームレベルの事後確率スコアから以下の処理によりイベント候補を生成:
-
-    1. 変化点検出: ステップフィルタを用いてスコアの変化点を検出
-    2. セグメント生成: 変化点を境界として候補セグメントを生成
-    3. セグメントマージ: 類似スコアを持つ隣接セグメントを統合
-    4. 信頼度計算: 各セグメントの平均スコアを信頼度として出力
-
-    この関数では、DESEDとMAESTROの両クラスに対してcSEBBsを適用し、
-    結果を統合して最終的なスコアDataFrameを生成する。
-
-    Args:
-        self: SEDTask4 instance (csebbs_predictor_desed, csebbs_predictor_maestroを保持)
-        scores_all_classes: Dictionary of score DataFrames for all clips
-                           各clipのDataFrameは全クラスのスコアを含む
-                           形式: {clip_id: pd.DataFrame(onset, offset, class1, class2, ...)}
-        model_type: 'student' or 'teacher'. モデルタイプを指定して適切なpredictorを選択
-
-    Returns:
-        sed_scores_postprocessed: Dictionary of post-processed score DataFrames
-                                  cSEBBsにより生成されたイベント候補のスコア
-                                  形式: {clip_id: pd.DataFrame(onset, offset, class1, class2, ...)}
-
-    処理フロー:
-        1. DESED/MAESTROクラスのスコアを個別に抽出
-        2. 各データセットに最適化されたcSEBBs predictorで処理
-        3. 生成されたイベント候補を統合
-        4. sed_scores_eval形式のDataFrameに変換
-
-    """
-    # モデルタイプに応じたpredictorを選択
-    if model_type == "teacher":
-        csebbs_predictor_desed = self.csebbs_predictor_desed_teacher
-        csebbs_predictor_maestro = self.csebbs_predictor_maestro_teacher
-    else:
-        csebbs_predictor_desed = self.csebbs_predictor_desed
-        csebbs_predictor_maestro = self.csebbs_predictor_maestro
-
-    # ステップ1: DESEDクラスに対するcSEBBs適用
-    # DESEDは家庭内音（食器、掃除機、猫など）の10クラス
-    desed_classes = list(classes_labels_desed.keys())
-    keys_desed = ["onset", "offset"] + sorted(desed_classes)
-
-    # 全クラスのスコアからDESEDクラスのみを抽出
-    scores_desed_classes = {
-        clip_id: scores_all_classes[clip_id][keys_desed] for clip_id in scores_all_classes.keys()
-    }
-
-    # cSEBBsでDESEDデータセットのスコアを後処理
-    # 戻り値: {clip_id: [(onset, offset, class_name, confidence), ...]}
-    csebbs_desed_events = csebbs_predictor_desed.predict(
-        scores_desed_classes,
-    )
-
-    # ステップ2: MAESTROクラスに対するcSEBBs適用
-    # MAESTROは都市音・屋内音（足音、会話、車など）の17クラス
-    maestro_classes = sorted(classes_labels_maestro_real_eval)
-    keys_maestro = ["onset", "offset"] + sorted(maestro_classes)
-
-    # 全クラスのスコアからMAESTROクラスのみを抽出
-    scores_maestro_classes = {
-        clip_id: scores_all_classes[clip_id][keys_maestro] for clip_id in scores_all_classes.keys()
-    }
-
-    # cSEBBsでMAESTROデータセットのスコアを後処理
-    # DESEDとは異なる音響特性に最適化されたパラメータを使用
-    # 戻り値: {clip_id: [(onset, offset, class_name, confidence), ...]}
-    csebbs_maestro_events = csebbs_predictor_maestro.predict(
-        scores_maestro_classes,
-    )
-
-    # ステップ3: イベント候補の統合
-    # DESEDとMAESTROの全クラスのリスト（重複なし、ソート済み）
-    all_sound_classes = sorted(list(set(desed_classes + maestro_classes)))
-
-    # 両データセットのclip IDを統合
-    all_clip_ids = set(csebbs_desed_events.keys()) | set(csebbs_maestro_events.keys())
-
-    # clip毎にDESEDとMAESTROのイベントを結合
-    sebbs_all_events = {}
-    for clip_id in all_clip_ids:
-        # DESEDのイベントリストを取得（存在しない場合は空リスト）
-        desed_events = csebbs_desed_events.get(clip_id, [])
-
-        # MAESTROのイベントリストを取得（存在しない場合は空リスト）
-        maestro_events = csebbs_maestro_events.get(clip_id, [])
-
-        # イベントリストを結合してonset時間順にソート
-        # 各イベント: (onset, offset, class_name, confidence)
-        sebbs_all_events[clip_id] = sorted(
-            desed_events + maestro_events,
-            key=lambda x: x[0],  # onset時間でソート
-        )
-
-    # ステップ4: sed_scores_eval形式への変換
-    # イベント候補リストからsed_scores_eval形式のDataFrameに変換
-    # - 各イベントの時間範囲で該当クラスのスコアを設定
-    # - イベントが存在しない時間・クラスは0.0で埋める
-    # - 評価ツール(sed_scores_eval)で直接使用可能な形式
-    sed_scores_postprocessed = sed_scores_from_sebbs(
-        sebbs_all_events,
-        sound_classes=all_sound_classes,
-        fill_value=0.0,  # イベントが存在しない箇所は0.0
-    )
-
-    return sed_scores_postprocessed

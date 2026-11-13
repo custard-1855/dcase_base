@@ -8,14 +8,17 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 | 場所 | 役割 | 由来 |
 |---|---|---|
 | `train_pretrained.py` | 学習・評価・推論の入口。`prepare_run`（引数と yaml の統合）→ `single_run` | 本家 + 改変 |
-| `local/sed_trainer_pretrained.py` | LightningModule `SEDTask4`。損失、CMT、validation / test の指標計算、wandb | 本家 + 大幅改変 |
-| `confs/pretrained.yaml` | 既定の設定。データのパスもここ | 本家 + 改変 |
+| `local/sed_trainer_pretrained.py` | LightningModule `SEDTask4`。損失、validation / test の指標計算、wandb | 本家 + 大幅改変 |
+| `local/cmt.py` | CMT の擬似ラベル生成・信頼度の重み・一貫性損失。`SEDTask4` を `self` として受け取る関数 | 卒論で追加 |
+| `local/sebbs_postprocess.py` | cSEBBs の適用（`get_sebbs`）とチューニング時の選択関数（`select_best_auroc`） | 卒論で追加 |
+| `local/utils.py` | 復号・指標のログなどの補助関数。`SafeDataLoader`、MAESTRO の正解ラベル結合、セグメントスコア計算もここ | 本家 + 追加 |
+| `confs/pretrained.yaml` | 既定の設定。データの置き場所は `data.root` の 1 か所 | 本家 + 改変 |
 | `desed_task/nnet/` | `CRNN` / `CNN` / `RNN`。`mixstyle.py` が MixStyle 実装 | 本家 + MixStyle 追加 |
 | `desed_task/dataio/datasets.py` | Strong / Weak / Unlabeled の Dataset。埋め込みは hdf5 から読む | 本家 |
 | `local/experiment_dir.py` | `experiments/{mode}/{category}/{method}/{variant}/run-*/` の出力先管理 | 卒論で追加 |
 | `local/sebbs_wrapper/` | `sebbs` submodule の型付きラッパー。使い方は同ディレクトリの `README.md` | 卒論で追加 |
 | `sebbs/` | cSEBBs 後処理（git submodule, MERL 製）。**編集しない** | 外部 |
-| `run_*.sh` | 論文のアブレーション実験。引数の組み合わせの正本 | 卒論で追加 |
+| `run_ablation.sh` | 論文のアブレーション実験。`mixstyle` / `cmt` / `a_times_b` のセットを選んで流す。引数の組み合わせの正本（`--list` で一覧） | 卒論で追加 |
 | `run_repro.sh` | 再現学習のキュー。論文の表の構成を順に流し、`exp/repro/{構成名}/version_N/test_metrics.json` に最終指標を残す（wandb は既定で無効） | 卒論で追加 |
 | `run_repro_eval.sh` | 再現学習のベスト ckpt の再評価（`--sebbs` で cSEBBs）。構成のフラグは `run_repro.sh --list` から引く。結果は `exp/repro_eval/{構成名}/version_N/` | 卒論で追加 |
 | `confs/pretrained_short.yaml` | 10 エポックの短縮学習用。`pretrained.yaml` を変えたら合わせて直す | 卒論で追加 |
@@ -52,6 +55,8 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 ## データの約束事
 
 - クラスは DESED 10 + MAESTRO 17 = 27（`local/classes_dict.py`）。`net.nclass` と `net.median_filter` の長さはこれに合わせる。
+- `data` のパスは `data.root` からの相対で書く。yaml を読んだ直後に `local/utils.py` の `resolve_data_paths` が絶対パスにする
+  （`train_pretrained.py` と `extract_embeddings.py`）。絶対パスで書いた値と、`root` の無い設定はそのまま通る。
 - 各セットは `*_folder_44k`（元音源）と `*_folder`（16 kHz）の組。16 kHz 側は初回実行時に自動生成される。
 - 埋め込み hdf5 のキーは wav の stem。セットを足すときは `extract_embeddings.py` 末尾の辞書と
   `train_pretrained.py` の `get_embeddings_name(config, "<name>")` の両方に名前を足す。

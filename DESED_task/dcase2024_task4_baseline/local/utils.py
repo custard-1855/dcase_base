@@ -1,7 +1,9 @@
 import glob
 import json
 import os
+from collections import defaultdict
 from copy import deepcopy
+from math import ceil
 from pathlib import Path
 
 import numpy as np
@@ -10,8 +12,24 @@ import scipy
 import soundfile
 import torch
 from desed_task.evaluation.evaluation_measures import compute_sed_eval_metrics
-from sed_scores_eval.base_modules.scores import create_score_dataframe
+from sed_scores_eval.base_modules.scores import create_score_dataframe, validate_score_dataframe
 from thop import clever_format, profile
+from torch.utils.data.dataloader import DataLoader, default_collate
+
+
+def resolve_data_paths(config_data):
+    """`data.root` からの相対で書かれたパスを絶対パスにする (その場で書き換える).
+
+    文字列の値はすべてパスとみなす. 絶対パスはそのまま残る.
+    `root` が無い設定 (optuna.yaml や, 以前に保存した設定) は何も変えない.
+    """
+    root = config_data.get("root")
+    if root is None:
+        return config_data
+    for key, value in config_data.items():
+        if key != "root" and isinstance(value, str):
+            config_data[key] = os.path.join(root, value)
+    return config_data
 
 
 def process_tsvs(tsv, alias_map=None):
@@ -249,3 +267,189 @@ def calculate_macs(model, config, dataset=None):
 
     macs, params = clever_format([macs, params], "%.3f")
     return macs, params
+
+
+class _NoneSafeIterator:
+    """DataLoaderから返されるNoneバッチを内部でスキップ."""
+
+    def __init__(self, dataloader_iter):
+        self.dataloader_iter = dataloader_iter
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        while True:
+            batch = next(self.dataloader_iter)
+            if batch is not None:
+                return batch
+            print("Skipping a batch that was None internally.")
+
+
+class SafeCollate:
+    """データセットから返される None 値をフィルタリングする collate_fn.
+
+    フィルタリング後にバッチが空になった場合は None を返す.
+    """
+
+    def __call__(self, batch):
+        batch = [b for b in batch if b is not None]
+
+        if not batch:
+            # バッチが空ならNoneを返す（このNoneは_NoneSafeIteratorで捕捉される>）
+            return None
+
+        return default_collate(batch)
+
+
+class SafeDataLoader(DataLoader):
+    """Noneを返す可能性があるバッチを自動的にスキップするDataLoader.
+
+    PyTorch Lightningなどのフレームワークで安全に使用できる。
+    """
+
+    def __init__(self, *args, **kwargs):
+        # ユーザーがcollate_fnを指定していない場合のみ、SafeCollateを設定
+        if "collate_fn" not in kwargs:
+            kwargs["collate_fn"] = SafeCollate()
+        super().__init__(*args, **kwargs)
+
+    def __iter__(self):
+        dataloader_iter = super().__iter__()
+        return _NoneSafeIterator(dataloader_iter)
+
+
+def _codecarbon_gpu_ids() -> list[int] | None:
+    """codecarbon に渡す GPU id. CPU 実行 (--gpus 0) では CUDA に触らない."""
+    if torch.cuda.is_available():
+        return [torch.cuda.current_device()]
+    return None
+
+
+def _merge_maestro_ground_truth(clip_ground_truth):
+    ground_truth = defaultdict(list)
+    for clip_id in clip_ground_truth:
+        file_id, clip_onset_time, clip_offset_time = clip_id.rsplit("-", maxsplit=2)
+        clip_onset_time = int(clip_onset_time) // 100
+        ground_truth[file_id].extend(
+            [
+                (
+                    clip_onset_time + event_onset_time,
+                    clip_onset_time + event_offset_time,
+                    event_class,
+                )
+                for event_onset_time, event_offset_time, event_class in clip_ground_truth[clip_id]
+            ],
+        )
+    return _merge_overlapping_events(ground_truth)
+
+
+def _merge_overlapping_events(ground_truth_events):
+    for clip_id, events in ground_truth_events.items():
+        per_class_events = defaultdict(list)
+        for event in events:
+            per_class_events[event[2]].append(event)
+        ground_truth_events[clip_id] = []
+        for event_class, events in per_class_events.items():
+            events = sorted(events)
+            merged_events = []
+            current_offset = -1e6
+            for event in events:
+                if event[0] > current_offset:
+                    merged_events.append(list(event))
+                else:
+                    merged_events[-1][1] = max(current_offset, event[1])
+                current_offset = merged_events[-1][1]
+            ground_truth_events[clip_id].extend(merged_events)
+    return ground_truth_events
+
+
+def _get_segment_scores_and_overlap_add(
+    frame_scores,
+    audio_durations,
+    event_classes,
+    segment_length=1.0,
+):
+    """>>> event_classes = ['a', 'b', 'c']
+    >>> audio_durations = {'f1': 201.6, 'f2':133.1, 'f3':326}
+    >>> frame_scores = {\
+        f'{file_id}-{int(100*onset)}-{int(100*(onset+10.))}': create_score_dataframe(np.random.rand(156,3), np.arange(157.)*0.064, event_classes)\
+        for file_id in audio_durations for onset in range(int((audio_durations[file_id]-9.)))\
+    }
+    >>> frame_scores.keys()
+    >>> seg_scores = _get_segment_scores_and_overlap_add(frame_scores, audio_durations, event_classes, segment_length=1.)
+    >>> [(key, validate_score_dataframe(value)[0][-3:]) for key, value in seg_scores.items()]
+    """
+    segment_scores_file = {}
+    summand_count = {}
+    keys = ["onset", "offset"] + event_classes
+    for clip_id in frame_scores:
+        file_id, clip_onset_time, clip_offset_time = clip_id.rsplit("-", maxsplit=2)
+        clip_onset_time = float(clip_onset_time) / 100
+        clip_offset_time = float(clip_offset_time) / 100
+        if file_id not in segment_scores_file:
+            segment_scores_file[file_id] = np.zeros(
+                (ceil(audio_durations[file_id] / segment_length), len(event_classes)),
+            )
+            summand_count[file_id] = np.zeros_like(segment_scores_file[file_id])
+        segment_scores_clip = _get_segment_scores(
+            frame_scores[clip_id][keys],
+            clip_length=(clip_offset_time - clip_onset_time),
+            segment_length=1.0,
+        )[event_classes].to_numpy()
+        seg_idx = int(clip_onset_time // segment_length)
+        segment_scores_file[file_id][seg_idx : seg_idx + len(segment_scores_clip)] += (
+            segment_scores_clip
+        )
+        summand_count[file_id][seg_idx : seg_idx + len(segment_scores_clip)] += 1
+    return {
+        file_id: create_score_dataframe(
+            segment_scores_file[file_id] / np.maximum(summand_count[file_id], 1),
+            np.minimum(
+                np.arange(
+                    0.0,
+                    audio_durations[file_id] + segment_length,
+                    segment_length,
+                ),
+                audio_durations[file_id],
+            ),
+            event_classes,
+        )
+        for file_id in segment_scores_file
+    }
+
+
+def _get_segment_scores(scores_df, clip_length, segment_length=1.0):
+    """>>> scores_arr = np.random.rand(156,3)
+    >>> timestamps = np.arange(157) * 0.064
+    >>> event_classes = ["a", "b", "c"]
+    >>> scores_df = create_score_dataframe(scores_arr, timestamps, event_classes)
+    >>> seg_scores_df = _get_segment_scores(scores_df, clip_length=10.0, segment_length=1.0)
+    """
+    frame_timestamps, event_classes = validate_score_dataframe(scores_df)
+    scores_arr = scores_df[event_classes].to_numpy()
+    segment_scores = []
+    segment_timestamps = []
+    seg_onset_idx = 0
+    seg_offset_idx = 0
+    for seg_onset in np.arange(0.0, clip_length, segment_length):
+        seg_offset = seg_onset + segment_length
+        while frame_timestamps[seg_onset_idx + 1] <= seg_onset:
+            seg_onset_idx += 1
+        while seg_offset_idx < len(scores_arr) and frame_timestamps[seg_offset_idx] < seg_offset:
+            seg_offset_idx += 1
+        seg_weights = np.minimum(
+            frame_timestamps[seg_onset_idx + 1 : seg_offset_idx + 1],
+            seg_offset,
+        ) - np.maximum(frame_timestamps[seg_onset_idx:seg_offset_idx], seg_onset)
+        segment_scores.append(
+            (seg_weights[:, None] * scores_arr[seg_onset_idx:seg_offset_idx]).sum(0)
+            / seg_weights.sum(),
+        )
+        segment_timestamps.append(seg_onset)
+    segment_timestamps.append(clip_length)
+    return create_score_dataframe(
+        np.array(segment_scores),
+        np.array(segment_timestamps),
+        event_classes,
+    )

@@ -34,7 +34,7 @@
 set -o pipefail
 cd "$(dirname "$0")" || exit 1
 
-# 構成 (実行順). MixStyle の引数は run_ablation_a_times_b.sh に合わせている.
+# 構成 (実行順). MixStyle の引数は run_ablation.sh に合わせている.
 MIXSTYLE="--mixstyle_type freqAttn --attn_type default"
 NAMES=()
 declare -A FLAGS

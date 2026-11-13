@@ -13,6 +13,7 @@ from tqdm import tqdm
 
 from desed_task.dataio.datasets import read_audio
 from desed_task.utils.download import download_from_url
+from local.utils import resolve_data_paths
 from train_pretrained import resample_data_generate_durations
 
 parser = argparse.ArgumentParser("Extract Embeddings with Audioset Pretrained Models")
@@ -114,6 +115,7 @@ if __name__ == "__main__":
 
     with open(args.conf_file, "r") as f:
         config = yaml.safe_load(f)
+    resolve_data_paths(config["data"])
 
     output_dir = os.path.join(args.output_dir, args.pretrained_model)
     resample_data_generate_durations(config["data"], False, args.eval_set)

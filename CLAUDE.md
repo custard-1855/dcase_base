@@ -1,7 +1,8 @@
 # dcase_base
 
 卒業論文の実験コード。DCASE 2024 Task 4 ベースライン（音響イベント検出, Mean Teacher + BEATs 埋め込み）に
-CMT・MixStyle・cSEBBs を追加して比較している。セットアップ手順は `README.md`。
+CMT・MixStyle・cSEBBs を追加して比較している。セットアップから学習・評価までの手順は `README.md`、
+詳細は `docs/`（`data.md` / `experiments.md` / `adding-a-method.md`）。
 
 作業の進め方（調査 / 計画 / 実装 / デバッグ の定義と日本語応答）は次のファイルに従う:
 
