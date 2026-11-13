@@ -62,13 +62,13 @@ $ uv run extract_embeddings.py --output_dir ./embeddings
 
 ## 実験
 - 各実験のため, 引数が細かく設定されている.
-- 詳細は各shファイルを参照.
+- 詳細は`run_ablation.sh`を参照(`./run_ablation.sh cmt --list` で構成と引数の一覧).
 ```bash
 # dcase_base/DESED_task/dcase2024_task4_baseline
 $ uv run train_pretrained.py --fast_dev_run # まず短い実行で確認 (CPU の場合は --gpus 0)
-$ bash ./run_cmt_ablation.sh
-$ bash ./run_ablation_a_times_b.sh
-$ bash ./run_mixstyle.sh
+$ bash ./run_ablation.sh cmt
+$ bash ./run_ablation.sh a_times_b
+$ bash ./run_ablation.sh mixstyle
 $ uv run train_pretrained.py
 ```
 

@@ -15,7 +15,7 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 | `local/experiment_dir.py` | `experiments/{mode}/{category}/{method}/{variant}/run-*/` の出力先管理 | 卒論で追加 |
 | `local/sebbs_wrapper/` | `sebbs` submodule の型付きラッパー。使い方は同ディレクトリの `README.md` | 卒論で追加 |
 | `sebbs/` | cSEBBs 後処理（git submodule, MERL 製）。**編集しない** | 外部 |
-| `run_*.sh` | 論文のアブレーション実験。引数の組み合わせの正本 | 卒論で追加 |
+| `run_ablation.sh` | 論文のアブレーション実験。`mixstyle` / `cmt` / `a_times_b` のセットを選んで流す。引数の組み合わせの正本（`--list` で一覧） | 卒論で追加 |
 | `run_repro.sh` | 再現学習のキュー。論文の表の構成を順に流し、`exp/repro/{構成名}/version_N/test_metrics.json` に最終指標を残す（wandb は既定で無効） | 卒論で追加 |
 | `run_repro_eval.sh` | 再現学習のベスト ckpt の再評価（`--sebbs` で cSEBBs）。構成のフラグは `run_repro.sh --list` から引く。結果は `exp/repro_eval/{構成名}/version_N/` | 卒論で追加 |
 | `confs/pretrained_short.yaml` | 10 エポックの短縮学習用。`pretrained.yaml` を変えたら合わせて直す | 卒論で追加 |
