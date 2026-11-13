@@ -12,6 +12,7 @@ CMT・MixStyle・cSEBBs を追加して比較している.
 | [3. 埋め込み抽出](#3-埋め込み抽出) | GPU, 空き容量 約 60 GB | — (未計測) |
 | [4. 学習](#4-学習) | GPU | 1 構成 約 1 時間 (RTX 4070) |
 | [5. 評価](#5-評価) | 4 の出力 | 数分 |
+| [6. 期待される数値](#6-期待される数値) | 5 で読んだ指標 | — (値を見比べるだけ) |
 
 詳細は `docs/` に分けてある.
 
@@ -173,6 +174,7 @@ $ uv run poe sebbs mt       # ベスト ckpt に cSEBBs を掛けて評価 (約 
 - 同じ seed でも実行ごとに値は揺れる (`training.deterministic` が `False`). 上の 2 回で PSDS は 0.01 弱, mpAUC は 0.02 程度の差がある.
   この程度の差なら手順は正しく進んでいると見てよい.
 - 7 構成すべての値は [docs/experiments.md](docs/experiments.md#再現値), 論文値との比較の所見は [docs/reports/2026-11-12-repro-results.md](docs/reports/2026-11-12-repro-results.md).
+- 値は目で見比べる. `uv run poe repro-check` は許容幅 (`tests/repro_expected.json` の `tolerance`) が未設定のため, 学習結果の検査を skip する.
 - 欠損している音声の数が違うと値も変わりうる (YouTube から取得できるファイルは時期によって減る).
 
 ## 引用

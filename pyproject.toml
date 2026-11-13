@@ -39,7 +39,7 @@ sebbs = { path = "DESED_task/dcase2024_task4_baseline/sebbs", editable = true }
 testpaths = ["DESED_task/dcase2024_task4_baseline"]
 norecursedirs = ["sebbs", ".venv", "experiments", "exp", "wandb"]
 markers = [
-    "slow: 合成データで学習〜評価を最後まで回すテスト (CPU で数分)",
+    "slow: 合成データで学習〜評価を最後まで回すテスト (CPU で 5 分程度)",
     "repro: 再現学習の結果 (exp/repro*) を期待値と比較するテスト. 既定では除外",
     "repro_ckpt: 再現学習の ckpt を実データの一部に通し, スコアを保存値と比較するテスト (CPU で数分). 既定では除外",
 ]
@@ -50,7 +50,7 @@ filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning", "ignore::
 
 [tool.poe.tasks]
 test = { cmd = "pytest -m 'not slow and not repro and not repro_ckpt'", help = "学習を回さない軽いテスト (数十秒)" }
-test-all = { cmd = "pytest", help = "学習〜評価を回すテストも含む (CPU で数分. repro は除外)" }
+test-all = { cmd = "pytest", help = "学習〜評価を回すテストも含む (CPU で 5 分程度. repro は除外)" }
 lint = { cmd = "ruff check", help = "ruff check (対象を引数で渡せる)" }
 typecheck = { cmd = "ty check", help = "ty による型検査 (対象は [tool.ty.src])" }
 repro-check = { cmd = "pytest -m repro", help = "exp/repro* の結果を期待値と比較 (学習・評価はしない)" }
