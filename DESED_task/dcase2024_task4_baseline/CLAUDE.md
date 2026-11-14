@@ -34,6 +34,7 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 
 `prepare_run` は yaml を読んだ後に CLI 引数で上書きする。次のキーは引数に既定値があるため
 **yaml に書いた値は常に上書きされ、効かない**。切り替えは CLI フラグで行う。
+（`docs/experiments.md` の「yaml に書いても効かないキー」にも同じ一覧がある。変えたら両方を直す。）
 
 - `cmt.enabled` / `cmt.use_neg_sample` / `cmt.pos_neg_scale` / `cmt.phi_frame` / `cmt.warmup_epochs` ← `--cmt` ほか
 - `sebbs.enabled` ← `--sebbs`
@@ -45,10 +46,13 @@ DCASE 本家ベースラインを土台に、卒論用の手法を足したレ�
 
 ## 実行モード
 
+`docs/experiments.md` の「直接実行」にも同じ表がある。引数を足したら両方を直す。
+
 | 引数 | 動作 |
 |---|---|
 | なし | 学習 → ベスト ckpt で dev-test 評価 |
 | `--fast_dev_run` | 2 epoch・20 batch に切り詰めた学習 + 評価 |
+| `--resume_from_checkpoint X` | ckpt から学習を再開 |
 | `--test_from_checkpoint X` | 学習せず dev-test の指標を再計算 |
 | `--eval_from_checkpoint X` | ラベルなしの `data.eval_folder` にスコアを書き出すだけ（指標なし） |
 
