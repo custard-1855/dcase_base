@@ -377,6 +377,7 @@ def test_repro_variant_end_to_end(repro_run):
 
 
 @pytest.mark.slow
+@pytest.mark.numeric
 def test_synthetic_metrics_unchanged(repro_run):
     """合成データ・seed 固定・CPU での最終指標が, 保存した値から変わっていない.
 
@@ -384,12 +385,13 @@ def test_synthetic_metrics_unchanged(repro_run):
     意図して挙動を変えたとき, torch などの版を上げたときは, 次で取り直す
     (synthetic_expected_trace.json も同時に取り直される):
 
-        UPDATE_SYNTHETIC_EXPECTED=1 uv run pytest -k "synthetic or variant"
+        UPDATE_SYNTHETIC_EXPECTED=1 uv run poe numeric-check
     """
     _assert_unchanged(SYNTHETIC_EXPECTED, repro_run.name, _test_metrics(repro_run.tmp_path))
 
 
 @pytest.mark.slow
+@pytest.mark.numeric
 def test_synthetic_trace_unchanged(repro_run):
     """合成データ・seed 固定・CPU での損失・出力・重みが, 保存した値から変わっていない.
 
@@ -403,6 +405,7 @@ def test_synthetic_trace_unchanged(repro_run):
 
 
 @pytest.mark.slow
+@pytest.mark.numeric
 def test_variant_numbers_unchanged(variant_run):
     """VARIANTS の構成でも, 最終指標と途中経過が保存した値から変わっていない."""
     _assert_unchanged(

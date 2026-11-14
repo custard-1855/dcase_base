@@ -85,8 +85,10 @@ $ uv run pytest                  # 合成データで学習〜評価まで (CPU 
 $ uv run ruff check <触ったファイル>
 ```
 
-`uv run pytest` には, 合成データでの指標・損失・重みを保存値と比較するテストが入っている
-(`tests/synthetic_expected.json`, `tests/synthetic_expected_trace.json`).
+合成データでの指標・損失・重みを保存値と比較するテストは, `uv run pytest` には含まれない. `uv run poe numeric-check` で流す
+(保存値は `tests/synthetic_expected.json`, `tests/synthetic_expected_trace.json`).
+保存値は作った計算機でしか通らないので, 同じ計算機で変更の前後を比べるために使う
+([reports/2026-11-14-synthetic-expected-mismatch.md](reports/2026-11-14-synthetic-expected-mismatch.md)).
 
 - フラグを付けないときの挙動を変えていなければ, 既存の構成の比較は通る. 落ちたら, 意図せず既存の計算を変えている.
 - 新しく足した構成は保存値が無いので skip になる. 次のコマンドで保存値を作ってコミットする.
@@ -94,7 +96,7 @@ $ uv run ruff check <触ったファイル>
 
 ```bash
 # リポジトリ直下
-$ UPDATE_SYNTHETIC_EXPECTED=1 uv run pytest -k "synthetic or variant"
+$ UPDATE_SYNTHETIC_EXPECTED=1 uv run poe numeric-check
 ```
 
 実データでは, まず短縮学習で確認してから本番を流す.

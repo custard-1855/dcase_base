@@ -42,17 +42,19 @@ markers = [
     "slow: 合成データで学習〜評価を最後まで回すテスト (CPU で 5 分程度)",
     "repro: 再現学習の結果 (exp/repro*) を期待値と比較するテスト. 既定では除外",
     "repro_ckpt: 再現学習の ckpt を実データの一部に通し, スコアを保存値と比較するテスト (CPU で数分). 既定では除外",
+    "numeric: 合成データでの損失・出力・重み・指標を保存値と比較するテスト. 保存値は作った計算機でしか通らない. 既定では除外",
 ]
-# repro と repro_ckpt は既定で除外する. コマンドラインの -m はこれを上書きするので,
-# slow を外すときは -m "not slow and not repro and not repro_ckpt" と書く.
-addopts = ["-m", "not repro and not repro_ckpt"]
+# repro, repro_ckpt, numeric は既定で除外する. コマンドラインの -m はこれを上書きするので,
+# slow を外すときは -m "not slow and not repro and not repro_ckpt" と書く (numeric は slow でもあるので外れる).
+addopts = ["-m", "not repro and not repro_ckpt and not numeric"]
 filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning", "ignore::FutureWarning", "ignore::RuntimeWarning"]
 
 [tool.poe.tasks]
 test = { cmd = "pytest -m 'not slow and not repro and not repro_ckpt'", help = "学習を回さない軽いテスト (数十秒)" }
-test-all = { cmd = "pytest", help = "学習〜評価を回すテストも含む (CPU で 5 分程度. repro は除外)" }
+test-all = { cmd = "pytest", help = "学習〜評価を回すテストも含む (CPU で 5 分程度. repro と numeric は除外)" }
 lint = { cmd = "ruff check", help = "ruff check (対象を引数で渡せる)" }
 typecheck = { cmd = "ty check", help = "ty による型検査 (対象は [tool.ty.src])" }
+numeric-check = { cmd = "pytest -m numeric", help = "合成データでの数値を保存値と比較 (CPU で 5 分程度). 保存値を作った計算機で, 変更の前後を比べる用" }
 repro-check = { cmd = "pytest -m repro", help = "exp/repro* の結果を期待値と比較 (学習・評価はしない)" }
 repro-ckpt-check = { cmd = "pytest -m repro_ckpt", help = "exp/repro の ckpt を実データの一部に通し, スコアを保存値と比較 (CPU で数分)" }
 
