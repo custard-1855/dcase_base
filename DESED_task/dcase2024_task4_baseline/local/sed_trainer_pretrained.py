@@ -193,7 +193,10 @@ class SEDTask4(pl.LightningModule):
         self.train_sampler: Any | None = train_sampler  # Sampler
         self.scheduler: Any | None = scheduler  # LR scheduler
 
-        self.num_workers: int = 1 if self.fast_dev_run else self.hparams["training"]["num_workers"]
+        # fast_dev_run では 1 に絞るが, 設定の 0 (ワーカープロセスなし) はそのまま通す
+        self.num_workers: int = self.hparams["training"]["num_workers"]
+        if self.fast_dev_run:
+            self.num_workers = min(self.num_workers, 1)
 
         feat_params = self.hparams["feats"]
         self.mel_spec: MelSpectrogram = MelSpectrogram(
