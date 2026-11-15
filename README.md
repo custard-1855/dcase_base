@@ -24,6 +24,19 @@ DCASE 2024 Task 4 ベースライン (音響イベント検出, Mean Teacher + B
 | [docs/reports/](docs/reports/) | 調査記録 |
 | [DESED_task/dcase2024_task4_baseline/CLAUDE.md](DESED_task/dcase2024_task4_baseline/CLAUDE.md) | どのファイルが何をするか |
 
+## 環境
+
+Linux + Python 3.11 以上. 環境の定義は `pyproject.toml` に集めてあり, 個別にインストールするのは uv だけ (残りは `uv sync` で入る).
+
+| 役割 | ツール | このリポジトリでの使い方 |
+|---|---|---|
+| パッケージ管理 | [uv](https://docs.astral.sh/uv/) | pip と venv を置き換える高速なパッケージマネージャ. `uv sync` でライブラリを入れ, コマンドはすべて `uv run <コマンド>` で実行する (仮想環境の有効化は不要). バージョンは `uv.lock` で固定している |
+| lint / 整形 | [Ruff](https://docs.astral.sh/ruff/) | おかしな記述を検知し, コードの書き方を揃える. `uv run poe lint <ファイル>` |
+| 型検査 | [ty](https://docs.astral.sh/ty/) | mypy より高速な型検査. 実行する前にデータ型の不整合が分かる. `uv run poe typecheck` |
+| テスト | [pytest](https://docs.pytest.org/) | 合成データでの学習〜評価や, 再現学習の結果と期待値の比較もテストとして書いてあり, 実験の再現性を担保する. `uv run pytest` |
+| タスクランナー | [poe](https://poethepoet.natn.io/) | pytest の引数や再現学習のスクリプト呼び出しが煩雑なので, 名前を付けてある. `uv run poe` で一覧, `uv run poe test` のように実行する |
+| コミット時の検査 | [prek](https://prek.j178.dev/) | pre-commit の高速な互換実装. コミット時・プッシュ時に検査が自動で走る |
+
 ## コマンドを実行する場所
 
 コードブロックの先頭で明示する.
