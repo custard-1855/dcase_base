@@ -1,9 +1,9 @@
 # dcase_base
 
-卒業論文の実験コード. DCASE 2024 Task 4 ベースライン (音響イベント検出, Mean Teacher + BEATs 埋め込み) に
-CMT・MixStyle・cSEBBs を追加して比較している.
+卒業論文の実験コード. 
+DCASE 2024 Task 4 ベースライン (音響イベント検出, Mean Teacher + BEATs 埋め込み) にいくつか手法を追加し, 比較している.
 
-この README の 1 → 6 を上から順に実行すると, smoke test の実行と ① MT (ベースライン) の学習・評価まで進める.
+以下を順に実行すると, smoke testから MT (ベースライン) の学習・評価まで進める.
 
 | 手順 | 必要なもの | 所要の目安 |
 |---|---|---|
@@ -12,28 +12,26 @@ CMT・MixStyle・cSEBBs を追加して比較している.
 | [3. 埋め込み抽出](#3-埋め込み抽出) | GPU, 空き容量 約 60 GB | — (未計測) |
 | [4. 学習](#4-学習) | GPU | 1 構成 約 1 時間 (RTX 4070) |
 | [5. 評価](#5-評価) | 4 の出力 | 数分 |
-| [6. 期待される数値](#6-期待される数値) | 5 で読んだ指標 | — (値を見比べるだけ) |
+| [6. 期待される数値](#6-期待される数値) | 5 で読んだ指標 | — |
 
-詳細は `docs/` に分けてある.
+詳細は `docs/`を参照のこと.
 
 | 文書 | 内容 |
 |---|---|
 | [docs/data.md](docs/data.md) | データの配置, 容量, 取得できないファイル, 埋め込みの中身 |
 | [docs/experiments.md](docs/experiments.md) | 構成とフラグの一覧, 実行モード, 出力先, wandb, アブレーション, 再現値 |
-| [docs/adding-a-method.md](docs/adding-a-method.md) | 手法を追加するときに触るファイル |
-| [docs/reports/](docs/reports/) | 調査の記録 (再現学習の結果など) |
-| [DESED_task/dcase2024_task4_baseline/CLAUDE.md](DESED_task/dcase2024_task4_baseline/CLAUDE.md) | コードの地図 (どのファイルが何をするか) |
-
-`DESED_task/dcase2024_task4_baseline/README.md` は本家ベースラインのもので, このリポジトリに無いもの (devcontainer など) への言及が残っている. 手順はこの README に従う.
+| [docs/adding-a-method.md](docs/adding-a-method.md) | 手法に関する実装 |
+| [docs/reports/](docs/reports/) | 調査記録 |
+| [DESED_task/dcase2024_task4_baseline/CLAUDE.md](DESED_task/dcase2024_task4_baseline/CLAUDE.md) | どのファイルが何をするか |
 
 ## コマンドを実行する場所
 
-実行場所は 2 つあり, 間違えると相対パスが合わずに失敗する. 以下, コードブロックの先頭にどちらかを書く.
+コードブロックの先頭で明示する.
 
-| 呼び方 | パス | ここで実行するもの |
+| 呼び方 | パス | 実行例 |
 |---|---|---|
 | リポジトリ直下 | `dcase_base/` | `uv sync`, `uv run pytest`, `uv run poe ...` |
-| レシピ | `dcase_base/DESED_task/dcase2024_task4_baseline/` | `uv run train_pretrained.py` など, スクリプトの直接実行 |
+| レシピ | `dcase_base/DESED_task/dcase2024_task4_baseline/` | `uv run train_pretrained.py` などのスクリプト |
 
 ## 1. セットアップ
 
@@ -45,12 +43,12 @@ $ git clone --recursive https://github.com/custard-1855/dcase_base.git
 $ curl -LsSf https://astral.sh/uv/0.7.12/install.sh | sh  # パッケージマネージャ uv
 $ sudo apt install sox libsox-dev                         # libsox-dev は soxbindings のビルドに必要
 $ cd dcase_base
-$ uv sync                                                 # ライブラリのインストール (sebbs もここでビルドされる)
+$ uv sync                                                 # ライブラリのインストール (sebbs もここでビルド)
 ```
 
 ### 動作確認 (smoke test)
 
-データや GPU が無くても, 合成データで「学習 → validation → dev-test 評価」と「ckpt からの推論」が通ることを確認できる.
+データやGPU, 学習後のモデルが無くても, 合成データで 学習 → validation → dev-test 評価, 推論を確認できる.
 
 ```bash
 # リポジトリ直下
@@ -58,10 +56,9 @@ $ uv run poe test   # モデルの forward など軽いテストのみ (数十�
 $ uv run pytest     # 学習・推論を最後まで回すテストも含む (CPU で 5 分程度)
 ```
 
-`local/sebbs_wrapper/tests/test_evaluator.py::test_evaluate_psds2` は既知の失敗 (`sed_scores_eval` 内部の TypeError).
-これ以外が通れば環境は出来ている.
+なお, `local/sebbs_wrapper/tests/test_evaluator.py::test_evaluate_psds2` は既知の失敗 (`sed_scores_eval` 内部の TypeError).
 
-コードを変更する人は, コミット時・プッシュ時の検査も入れておく.
+また, コミット時・プッシュ時の検査は[prek](https://github.com/j178/prek)で行う.
 
 ```bash
 # リポジトリ直下
@@ -73,15 +70,14 @@ $ uv run prek install  # 設定は prek.toml. コミット時に構文・型検�
 ### データセット
 
 `confs/pretrained.yaml` の `data.root` (既定: `/mnt/data/data/dcase/dataset`) の下にデータを置く.
-下のコマンドは `--basedir` の下の `dcase/dataset/` に展開するので, 既定のままなら `data.root` の書き換えは不要.
-別の場所に置いたら `data.root` の 1 行だけを書き換える.
+変更する場合, 以下を実行する前に`data.root`を書き換えておく.
 
 ```bash
 # レシピ
 $ uv run generate_dcase_task4_2024.py --basedir="/mnt/data/data"
 ```
 
-- AudioSet 由来の音声は YouTube から取得するため, 取得できないファイルが出る. 欠損したファイルは学習時に読み飛ばされる.
+- AudioSet 由来の音声は YouTube から取得するため, 取得できないファイルが出る. 欠損ファイルは学習時に読み飛ばされる.
 - 容量と配置の詳細は [docs/data.md](docs/data.md).
 
 ### BEATs のチェックポイント
@@ -101,7 +97,7 @@ $ sha256sum pretrained_models/BEATs_iter3_plus_AS2M.pt
 
 ## 3. 埋め込み抽出
 
-BEATs の埋め込みを事前に計算して `embeddings/beats/*.hdf5` に保存する (合計 約 60 GB). 学習はこのファイルを読む.
+BEATsによる埋め込みを事前に計算して `embeddings/beats/*.hdf5` に保存する (合計 約 60 GB). 学習はこのファイルを読む.
 
 ```bash
 # レシピ
@@ -113,8 +109,8 @@ $ uv run extract_embeddings.py --output_dir ./embeddings
 
 ## 4. 学習
 
-論文の表の構成には名前が付いていて (`mt`, `cmt`, `cmt_scale_mixstyle` など 7 つ), 名前を指定して学習する.
-① MT (ベースライン) は `mt`.
+当方の論文で扱った構成は `mt`, `cmt`, `cmt_scale_mixstyle` など 7 つで, 名前を指定して学習する.
+なお, ベースラインは `mt`.
 
 ```bash
 # リポジトリ直下
@@ -127,14 +123,14 @@ $ uv run poe repro --out exp/repro_check mt -- --fast_dev_run
 $ uv run poe repro mt
 ```
 
-- 出力はレシピの `exp/repro/mt/version_0/`. ログ (`train_*.log`), TensorBoard, ckpt, 最終指標 (`test_metrics.json`) が入る.
+- 出力先はレシピの `exp/repro/mt/version_0/`. ログ (`train_*.log`), TensorBoard, ckpt, 最終指標 (`test_metrics.json`) が入る.
 - 学習が終わると, 続けてベスト ckpt で dev-test の評価まで行う.
 - `test_metrics.json` がある構成は飛ばされる. もう一度流すときは `--rotate` を付ける (前回分は `exp/repro.N/` に退避される).
   短い実行の出力先を `exp/repro_check` に分けているのはこのため.
 - 構成名を省くと 7 構成を順に流す. CPU で流すときは `--gpus 0`.
 - wandb は無効で流れる (ログイン不要). 有効にするときは `--wandb`.
 
-フラグを自分で組み合わせる実行, アブレーション (`run_ablation.sh`), 10 エポックの短縮学習は [docs/experiments.md](docs/experiments.md).
+フラグを自分で組み合わせる実行, アブレーション (`run_ablation.sh`), 10 エポックの短縮学習は [docs/experiments.md](docs/experiments.md)を参照.
 
 ## 5. 評価
 
@@ -174,7 +170,6 @@ $ uv run poe sebbs mt       # ベスト ckpt に cSEBBs を掛けて評価 (約 
 - 同じ seed でも実行ごとに値は揺れる (`training.deterministic` が `False`). 上の 2 回で PSDS は 0.01 弱, mpAUC は 0.02 程度の差がある.
   この程度の差なら手順は正しく進んでいると見てよい.
 - 7 構成すべての値は [docs/experiments.md](docs/experiments.md#再現値), 論文値との比較の所見は [docs/reports/2026-11-12-repro-results.md](docs/reports/2026-11-12-repro-results.md).
-- 値は目で見比べる. `uv run poe repro-check` は許容幅 (`tests/repro_expected.json` の `tolerance`) が未設定のため, 学習結果の検査を skip する.
 - 欠損している音声の数が違うと値も変わりうる (YouTube から取得できるファイルは時期によって減る).
 
 ## 引用
