@@ -20,7 +20,7 @@ DCASE 2024 Task 4 ベースライン (音響イベント検出, Mean Teacher + B
 |---|---|
 | [docs/data.md](docs/data.md) | データの配置, 容量, 取得できないファイル, 埋め込みの中身 |
 | [docs/experiments.md](docs/experiments.md) | 構成とフラグの一覧, 実行モード, 出力先, wandb, アブレーション, 再現値 |
-| [docs/adding-a-method.md](docs/adding-a-method.md) | 手法に関する実装 |
+| [docs/adding-a-method.md](docs/adding-a-method.md) | 手法の追加について |
 | [docs/reports/](docs/reports/) | 調査記録 |
 | [DESED_task/dcase2024_task4_baseline/CLAUDE.md](DESED_task/dcase2024_task4_baseline/CLAUDE.md) | どのファイルが何をするか |
 
