@@ -1,8 +1,8 @@
 # 手法を追加するときに触るファイル
 
 既存の 3 手法 (CMT・MixStyle・cSEBBs) が, それぞれ「損失」「モデル」「後処理」の追加例になっている.
-足したい手法に近いものをなぞるのが早い. パスはレシピ (`DESED_task/dcase2024_task4_baseline/`) からの相対.
-ファイルごとの役割は同ディレクトリの `CLAUDE.md` の「地図」にある.
+パスはレシピ (`DESED_task/dcase2024_task4_baseline/`) からの相対.
+ファイルごとの役割は同ディレクトリの `CLAUDE.md`にある.
 
 ## 全体の流れ
 
@@ -85,14 +85,7 @@ $ uv run pytest                  # 合成データで学習〜評価まで (CPU 
 $ uv run ruff check <触ったファイル>
 ```
 
-合成データでの指標・損失・重みを保存値と比較するテストは, `uv run pytest` には含まれない. `uv run poe numeric-check` で流す
-(保存値は `tests/synthetic_expected.json`, `tests/synthetic_expected_trace.json`).
-保存値は作った計算機でしか通らないので, 同じ計算機で変更の前後を比べるために使う
-([reports/2026-11-14-synthetic-expected-mismatch.md](reports/2026-11-14-synthetic-expected-mismatch.md)).
-
-- フラグを付けないときの挙動を変えていなければ, 既存の構成の比較は通る. 落ちたら, 意図せず既存の計算を変えている.
-- 新しく足した構成は保存値が無いので skip になる. 次のコマンドで保存値を作ってコミットする.
-- 既存の計算を意図して変えた場合も, 同じコマンドで取り直す.
+合成データでの指標・損失・重みを保存値と比較するテストは, `uv run pytest` には含まれない. `uv run poe numeric-check` で流す.
 
 ```bash
 # リポジトリ直下
